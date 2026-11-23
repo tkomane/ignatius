@@ -71,7 +71,7 @@ Ignatius stays sharp by refusing feature sprawl recorded in [the product vision]
 
 ## Editorial Craft & Seven Built-In Themes
 
-Terminal tools do not need visual clutter to feel refined. Ignatius pairs **Apple HIG clarity and typographic hierarchy**, **Google Material Design 3 4-tier tonal elevation**, and **Dieter Rams / print editorial discipline**:
+Terminal tools do not need visual clutter to feel refined. Ignatius pairs **Apple HIG clarity and typographic hierarchy**, **Google Material Design 3 4-tier tonal elevation**, and **Dieter Rams / print editorial discipline**, codified in [the Ignatius Constitution](.specify/memory/constitution.md) (Principle XI):
 
 - **4-Tier Painted Surfaces**: Every built-in palette maps distinct elevations (`Surface` outer frame, `SurfacePane` interiors, `SurfaceAlt` rails/headers/zebra stripes/recessed modal pills, `SurfaceOverlay` dialogs/elevated keycaps) using `Clear`-then-block overlay painting.
 - **Tactile Keycaps & Non-Dimmed Modal Badges**:

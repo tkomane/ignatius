@@ -4,6 +4,48 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 67 - Constitution v1.2.0 Principle XI and editorial craft iteration - 23 November 2026
+
+- Amended `.specify/memory/constitution.md` (`1.1.0 -> 1.2.0`) to codify
+  `### XI. Editorial craft and tactile restraint` and the `Visual tokens`
+  constraint (zero raw `Color::Rgb` or `Color::Indexed` literals in production
+  `src/ui/widgets/`), updated `specs/062-editorial-tui-aesthetic-and-atelier-themes/spec.md`,
+  `docs/design/theme-tokens.md`, `docs/design/interaction-principles.md`, and
+  `README.md`, and enforced both in `tests/documentation_matches_the_build.rs`
+  (`constitution_editorial_craft_principle_and_widget_token_discipline`).
+- Fixed the diagnostic caret-alignment regression in `src/ui/widgets/results.rs`
+  (`render_error` switched to `Wrap { trim: false }` so `^` aligns directly
+  under the failing SQL token and technical field indentation survives) while
+  painting the error marker excerpt as a syntax-highlighted `SurfaceAlt` strip
+  with underlined/bold `Token::Danger` token emphasis and bold `Ctrl+D` hint,
+  and upgraded `render_grid` hairline rules with column-aligned `┼`/`+`
+  T-junctions beneath every column divider.
+- Upgraded `src/ui/widgets/editor.rs` (`render_completion` per-kind icons via
+  `candidate_kind_icon`, icon-led `overlay_block_line` title, key-emphasized
+  hints, and empty-editor placeholder parity using `inset_empty_area`, prefix
+  icons, hairline rule, and `Theme::keycap(Token::Focus)`), shared SQL span
+  helper `highlighted_sql_spans` in `src/ui/widgets/mod.rs`, `src/ui/widgets/palette.rs`
+  (`purpose_icon` mapping, preview hairline separator above `SQL:` / `SQL: ...`,
+  and semantic `Query:`/`Origin:` accenting while keeping selected/ordinary
+  plain-text invariance intact), and `src/ui/widgets/overlays.rs` (`render_plan`
+  multi-span `pane_block_line` header, `render_plan_detail` full-width
+  `SurfaceAlt` `Selected:` strip, and `render_sending_review` icon header,
+  recessed syntax-highlighted SQL strip, and full-width `SurfaceAlt` rail).
+- Added unit assertions in sibling `tests.rs` files (`results/tests.rs`,
+  `editor/tests.rs`, `palette/tests.rs`, `overlays/tests.rs`), re-captured all
+  14 scenes with `scripts/render-showcase.py` (`CommitMonoNerdFontMono`), and
+  visually inspected all 14 refreshed PNGs in `docs/assets/screenshots/`.
+- Verified locally on macOS arm64 (`rustc 1.100.0`) against live PostgreSQL
+  18.7 plain and TLS fixtures: `cargo --locked xtask verify` passed (`2,178`
+  tests across `53` suites including `1,715` lib tests and all `431` `ui::`
+  tests; `0` failed; `1` Unix-socket integration skip with
+  `IGNATIUS_TEST_PG_SOCKET_URI` unset), standalone contract tests passed (`24`
+  doc/constitution + `89` release + `8` session recovery + `4` theme + `16`
+  workflow = `141` passed), `actionlint` passed, `diff -u AGENTS.md CLAUDE.md`
+  matched byte-for-byte, and sidecar-test/dash checks passed.
+- Open Wave 64 human Warp/VoiceOver/NVDA, Windows 11, Linux desktop, and
+  ADR-0008 owner signing/provenance/publication gates remain unchanged and open.
+
 ## GitHub CI recovery and release hardening - 23 November 2026
 
 - The weekly CI comparison found moved Docker Official Image indexes for

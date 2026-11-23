@@ -1,5 +1,6 @@
 use super::{
-    action_key_label, hairline_rule, input_cursor, overlay_block, pane_block, syntax_token,
+    action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, overlay_block,
+    overlay_block_line, pane_block_line, syntax_token,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -62,6 +63,36 @@ pub(crate) fn render_name_prompt(
         .render(box_area, buf);
 }
 
+fn review_sql_row_mask(
+    kind: crate::ui::review::Kind,
+    rows: &[crate::ui::review::Row],
+) -> Vec<bool> {
+    let mut mask = vec![false; rows.len()];
+    match kind {
+        crate::ui::review::Kind::Update => {
+            let mut in_bound = false;
+            for (idx, row) in rows.iter().enumerate() {
+                if row.token == Token::Header && row.text == "Exact bound statement:" {
+                    in_bound = true;
+                } else if row.token == Token::Info {
+                    in_bound = false;
+                } else if in_bound && row.token == Token::Text {
+                    mask[idx] = true;
+                }
+            }
+        }
+        crate::ui::review::Kind::Production | crate::ui::review::Kind::Analyze => {
+            for (idx, row) in rows.iter().enumerate() {
+                if row.token == Token::Muted && row.text.starts_with("  ") {
+                    mask[idx] = true;
+                }
+            }
+        }
+        crate::ui::review::Kind::Copy | crate::ui::review::Kind::Parameter => {}
+    }
+    mask
+}
+
 /// Draws precisely the rows and fixed interaction areas used for admission.
 fn render_sending_review(
     model: &Model,
@@ -73,8 +104,19 @@ fn render_sending_review(
     let Some(view) = crate::ui::review::build(model, kind, presentation, area) else {
         return;
     };
+    let theme = &presentation.theme;
     ratatui::widgets::Clear.render(view.outer, buf);
-    overlay_block(format!(" {} ", view.title), presentation).render(view.outer, buf);
+    let title_icon = match kind {
+        crate::ui::review::Kind::Production
+        | crate::ui::review::Kind::Update
+        | crate::ui::review::Kind::Analyze => Icon::Warning,
+        crate::ui::review::Kind::Copy | crate::ui::review::Kind::Parameter => Icon::Info,
+    };
+    let title_line = Line::from(Span::styled(
+        format!("{}{}", presentation.icon(title_icon), view.title),
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+    ));
+    overlay_block_line(title_line, presentation).render(view.outer, buf);
     if !view.usable {
         if view.outer.width > 2 && view.outer.height > 2 {
             let inner = Rect::new(
@@ -89,39 +131,62 @@ fn render_sending_review(
                     .map(|line| Line::from(line.as_str()))
                     .collect::<Vec<_>>(),
             )
-            .style(presentation.theme.style(Token::Warning))
+            .style(theme.style(Token::Warning))
             .render(inner, buf);
         }
         return;
     }
+    let sql_mask = review_sql_row_mask(kind, &view.rows);
+    let window_start = view.offset.min(view.rows.len());
+    let body_width = usize::from(view.body.width);
     let body = view
         .window()
         .iter()
-        .map(|row| {
-            Line::from(Span::styled(
-                row.text.as_str(),
-                presentation.theme.style(row.token),
-            ))
+        .enumerate()
+        .map(|(offset_idx, row)| {
+            let global_idx = window_start.saturating_add(offset_idx);
+            if sql_mask.get(global_idx).copied().unwrap_or(false) {
+                let mut spans = highlighted_sql_spans(row.text.as_str(), theme, true);
+                let row_w = display_width(&row.text);
+                if row_w < body_width {
+                    spans.push(Span::styled(" ".repeat(body_width - row_w), theme.stripe()));
+                }
+                Line::from(spans).style(theme.stripe())
+            } else {
+                Line::from(Span::styled(row.text.as_str(), theme.style(row.token)))
+            }
         })
         .collect::<Vec<_>>();
     Paragraph::new(body).render(view.body, buf);
     if let (Some(input), Some(input_area)) = (&view.input, view.input_area) {
         Paragraph::new(input.as_str())
-            .style(presentation.theme.style(Token::Focus))
+            .style(theme.style(Token::Focus))
             .render(input_area, buf);
     }
-    Paragraph::new(
-        view.rail
-            .iter()
-            .map(|line| Line::from(line.as_str()))
-            .collect::<Vec<_>>(),
-    )
-    .style(presentation.theme.style(if view.ready {
+    let rail_token = if view.ready {
         Token::Info
     } else {
         Token::Warning
-    }))
-    .render(view.rail_area, buf);
+    };
+    let rail_width = usize::from(view.rail_area.width);
+    let rail_lines = view
+        .rail
+        .iter()
+        .map(|line| {
+            let mut spans = vec![Span::styled(line.as_str(), theme.on_stripe(rail_token))];
+            let line_w = display_width(line);
+            if line_w < rail_width {
+                spans.push(Span::styled(
+                    " ".repeat(rail_width - line_w),
+                    theme.stripe(),
+                ));
+            }
+            Line::from(spans).style(theme.stripe())
+        })
+        .collect::<Vec<_>>();
+    Paragraph::new(rail_lines)
+        .style(theme.stripe())
+        .render(view.rail_area, buf);
 }
 
 /// Asks for one named value without changing the SQL editor underneath.
@@ -358,33 +423,46 @@ pub(crate) fn render_plan(
 ) {
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Results;
-    let title = match &model.plan.status {
-        crate::app::PlanStatus::Loading { analyzed: true, .. } => " Plan  Measuring ",
+    let (status_label, status_token) = match &model.plan.status {
+        crate::app::PlanStatus::Loading { analyzed: true, .. } => ("  Measuring", Token::Info),
         crate::app::PlanStatus::Loading {
             analyzed: false, ..
-        } => " Plan  Reading estimate ",
-        crate::app::PlanStatus::Ready(document) if document.analyzed => " Plan  EXPLAIN ANALYZE ",
-        crate::app::PlanStatus::Ready(_) => " Plan  EXPLAIN ",
-        crate::app::PlanStatus::Failed { analyzed: true, .. } => " Plan  Analysis failed ",
+        } => ("  Reading estimate", Token::Muted),
+        crate::app::PlanStatus::Ready(document) if document.analyzed => {
+            ("  EXPLAIN ANALYZE", Token::Info)
+        }
+        crate::app::PlanStatus::Ready(_) => ("  EXPLAIN", Token::Muted),
+        crate::app::PlanStatus::Failed { analyzed: true, .. } => {
+            ("  Analysis failed", Token::Danger)
+        }
         crate::app::PlanStatus::Failed {
             analyzed: false, ..
-        } => " Plan  Plan failed ",
-        crate::app::PlanStatus::Hidden => " Plan ",
+        } => ("  Plan failed", Token::Danger),
+        crate::app::PlanStatus::Hidden => ("", Token::Muted),
     };
-    let block = pane_block(
-        format!(
-            "{}{}{}",
-            if model.splits.zoomed && focused {
-                "(zoomed) "
-            } else {
-                ""
-            },
-            presentation.icon(Icon::Info),
-            title
-        ),
-        focused,
-        presentation,
-    );
+    let mut title_spans = Vec::new();
+    if model.splits.zoomed && focused {
+        title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
+    }
+    let primary_style = if focused {
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+    } else {
+        theme.style(Token::Header)
+    };
+    title_spans.push(Span::styled(
+        format!("{}Plan", presentation.icon(Icon::Info)),
+        primary_style,
+    ));
+    if !status_label.is_empty() {
+        title_spans.push(Span::styled(status_label, theme.style(status_token)));
+    }
+    if focused {
+        title_spans.push(Span::styled(
+            "  [focused]",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+    }
+    let block = pane_block_line(Line::from(title_spans), focused, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
@@ -646,21 +724,28 @@ fn render_plan_detail(
     let Some(node) = view.selected_node() else {
         return;
     };
-    let mut lines = vec![Line::from(vec![
-        Span::styled("Selected: ", presentation.theme.style(Token::Info)),
-        Span::styled(
-            format!(
-                "{}  ({}/{})",
-                safe_plan_text(&node.node_type),
-                view.visible_paths()
-                    .iter()
-                    .position(|path| path == &view.selected_path)
-                    .map_or(1, |index| index + 1),
-                view.visible_paths().len()
-            ),
-            presentation.theme.style(Token::Header),
-        ),
-    ])];
+    let theme = &presentation.theme;
+    let selected_idx = view
+        .visible_paths()
+        .iter()
+        .position(|path| path == &view.selected_path)
+        .map_or(1, |index| index + 1);
+    let selected_text = format!(
+        "{}  ({}/{})",
+        safe_plan_text(&node.node_type),
+        selected_idx,
+        view.visible_paths().len()
+    );
+    let mut header_spans = vec![
+        Span::styled("Selected: ", theme.on_stripe(Token::Info)),
+        Span::styled(selected_text.clone(), theme.on_stripe(Token::Header)),
+    ];
+    let header_w = "Selected: ".len() + display_width(&selected_text);
+    let area_w = usize::from(area.width);
+    if header_w < area_w {
+        header_spans.push(Span::styled(" ".repeat(area_w - header_w), theme.stripe()));
+    }
+    let mut lines = vec![Line::from(header_spans).style(theme.stripe())];
     lines.push(Line::from(Span::styled(
         plan_metrics(node, document.analyzed),
         presentation.theme.style(Token::Text),

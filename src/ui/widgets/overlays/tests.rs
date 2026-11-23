@@ -1218,3 +1218,156 @@ fn overlay_chrome_recessed_pills_hairline_rule_and_footer_keycaps_across_depths(
         assert_eq!(low_buf[(enter_col, footer_y)].bg, Color::Reset);
     }
 }
+
+#[test]
+fn plan_header_detail_strip_and_review_modal_craft_across_depths() {
+    use crate::app::model::{Model, PendingUpdate};
+    use crate::query::JobId;
+    use crate::query::value::Cell;
+
+    let document = PlanDocument::parse(PLAIN_PLAN, true).expect("valid plan");
+    let mut model = Model::new(100);
+    model.focus = crate::app::model::Focus::Results;
+    model.plan.ready(document);
+
+    let area = Rect::new(0, 0, 100, 16);
+    let nerd = Presentation::new(
+        Theme::new(ThemeChoice::Atelier, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Nerd),
+        false,
+    );
+    let mut pbuf = Buffer::empty(area);
+    render_plan(
+        &model,
+        &crate::ui::keymap::Keymap::new(),
+        &nerd,
+        area,
+        &mut pbuf,
+    );
+    let ptext = buffer_to_string(&pbuf);
+    assert!(
+        ptext.contains("\u{258d} "),
+        "focused Plan needs accent leader: {ptext}"
+    );
+    assert!(ptext.contains("[focused]"), "{ptext}");
+    let sel_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| pbuf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Selected: Nested Loop")
+        })
+        .expect("plan detail strip");
+    assert_eq!(
+        pbuf[(2, sel_y)].bg,
+        nerd.theme.surface(Token::SurfaceAlt).bg.unwrap(),
+        "plan Selected: strip must use SurfaceAlt"
+    );
+
+    let mut review_model = Model::new(100);
+    let source_sql = "SELECT id, status FROM public.orders ORDER BY id ASC;";
+    let candidate = UpdateCandidate {
+        result_job: JobId(1),
+        source_row: 0,
+        result_column: 1,
+        source_sql: source_sql.into(),
+    };
+    let source = crate::query::parse_update_source(source_sql, &["id".into(), "status".into()], 1)
+        .expect("update source");
+    let relation = UpdateRelation {
+        schema: "public".into(),
+        relation: "orders".into(),
+        kind: ObjectKind::Table,
+        readable: true,
+        writable: true,
+        columns: vec![
+            ColumnInfo {
+                name: "id".into(),
+                data_type: "integer".into(),
+                nullable: false,
+                primary_key: true,
+                default: None,
+            },
+            ColumnInfo {
+                name: "status".into(),
+                data_type: "text".into(),
+                nullable: false,
+                primary_key: false,
+                default: None,
+            },
+        ],
+    };
+    let plan = crate::query::plan_update(
+        &source,
+        "public",
+        "orders",
+        &["id".into(), "status".into()],
+        &[Cell::Text("1".into()), Cell::Text("paid".into())],
+        &[
+            crate::query::UpdateColumn {
+                name: "id".into(),
+                primary_key: true,
+            },
+            crate::query::UpdateColumn {
+                name: "status".into(),
+                primary_key: false,
+            },
+        ],
+        "delivered",
+    )
+    .expect("update plan");
+    review_model.pending_update = Some(PendingUpdate {
+        relation,
+        candidate,
+        plan,
+    });
+    let r_area = Rect::new(0, 0, 110, 26);
+    let mut rbuf = Buffer::empty(r_area);
+    render_update_review(&review_model, &nerd, r_area, &mut rbuf);
+    let rtext = buffer_to_string(&rbuf);
+    let warn_icon = nerd.icon(crate::ui::glyphs::Icon::Warning);
+    assert!(
+        rtext.contains(&format!("{warn_icon}Confirm cell update")),
+        "update review title should show warning icon: {rtext}"
+    );
+    let find_word = |needle: &str| -> (u16, u16) {
+        for y in 0..r_area.height {
+            let row: String = (0..r_area.width).map(|x| rbuf[(x, y)].symbol()).collect();
+            if let Some(pos) = row.find(needle) {
+                return (row[..pos].chars().count() as u16, y);
+            }
+        }
+        panic!("missing {needle:?} in:\n{rtext}");
+    };
+    let update_pos = find_word("UPDATE \"public\"");
+    assert_eq!(
+        rbuf[update_pos].fg,
+        nerd.theme.color(Token::SyntaxKeyword).unwrap(),
+        "UPDATE keyword in review modal must be syntax-highlighted"
+    );
+    assert_eq!(
+        rbuf[update_pos].bg,
+        nerd.theme.surface(Token::SurfaceAlt).bg.unwrap(),
+        "bound SQL statement row must sit on SurfaceAlt"
+    );
+    let rail_pos = find_word("Enter/Ctrl+R to run this UPDATE once");
+    assert_eq!(
+        rbuf[rail_pos].bg,
+        nerd.theme.surface(Token::SurfaceAlt).bg.unwrap(),
+        "review modal action rail must sit on SurfaceAlt"
+    );
+
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut lbuf = Buffer::empty(r_area);
+        render_update_review(&review_model, &low, r_area, &mut lbuf);
+        let ltext = buffer_to_string(&lbuf);
+        assert!(ltext.is_ascii(), "{depth:?}: {ltext:?}");
+        assert_eq!(lbuf[update_pos].bg, Color::Reset);
+        assert_eq!(lbuf[rail_pos].bg, Color::Reset);
+    }
+}

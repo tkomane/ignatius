@@ -1,6 +1,7 @@
 use super::overlays::render_plan;
 use super::{
-    action_key_label, hairline_rule, input_cursor, inset_empty_area, overlay_block, pane_block_line,
+    action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, inset_empty_area,
+    overlay_block, pane_block_line, syntax_token,
 };
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
@@ -1180,8 +1181,33 @@ fn render_grid(
     }
 
     let rule_char = hairline_rule(presentation);
+    let cross_char = if presentation.glyphs.is_ascii() {
+        "+"
+    } else {
+        "\u{253c}"
+    };
+    let pad_w = padding.len();
+    let mut grid_rule = String::with_capacity(grid_width);
+    grid_rule.push_str(&rule_char.repeat(gutter + pad_w));
+    for (position, index) in window.iter().enumerate() {
+        if position > 0 {
+            grid_rule.push_str(cross_char);
+            grid_rule.push_str(&rule_char.repeat(pad_w));
+        }
+        let width = widths
+            .get(*index)
+            .copied()
+            .unwrap_or(grid::MIN_COLUMN_WIDTH);
+        grid_rule.push_str(&rule_char.repeat(width + pad_w));
+    }
+    let current_w = grid_rule.chars().count();
+    if current_w < grid_width {
+        grid_rule.push_str(&rule_char.repeat(grid_width - current_w));
+    } else if current_w > grid_width {
+        grid_rule = grid_rule.chars().take(grid_width).collect();
+    }
     lines.push(Line::from(Span::styled(
-        rule_char.repeat(grid_width),
+        grid_rule,
         theme.style(Token::Border),
     )));
 
@@ -1414,6 +1440,103 @@ pub(crate) fn column_alignment(set: &crate::query::result::ResultSet) -> Vec<boo
         })
         .collect()
 }
+fn error_sql_spans(
+    editor_text: &str,
+    location: &crate::query::error_location::ErrorLocation,
+    sql_part: &str,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
+    let exact_raw_slice = (location.cursor <= editor_text.len()
+        && editor_text.is_char_boundary(location.cursor))
+    .then(|| {
+        let start = editor_text[..location.cursor]
+            .rfind('\n')
+            .map_or(0, |i| i + 1);
+        let end = editor_text[location.cursor..]
+            .find('\n')
+            .map_or(editor_text.len(), |i| location.cursor + i);
+        (editor_text.get(start..end) == Some(sql_part)).then_some(start)
+    })
+    .flatten();
+
+    match (exact_raw_slice, location.token.as_ref()) {
+        (Some(line_start), Some(token_range)) => {
+            let syntax = crate::query::highlight::tokens(sql_part);
+            let mut spans = Vec::new();
+            let mut run = String::new();
+            let mut run_style: Option<Style> = None;
+            for (byte, ch) in sql_part.char_indices() {
+                let abs_byte = line_start + byte;
+                let style = if token_range.contains(&abs_byte) {
+                    theme
+                        .on_stripe(Token::Danger)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                } else {
+                    theme.on_stripe(syntax_token(crate::query::highlight::kind_at(
+                        &syntax, byte,
+                    )))
+                };
+                if run_style != Some(style) {
+                    if let Some(previous) = run_style {
+                        spans.push(Span::styled(std::mem::take(&mut run), previous));
+                    }
+                    run_style = Some(style);
+                }
+                run.push(ch);
+            }
+            if let Some(previous) = run_style {
+                spans.push(Span::styled(run, previous));
+            }
+            spans
+        }
+        _ => highlighted_sql_spans(sql_part, theme, true),
+    }
+}
+
+fn push_error_marker_lines(
+    lines: &mut Vec<Line<'static>>,
+    editor_text: &str,
+    location: &crate::query::error_location::ErrorLocation,
+    marker: &str,
+    inner_width: usize,
+    presentation: &Presentation,
+) {
+    let theme = &presentation.theme;
+    let col_sep = format!(" {} ", presentation.glyphs.column_rule());
+    for raw_line in marker.lines() {
+        let line_width = display_width(raw_line);
+        let mut spans = if let Some((line_num, sql_part)) = raw_line.split_once(" | ") {
+            let mut row = vec![
+                Span::styled(line_num.to_owned(), theme.on_stripe(Token::Muted)),
+                Span::styled(col_sep.clone(), theme.on_stripe(Token::Border)),
+            ];
+            row.extend(error_sql_spans(editor_text, location, sql_part, theme));
+            row
+        } else if let Some(caret_pos) = raw_line.rfind('^') {
+            vec![
+                // Leading spaces must survive Wrap { trim: false } so ^ stays under the column.
+                Span::styled(raw_line[..caret_pos].to_owned(), theme.stripe()),
+                Span::styled(
+                    raw_line[caret_pos..].to_owned(),
+                    theme.on_stripe(Token::Danger).add_modifier(Modifier::BOLD),
+                ),
+            ]
+        } else {
+            vec![Span::styled(
+                raw_line.to_owned(),
+                theme.on_stripe(Token::Warning),
+            )]
+        };
+        if line_width < inner_width {
+            spans.push(Span::styled(
+                " ".repeat(inner_width - line_width),
+                theme.stripe(),
+            ));
+        }
+        lines.push(Line::from(spans).style(theme.stripe()));
+    }
+}
+
 pub(crate) fn render_error(
     model: &Model,
     error: &crate::diagnostics::Diagnostic,
@@ -1431,6 +1554,7 @@ pub(crate) fn render_error(
         theme.style(Token::Danger).add_modifier(Modifier::BOLD),
     ));
     let block = pane_block_line(Line::from(title_spans), false, presentation);
+    let inner_width = usize::from(block.inner(area).width);
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -1475,12 +1599,14 @@ pub(crate) fn render_error(
         if let Some(marker) =
             crate::query::error_location::render_marker(model.editor.text(), location)
         {
-            for line in marker.lines() {
-                lines.push(Line::from(Span::styled(
-                    line.to_owned(),
-                    theme.style(Token::Warning),
-                )));
-            }
+            push_error_marker_lines(
+                &mut lines,
+                model.editor.text(),
+                location,
+                &marker,
+                inner_width,
+                presentation,
+            );
         }
     } else if let Some(note) = &model.error_location_note {
         lines.push(Line::from(vec![
@@ -1529,18 +1655,23 @@ pub(crate) fn render_error(
             ]));
         }
     } else if !error.technical.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{} technical field(s) hidden. Ctrl+D to expand.",
-                error.technical.len()
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} technical field(s) hidden. ", error.technical.len()),
+                theme.style(Token::Muted),
             ),
-            theme.style(Token::Muted),
-        )));
+            Span::styled(
+                "Ctrl+D",
+                theme.style(Token::Info).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" to expand.", theme.style(Token::Muted)),
+        ]));
     }
 
     Paragraph::new(lines)
         .block(block)
-        .wrap(Wrap { trim: true })
+        // Preserve leading indentation on error caret and technical-field lines.
+        .wrap(Wrap { trim: false })
         .render(area, buf);
 }
 

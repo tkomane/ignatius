@@ -11,7 +11,7 @@ use crate::query::completion::{
 };
 use crate::ui::glyphs::{GlyphTier, Glyphs};
 use crate::ui::keymap::Keymap;
-use crate::ui::layout::Presentation;
+use crate::ui::layout::{Presentation, buffer_to_string};
 use crate::ui::theme::{ColorDepth, Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -814,4 +814,76 @@ fn editor_split_header_vertical_gutter_rule_and_completion_ascii_parity() {
             "ASCII completion rules must use dashes: {joined}"
         );
     }
+}
+
+#[test]
+fn completion_displays_kind_icons_and_empty_editor_renders_editorial_keycaps() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.editor.set_text("SELECT ");
+    model.completion.menu = Some(CompletionMenu::new(test_completion_result(), true));
+
+    let nerd = Presentation::new(
+        Theme::new(ThemeChoice::Atelier, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Nerd),
+        false,
+    );
+    let area = Rect::new(0, 0, 88, 22);
+    let mut cbuf = Buffer::empty(area);
+    render_editor(&model, &Keymap::new(), &nerd, area, &mut cbuf);
+    render_completion(&model, &nerd, area, &mut cbuf);
+    let ctext = buffer_to_string(&cbuf);
+
+    let table_icon = nerd.icon(crate::ui::glyphs::Icon::Table);
+    let fn_icon = nerd.icon(crate::ui::glyphs::Icon::Function);
+    let col_icon = nerd.icon(crate::ui::glyphs::Icon::Column);
+    assert!(
+        ctext.contains(&format!("{table_icon}users")),
+        "missing table kind icon in completion menu:\n{ctext}"
+    );
+    assert!(
+        ctext.contains(&format!("{fn_icon}now")),
+        "missing function kind icon in completion menu:\n{ctext}"
+    );
+    assert!(
+        ctext.contains(&format!("{col_icon}id")),
+        "missing column kind icon in completion menu:\n{ctext}"
+    );
+
+    let mut empty_model = Model::new(100);
+    empty_model.connection = ConnectionState::Connected(session());
+    let mut ebuf = Buffer::empty(area);
+    render_editor(&empty_model, &Keymap::new(), &nerd, area, &mut ebuf);
+    let etext = buffer_to_string(&ebuf);
+    assert!(
+        etext.contains("\u{2500}\u{2500}\u{2500}\u{2500}"),
+        "{etext}"
+    );
+
+    let run_pos = (0..area.height)
+        .find_map(|y| {
+            let line: String = (0..area.width).map(|x| ebuf[(x, y)].symbol()).collect();
+            line.find("Ctrl+R").map(|x| (x as u16, y))
+        })
+        .expect("Ctrl+R starter keycap");
+    assert_eq!(
+        ebuf[run_pos].bg,
+        nerd.theme.surface(Token::SurfaceOverlay).bg.unwrap(),
+        "empty editor starter keycap must elevate onto SurfaceOverlay"
+    );
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut abuf = Buffer::empty(area);
+    render_editor(&empty_model, &Keymap::new(), &ascii, area, &mut abuf);
+    let atext = buffer_to_string(&abuf);
+    assert!(atext.is_ascii(), "{atext:?}");
+    assert!(atext.contains("Start here"), "{atext}");
+    assert!(
+        atext.contains("Ctrl+R Run the buffer once SQL is ready."),
+        "{atext}"
+    );
 }

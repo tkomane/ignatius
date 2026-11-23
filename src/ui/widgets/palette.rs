@@ -1,4 +1,6 @@
-use super::{input_cursor, overlay_block, overlay_block_line, syntax_token};
+use super::{
+    hairline_rule, highlighted_sql_spans, input_cursor, overlay_block, overlay_block_line,
+};
 use crate::app::model::Model;
 use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
@@ -108,27 +110,32 @@ pub(crate) fn hit_row(
     Some(index)
 }
 
-fn highlight_sql_line(source: &str, theme: &Theme) -> Vec<Span<'static>> {
-    let syntax = crate::query::highlight::tokens(source);
-    let mut spans = Vec::new();
-    let mut run = String::new();
-    let mut run_style: Option<Style> = None;
-    for (byte, ch) in source.char_indices() {
-        let style = theme.style(syntax_token(crate::query::highlight::kind_at(
-            &syntax, byte,
+fn push_preview_hairline(
+    preview_lines: &mut Vec<Line<'static>>,
+    preview_w: u16,
+    presentation: &Presentation,
+    theme: &Theme,
+) {
+    if !preview_lines.is_empty() && preview_w >= 8 {
+        let rule_w = usize::from(preview_w).min(44);
+        preview_lines.push(Line::from(Span::styled(
+            hairline_rule(presentation).repeat(rule_w),
+            theme.style(Token::Border),
         )));
-        if run_style != Some(style) {
-            if let Some(previous) = run_style {
-                spans.push(Span::styled(std::mem::take(&mut run), previous));
-            }
-            run_style = Some(style);
-        }
-        run.push(ch);
     }
-    if let Some(previous) = run_style {
-        spans.push(Span::styled(run, previous));
+}
+
+const fn purpose_icon(purpose: crate::app::palette::Purpose) -> Icon {
+    use crate::app::palette::Purpose;
+    match purpose {
+        Purpose::Commands => Icon::Key,
+        Purpose::GoTo => Icon::SearchPath,
+        Purpose::History => Icon::Clock,
+        Purpose::Dependencies => Icon::Schema,
+        Purpose::SavedQueries => Icon::Editor,
+        Purpose::ResultControls | Purpose::ResultColumns | Purpose::ExportFormats => Icon::Rows,
+        Purpose::Connections => Icon::Database,
     }
-    spans
 }
 
 fn palette_title_line(
@@ -138,7 +145,7 @@ fn palette_title_line(
     let theme = &presentation.theme;
     let raw = palette.purpose.title().trim();
     let (primary, instructions) = raw.split_once("  ").unwrap_or((raw, ""));
-    let icon = presentation.icon(Icon::KeyColumn);
+    let icon = presentation.icon(purpose_icon(palette.purpose));
     let mut spans = vec![Span::styled(
         format!("{icon}{primary}"),
         theme.style(Token::Focus).add_modifier(Modifier::BOLD),
@@ -480,6 +487,7 @@ pub(crate) fn render_palette(
         for raw_line in preview_raw {
             if raw_line == "SQL:" {
                 in_sql_block = true;
+                push_preview_hairline(&mut preview_lines, preview_w, presentation, theme);
                 preview_lines.push(Line::from(Span::styled(
                     raw_line,
                     theme.style(Token::Header),
@@ -491,17 +499,23 @@ pub(crate) fn render_palette(
             }
 
             if in_sql_block {
-                preview_lines.push(Line::from(highlight_sql_line(&raw_line, theme)));
+                preview_lines.push(Line::from(highlighted_sql_spans(&raw_line, theme, false)));
             } else if let Some((key, val)) = raw_line.split_once(": ") {
                 if key == "SQL" {
+                    push_preview_hairline(&mut preview_lines, preview_w, presentation, theme);
                     let mut line_spans =
                         vec![Span::styled(format!("{key}: "), theme.style(Token::Header))];
-                    line_spans.extend(highlight_sql_line(val, theme));
+                    line_spans.extend(highlighted_sql_spans(val, theme, false));
                     preview_lines.push(Line::from(line_spans));
                 } else {
+                    let value_token = match key {
+                        "Query" => Token::Focus,
+                        "Origin" => Token::Info,
+                        _ => Token::Text,
+                    };
                     preview_lines.push(Line::from(vec![
                         Span::styled(format!("{key}: "), theme.style(Token::Header)),
-                        Span::styled(val.to_owned(), theme.style(Token::Text)),
+                        Span::styled(val.to_owned(), theme.style(value_token)),
                     ]));
                 }
             } else if raw_line.ends_with(':') {

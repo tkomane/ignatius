@@ -1,7 +1,8 @@
 pub(super) mod view;
 
 use super::{
-    action_key_label, hairline_rule, overlay_block, pane_block, pane_block_line, syntax_token,
+    action_key_label, hairline_rule, inset_empty_area, overlay_block_line, pane_block,
+    pane_block_line, syntax_token,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -107,7 +108,7 @@ pub(crate) fn render_completion(
         OverlayAnchor::Center,
     );
     let max_width = bounds.width;
-    let desired_width = u16::try_from(name_width + 44).unwrap_or(max_width);
+    let desired_width = u16::try_from(name_width + 46).unwrap_or(max_width);
     let width = desired_width.clamp(28, 78).min(max_width);
     let max_height = bounds.height;
     let use_rules = max_height >= 7;
@@ -128,7 +129,6 @@ pub(crate) fn render_completion(
     ratatui::widgets::Clear.render(popup, buf);
 
     let content_width = width.saturating_sub(2) as usize;
-    let label_width = name_width.min(content_width.saturating_sub(8));
     let mut lines = vec![Line::from(Span::styled(
         truncate_to_width(
             &sanitize_for_display(&menu.result.scope.label()),
@@ -149,18 +149,18 @@ pub(crate) fn render_completion(
         } else {
             " "
         };
+        let kind_icon = presentation.icon(candidate_kind_icon(candidate.kind));
+        let icon_w = display_width(&kind_icon);
+        let label_width = name_width.min(content_width.saturating_sub(8 + icon_w));
         let name = truncate_to_width(&safe_names[index], label_width, unicode);
         let name = pad_to_width(&name, label_width);
         let detail = truncate_to_width(
             &sanitize_for_display(&candidate.plain_detail()),
-            content_width.saturating_sub(label_width + 5),
+            content_width.saturating_sub(label_width + 5 + icon_w),
             unicode,
         );
-        let text = truncate_to_width(
-            &format!("{marker} {name}  {detail}"),
-            content_width,
-            unicode,
-        );
+        let prefix_raw = format!("{marker} {kind_icon}{name}");
+        let text = truncate_to_width(&format!("{prefix_raw}  {detail}"), content_width, unicode);
         if index == menu.selected {
             let padded = pad_to_width(&text, content_width);
             lines.push(Line::from(Span::styled(
@@ -168,7 +168,6 @@ pub(crate) fn render_completion(
                 presentation.theme.style(Token::Selection),
             )));
         } else {
-            let prefix_raw = format!("{marker} {name}");
             let kind_token = candidate_kind_token(candidate.kind);
             if text.len() > prefix_raw.len() && text.is_char_boundary(prefix_raw.len()) {
                 lines.push(Line::from(vec![
@@ -213,17 +212,38 @@ pub(crate) fn render_completion(
         truncate_to_width(&catalog_summary, content_width, unicode),
         presentation.theme.style(Token::Muted),
     )));
-    lines.push(Line::from(Span::styled(
-        truncate_to_width(
-            "Enter accepts, Esc cancels, Up/Down moves.",
-            content_width,
-            unicode,
-        ),
-        presentation.theme.style(Token::Muted),
-    )));
+    let hint_line = if content_width >= 42 {
+        let key_style = presentation.theme.style(Token::Header);
+        let verb_style = presentation.theme.style(Token::Muted);
+        Line::from(vec![
+            Span::styled("Enter", key_style),
+            Span::styled(" accepts, ", verb_style),
+            Span::styled("Esc", key_style),
+            Span::styled(" cancels, ", verb_style),
+            Span::styled("Up/Down", key_style),
+            Span::styled(" moves.", verb_style),
+        ])
+    } else {
+        Line::from(Span::styled(
+            truncate_to_width(
+                "Enter accepts, Esc cancels, Up/Down moves.",
+                content_width,
+                unicode,
+            ),
+            presentation.theme.style(Token::Muted),
+        ))
+    };
+    lines.push(hint_line);
 
+    let title_line = Line::from(Span::styled(
+        format!("{}Complete", presentation.icon(Icon::Editor)),
+        presentation
+            .theme
+            .style(Token::Focus)
+            .add_modifier(Modifier::BOLD),
+    ));
     Paragraph::new(lines)
-        .block(overlay_block(" Complete ".to_owned(), presentation))
+        .block(overlay_block_line(title_line, presentation))
         .render(popup, buf);
 
     if menu.selected < menu.result.candidates.len() {
@@ -238,6 +258,24 @@ pub(crate) fn render_completion(
                 buf[(cx, sel_y)].set_style(sel_style);
             }
         }
+    }
+}
+
+const fn candidate_kind_icon(kind: crate::query::completion::CandidateKind) -> Icon {
+    use crate::query::completion::{CandidateKind, CatalogObjectKind};
+    match kind {
+        CandidateKind::Keyword => Icon::Key,
+        CandidateKind::Cte => Icon::SearchPath,
+        CandidateKind::Column => Icon::Column,
+        CandidateKind::Object(
+            CatalogObjectKind::Table
+            | CatalogObjectKind::ForeignTable
+            | CatalogObjectKind::PartitionedTable,
+        ) => Icon::Table,
+        CandidateKind::Object(CatalogObjectKind::View) => Icon::View,
+        CandidateKind::Object(CatalogObjectKind::MaterializedView) => Icon::MaterializedView,
+        CandidateKind::Object(CatalogObjectKind::Sequence) => Icon::Sequence,
+        CandidateKind::Object(CatalogObjectKind::Function) => Icon::Function,
     }
 }
 
@@ -493,27 +531,31 @@ fn render_editor_buffer_pane(
 
     if text.is_empty() {
         if is_active {
+            let empty_area = inset_empty_area(inner);
+            let keycap = theme.keycap(Token::Focus);
             let ctx = crate::app::discovery::context(model);
             let palette_key = action_key_label(keymap, &crate::app::Action::OpenPalette);
             let help_key = action_key_label(keymap, &crate::app::Action::ToggleHelp);
-            let mut lines = Vec::new();
+            let mut prose_lines = Vec::new();
+            let mut hint_lines = Vec::new();
             match ctx.connection {
                 crate::app::discovery::ConnectionPosture::Disconnected => {
-                    lines.push(Line::from(Span::styled(
-                        "Connection required",
-                        theme.style(Token::Warning),
-                    )));
-                    lines.push(Line::from(Span::styled(
+                    prose_lines.push(Line::from(vec![
+                        Span::styled(
+                            presentation.glyphs.prefix(Icon::Warning),
+                            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Connection required",
+                            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    prose_lines.push(Line::from(Span::styled(
                         "Connect before running SQL. Results appear after a query.",
                         theme.style(Token::Muted),
                     )));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("{palette_key} "),
-                            theme
-                                .style(Token::Focus)
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        ),
+                    hint_lines.push(Line::from(vec![
+                        Span::styled(format!(" {palette_key} "), keycap),
                         Span::styled(
                             "Command palette shows available actions.",
                             theme.style(Token::Info),
@@ -521,21 +563,22 @@ fn render_editor_buffer_pane(
                     ]));
                 }
                 crate::app::discovery::ConnectionPosture::Connecting => {
-                    lines.push(Line::from(Span::styled(
-                        "Connecting",
-                        theme.style(Token::Info),
-                    )));
-                    lines.push(Line::from(Span::styled(
+                    prose_lines.push(Line::from(vec![
+                        Span::styled(
+                            presentation.glyphs.prefix(Icon::Info),
+                            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Connecting",
+                            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    prose_lines.push(Line::from(Span::styled(
                         "The editor is ready. Wait for the connection before running SQL.",
                         theme.style(Token::Muted),
                     )));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("{help_key} "),
-                            theme
-                                .style(Token::Focus)
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        ),
+                    hint_lines.push(Line::from(vec![
+                        Span::styled(format!(" {help_key} "), keycap),
                         Span::styled(
                             "Help explains the keyboard while it connects.",
                             theme.style(Token::Info),
@@ -544,33 +587,29 @@ fn render_editor_buffer_pane(
                 }
                 crate::app::discovery::ConnectionPosture::Connected => {
                     let run_key = action_key_label(keymap, &crate::app::Action::RunBuffer);
-                    lines.push(Line::from(Span::styled(
-                        "Start here",
-                        theme.style(Token::Focus),
-                    )));
-                    lines.push(Line::from(Span::styled(
+                    prose_lines.push(Line::from(vec![
+                        Span::styled(
+                            presentation.glyphs.prefix(Icon::Editor),
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "Start here",
+                            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    prose_lines.push(Line::from(Span::styled(
                         "Type SQL in this editor.",
                         theme.style(Token::Text),
                     )));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("{run_key} "),
-                            theme
-                                .style(Token::Focus)
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        ),
+                    hint_lines.push(Line::from(vec![
+                        Span::styled(format!(" {run_key} "), keycap),
                         Span::styled(
                             "Run the buffer once SQL is ready.",
                             theme.style(Token::Info),
                         ),
                     ]));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("{palette_key} "),
-                            theme
-                                .style(Token::Focus)
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        ),
+                    hint_lines.push(Line::from(vec![
+                        Span::styled(format!(" {palette_key} "), keycap),
                         Span::styled(
                             "Command palette answers what else is possible.",
                             theme.style(Token::Muted),
@@ -579,21 +618,22 @@ fn render_editor_buffer_pane(
                 }
                 crate::app::discovery::ConnectionPosture::Lost
                 | crate::app::discovery::ConnectionPosture::Failed => {
-                    lines.push(Line::from(Span::styled(
-                        ctx.connection.label(),
-                        theme.style(Token::Danger),
-                    )));
-                    lines.push(Line::from(Span::styled(
+                    prose_lines.push(Line::from(vec![
+                        Span::styled(
+                            presentation.glyphs.prefix(Icon::Warning),
+                            theme.style(Token::Danger).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            ctx.connection.label(),
+                            theme.style(Token::Danger).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    prose_lines.push(Line::from(Span::styled(
                         "Reconnect before running SQL. Results remain from the last known query.",
                         theme.style(Token::Muted),
                     )));
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("{palette_key} "),
-                            theme
-                                .style(Token::Focus)
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        ),
+                    hint_lines.push(Line::from(vec![
+                        Span::styled(format!(" {palette_key} "), keycap),
                         Span::styled(
                             "Command palette shows safe actions.",
                             theme.style(Token::Info),
@@ -601,9 +641,22 @@ fn render_editor_buffer_pane(
                     ]));
                 }
             }
-            Paragraph::new(lines)
+            let min_needed = prose_lines.len().saturating_add(hint_lines.len());
+            let show_separator =
+                empty_area.height >= 6 && usize::from(empty_area.height) > min_needed;
+            if show_separator {
+                let rule_width = usize::from(empty_area.width).min(48);
+                if rule_width > 0 {
+                    prose_lines.push(Line::from(Span::styled(
+                        hairline_rule(presentation).repeat(rule_width),
+                        theme.style(Token::Border),
+                    )));
+                }
+            }
+            prose_lines.extend(hint_lines);
+            Paragraph::new(prose_lines)
                 .wrap(Wrap { trim: true })
-                .render(inner, buf);
+                .render(empty_area, buf);
         } else {
             let badge = split_badge
                 .map(|(idx, title)| format!("[SPLIT {}: {}]", idx + 1, sanitize_for_display(title)))
