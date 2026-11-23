@@ -12018,3 +12018,354 @@ fn structured_inspector_uses_existing_review_and_discards_stale_selection() {
     assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
     assert!(model.pending_update.is_none());
 }
+
+// ------------------------------------------------- truthful motion (063)
+
+/// A connected model presented the way the interactive runtime presents it,
+/// with motion enabled: truecolour, Unicode glyphs, motion not reduced.
+fn moving() -> Model {
+    let mut model = connected();
+    model.presentation = crate::ui::layout::Presentation::new(
+        crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true),
+        crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+        false,
+    );
+    model.motion.enable();
+    model
+}
+
+/// Finishes one statement with the given outcome, without a key press, and
+/// returns its job. A key would settle every transition first.
+fn finish_statement(model: &mut Model, execution: impl FnOnce(JobId) -> Box<Execution>) -> JobId {
+    let job = model.allocate_job();
+    model.phase = QueryPhase::Running { job, statements: 1 };
+    update(model, Message::ExecutionFinished(execution(job)));
+    job
+}
+
+fn motion_frames(model: &mut Model, total: Duration) {
+    let mut left = total;
+    while !left.is_zero() {
+        let step = left.min(crate::ui::motion::FRAME_INTERVAL);
+        update(model, Message::MotionFrame { elapsed: step });
+        left -= step;
+    }
+}
+
+#[test]
+fn motion_a_theme_switch_reaches_the_new_theme_first_and_sweeps_from_the_old_one() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::Theme;
+    let mut model = moving();
+    assert!(!model.is_animating(), "a settled client animates nothing");
+
+    assert!(update(&mut model, Message::Action(Action::SwitchTheme)).is_empty());
+    assert_eq!(
+        model.presentation.theme,
+        Theme::new(ThemeChoice::Light, true),
+        "the state changes in the same reduction"
+    );
+    assert_eq!(
+        model.motion().theme_curtain(),
+        Some((&Theme::new(ThemeChoice::Dark, true), 0.0))
+    );
+    assert!(model.is_animating());
+    assert!(model.is_in_motion());
+    assert!(
+        !model.is_busy_animating(),
+        "a transition never starts the busy ticker"
+    );
+}
+
+#[test]
+fn motion_a_complete_successful_statement_settles_once_per_job() {
+    let mut model = moving();
+    let first = finish_statement(&mut model, |job| {
+        execution(job, ExecutionStatus::Succeeded, &["x"])
+    });
+    assert_eq!(model.motion().result_settle(), Some((first, 0.0)));
+    assert!(model.is_in_motion());
+    assert!(!model.is_busy_animating());
+
+    motion_frames(&mut model, Duration::from_millis(99));
+    let second = finish_statement(&mut model, |job| {
+        execution(job, ExecutionStatus::Succeeded, &["y"])
+    });
+    assert_ne!(first, second);
+    assert_eq!(
+        model.motion().result_settle(),
+        Some((second, 0.0)),
+        "a new job retriggers from the start"
+    );
+}
+
+#[test]
+fn motion_failed_cancelled_lost_and_limited_results_keep_their_static_colours() {
+    for status in [
+        ExecutionStatus::Failed,
+        ExecutionStatus::Cancelled,
+        ExecutionStatus::ConnectionLost,
+    ] {
+        let mut model = moving();
+        finish_statement(&mut model, |job| execution(job, status.clone(), &[]));
+        assert_eq!(model.motion().result_settle(), None, "{status:?}");
+        assert!(!model.is_animating(), "{status:?}");
+    }
+
+    let mut model = moving();
+    finish_statement(&mut model, |job| {
+        let mut limited = execution(job, ExecutionStatus::Succeeded, &[]);
+        let mut set = ResultSet::new(vec!["value".into()], 1);
+        for value in ["a", "b", "c"] {
+            set.push(vec![Cell::Text(value.into())]);
+        }
+        limited.statements[0].result_set = Some(set);
+        assert!(limited.any_truncated());
+        limited
+    });
+    assert_eq!(
+        model.motion().result_settle(),
+        None,
+        "a limited result is not settled toward calm"
+    );
+
+    let mut stale = moving();
+    stale.editor.set_text("SELECT 1;");
+    update(&mut stale, Message::Action(Action::RunBuffer));
+    update(
+        &mut stale,
+        Message::ExecutionFinished(execution(JobId(999), ExecutionStatus::Succeeded, &[])),
+    );
+    assert!(
+        stale.motion().result_settle().is_none(),
+        "a stale result changes nothing, motion included"
+    );
+}
+
+#[test]
+fn motion_never_starts_where_it_would_not_be_seen_or_is_not_wanted() {
+    use crate::ui::theme::ColorDepth;
+    type StillCase = (&'static str, fn(&mut Model));
+    let cases: [StillCase; 7] = [
+        ("not enabled", |model| {
+            model.motion = crate::ui::motion::Motion::default();
+        }),
+        ("reduced motion", |model| model.reduced_motion = true),
+        ("presentation reduced motion", |model| {
+            model.presentation.reduced_motion = true;
+        }),
+        ("ascii", |model| {
+            model.presentation.glyphs = crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii);
+        }),
+        ("colour off", |model| model.presentation.theme.color = false),
+        ("16 colours", |model| {
+            model.presentation.theme.depth = ColorDepth::Basic16;
+        }),
+        ("no colour depth", |model| {
+            model.presentation.theme.depth = ColorDepth::None;
+        }),
+    ];
+    for (name, still) in cases {
+        let mut model = moving();
+        still(&mut model);
+        let before = model.motion().clone();
+        update(&mut model, Message::Action(Action::SwitchTheme));
+        finish_statement(&mut model, |job| {
+            execution(job, ExecutionStatus::Succeeded, &["x"])
+        });
+        assert!(!model.is_in_motion(), "{name}");
+        assert!(model.motion().theme_curtain().is_none(), "{name}");
+        assert!(model.motion().result_settle().is_none(), "{name}");
+        assert_eq!(
+            format!("{:?}", model.motion()),
+            format!("{before:?}"),
+            "{name}: nothing about motion changed"
+        );
+    }
+}
+
+#[test]
+fn motion_a_fresh_model_is_still_even_in_full_colour() {
+    let mut model = Model::new(100);
+    model.presentation = crate::ui::layout::Presentation::new(
+        crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true),
+        crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+        false,
+    );
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert!(
+        !model.is_in_motion(),
+        "only the interactive runtime enables motion"
+    );
+}
+
+#[test]
+fn motion_a_key_settles_every_transition_and_is_still_applied() {
+    let mut model = moving();
+    model.focus = Focus::Editor;
+    model.editor.set_text("");
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    finish_statement(&mut model, |job| {
+        execution(job, ExecutionStatus::Succeeded, &["x"])
+    });
+    model.focus = Focus::Editor;
+    assert!(model.motion().theme_curtain().is_some());
+    assert!(model.motion().result_settle().is_some());
+
+    update(&mut model, Message::Action(Action::Insert('x')));
+    assert_eq!(model.editor.text(), "x", "the key reached its handler");
+    assert!(!model.is_in_motion(), "and everything settled first");
+
+    // The same holds for a key the runtime sends with its geometry.
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert!(model.is_in_motion());
+    update(
+        &mut model,
+        Message::InputAtSize {
+            action: Action::Insert('y'),
+            columns: 120,
+            rows: 40,
+        },
+    );
+    assert_eq!(model.editor.text(), "xy");
+    assert!(!model.is_in_motion());
+}
+
+#[test]
+fn motion_a_theme_key_during_the_curtain_settles_it_and_sweeps_from_where_it_ended() {
+    use crate::config::ThemeChoice;
+    use crate::ui::theme::Theme;
+    let mut model = moving();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    motion_frames(&mut model, Duration::from_millis(66));
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert_eq!(
+        model.presentation.theme,
+        Theme::new(ThemeChoice::HighContrast, true)
+    );
+    assert_eq!(
+        model.motion().theme_curtain(),
+        Some((&Theme::new(ThemeChoice::Light, true), 0.0)),
+        "the settled theme is the one that sweeps away"
+    );
+}
+
+#[test]
+fn motion_paste_and_clicks_settle_but_a_passing_pointer_does_not() {
+    use crate::app::message::{MouseButton, MouseKind, MouseModifiers};
+    let pointer = |kind| Message::Mouse {
+        kind,
+        column: 0,
+        row: 0,
+        modifiers: MouseModifiers::default(),
+    };
+
+    let mut model = moving();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    update(&mut model, pointer(MouseKind::Moved));
+    assert!(model.is_in_motion(), "a hover is not an intent");
+    update(&mut model, pointer(MouseKind::Down(MouseButton::Left)));
+    assert!(!model.is_in_motion());
+
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    update(&mut model, Message::Pasted("z".into()));
+    assert!(!model.is_in_motion());
+}
+
+#[test]
+fn motion_transitions_settle_on_motion_frames_and_the_client_sleeps_again() {
+    let mut model = moving();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    finish_statement(&mut model, |job| {
+        execution(job, ExecutionStatus::Succeeded, &["x"])
+    });
+    assert!(model.motion().theme_curtain().is_some());
+    assert!(model.motion().result_settle().is_some());
+
+    let settle = crate::ui::motion::TransitionKind::ResultSettle.duration();
+    motion_frames(&mut model, Duration::from_millis(320));
+    assert!(model.motion().theme_curtain().is_none());
+    motion_frames(&mut model, settle);
+    assert!(!model.is_in_motion());
+    assert!(!model.is_animating(), "an idle client wakes nothing");
+}
+
+#[test]
+fn motion_frames_move_only_the_motion_clock_and_ticks_never_move_it() {
+    let mut model = moving();
+    update(
+        &mut model,
+        Message::ConnectingStep {
+            step: ConnectingStep::ServerHandshake,
+            target: "app@localhost:5432/orders".into(),
+        },
+    );
+    update(
+        &mut model,
+        Message::Tick {
+            running_for: Some(Duration::from_millis(90)),
+        },
+    );
+    let frame = model.frame;
+    let mouse = model.mouse.clock;
+    let running = model.running_for;
+    let banner = format!("{:?}", model.banner);
+    let clock = model.motion().clock();
+
+    update(
+        &mut model,
+        Message::MotionFrame {
+            elapsed: Duration::from_millis(33),
+        },
+    );
+    assert_eq!(model.frame, frame, "the spinner frame is the busy ticker's");
+    assert_eq!(model.mouse.clock, mouse, "double-click timing is unchanged");
+    assert_eq!(model.running_for, running);
+    assert_eq!(format!("{:?}", model.banner), banner, "the boot reveal too");
+    assert_eq!(model.motion().clock(), clock + Duration::from_millis(33));
+
+    update(
+        &mut model,
+        Message::Tick {
+            running_for: Some(Duration::from_millis(180)),
+        },
+    );
+    assert_eq!(model.frame, frame + 1);
+    assert_eq!(
+        model.motion().clock(),
+        clock + Duration::from_millis(33),
+        "a busy tick never moves the motion clock"
+    );
+}
+
+#[test]
+fn motion_holds_still_while_a_prompt_or_confirmation_is_open() {
+    let mut model = moving();
+    update(&mut model, Message::Action(Action::SwitchTheme));
+    assert!(model.is_in_motion());
+    // A prompt can open from an asynchronous answer, with no key to settle
+    // first: the server refusing a password is one.
+    update(
+        &mut model,
+        Message::ConnectionFailed(Box::new(Diagnostic::new(
+            DiagnosticKind::Authentication,
+            "password authentication failed",
+            "connecting",
+        ))),
+    );
+    assert!(model.password_prompt.is_some());
+    assert!(
+        !model.is_in_motion(),
+        "the prompt is painted exactly as it is"
+    );
+
+    let mut reviewing = moving();
+    reviewing.connection_details = true;
+    finish_statement(&mut reviewing, |job| {
+        execution(job, ExecutionStatus::Succeeded, &["x"])
+    });
+    assert!(
+        reviewing.motion().result_settle().is_none(),
+        "nothing starts while the trust surface is open"
+    );
+}

@@ -22,7 +22,37 @@ use crate::query::result::ExecutionStatus;
 use crate::query::statements;
 
 /// Applies a message to the model and returns the effects to perform.
+///
+/// Motion is handled around the reduction rather than inside it, so no arm has
+/// to remember the input rule. Input settles every transition first, so a key
+/// is never delayed or swallowed by one and is still applied in this same
+/// reduction. Afterwards, anywhere motion may not play, or while a surface is
+/// open that must be painted exactly as it is, everything is settled.
 pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
+    if settles_motion(&message) {
+        model.motion.settle();
+    }
+    let effects = reduce(model, message);
+    if !model.allows_motion() || model.holds_motion_still() {
+        model.motion.settle();
+    }
+    effects
+}
+
+/// Whether a message is input that must win over any transition.
+///
+/// A pointer moving without a button is not an intent, so it lets a
+/// transition finish.
+const fn settles_motion(message: &Message) -> bool {
+    match message {
+        Message::Action(_) | Message::InputAtSize { .. } | Message::Pasted(_) => true,
+        Message::Mouse { kind, .. } => !matches!(kind, crate::app::message::MouseKind::Moved),
+        _ => false,
+    }
+}
+
+/// The reduction itself, with no motion bookkeeping.
+fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
     let effects = match message {
         Message::ForConnection {
             generation,
@@ -31,7 +61,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             if model.connection_generation != generation {
                 return Vec::new();
             }
-            update(model, *message)
+            reduce(model, *message)
         }
         Message::Action(action) => {
             model.banner.finish();
@@ -51,7 +81,7 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             let accepting_review = matches!(action, Action::Activate | Action::RunBuffer)
                 && crate::ui::review::active_kind(model).is_some();
             if changed {
-                update(model, Message::Resized(columns, rows));
+                reduce(model, Message::Resized(columns, rows));
             }
             if changed && accepting_review {
                 // The newly observed geometry has not been painted yet. A
@@ -270,6 +300,18 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
             model.pending_update = None;
             let outcome = crate::history::Outcome::from_status(&execution.status);
             let elapsed = execution.elapsed;
+            // Only a complete, successful result settles. A failure, a
+            // cancellation, a lost connection or a limited result keeps its
+            // static colours, because fading any of them toward calm would
+            // soften news that is not calm. A generated cell update leaves the
+            // earlier result on screen, so it has nothing of its own to settle.
+            if model.allows_motion()
+                && execution.status == ExecutionStatus::Succeeded
+                && !execution.any_truncated()
+                && !running_cell_update
+            {
+                model.motion.begin_result_settle(execution.job);
+            }
             if running_cell_update {
                 // A generated UPDATE is a write against the retained result,
                 // not a replacement result. Keep the source snapshot and its
@@ -677,6 +719,12 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
                     model.banner.advance();
                 }
             }
+            Vec::new()
+        }
+        Message::MotionFrame { elapsed } => {
+            // Only the motion clock moves. The spinner frame, the boot reveal
+            // and the mouse clock keep the busy ticker's timing exactly.
+            model.motion.advance(elapsed);
             Vec::new()
         }
         Message::SchemaDiagramLoaded { request, result } => {
@@ -1521,7 +1569,12 @@ fn switch_theme_action(model: &mut Model) -> Vec<Effect> {
         return Vec::new();
     }
     match model.theme_catalog.cycle(&model.presentation.theme) {
-        Ok(theme) => model.presentation.theme = theme,
+        Ok(theme) => {
+            let outgoing = std::mem::replace(&mut model.presentation.theme, theme);
+            if model.allows_motion() {
+                model.motion.begin_theme_curtain(outgoing);
+            }
+        }
         Err(reason) => {
             let diagnostic = crate::diagnostics::Diagnostic::new(
                 crate::diagnostics::DiagnosticKind::Internal,

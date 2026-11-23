@@ -633,6 +633,14 @@ pub enum Message {
         /// How long the statement in flight has been running, when one is.
         running_for: Option<std::time::Duration>,
     },
+    /// A motion frame, sent only while a short transition is active.
+    ///
+    /// It advances the motion clock and nothing else: the spinner frame, the
+    /// boot reveal and the mouse clock still move only with [`Message::Tick`].
+    MotionFrame {
+        /// Time since the previous motion frame, measured by the runtime.
+        elapsed: std::time::Duration,
+    },
     /// The schema ER diagram graph finished loading from pg_catalog.
     SchemaDiagramLoaded {
         /// Which request this answers, so a late answer is discarded.

@@ -676,6 +676,10 @@ async fn event_loop(
     )
     .with_density(config.ui.density);
     model.keymap_snapshot = keymap.snapshot();
+    // The interactive terminal is the only place a transition may play. Models
+    // built anywhere else, by tests or the showcase, stay still and render
+    // settled. Reduced motion, colour and depth still decide per transition.
+    model.motion.enable();
     let configured_providers = crate::cli::auth_providers(&config).unwrap_or_default();
     let providers = crate::connection::cloud::registry(&configured_providers);
     model.connection_profiles =
@@ -753,6 +757,11 @@ async fn event_loop(
     // every animated state reproducible in a test.
     let (activity, activity_rx) = tokio::sync::watch::channel(Some(std::time::Instant::now()));
     spawn_ticker(tx.clone(), activity_rx);
+    // Short transitions get a ticker of their own at about thirty frames a
+    // second, so the busy ticker's 90 ms timing, which the spinner, the boot
+    // reveal and the mouse clock depend on, never changes.
+    let (motion_activity, motion_rx) = tokio::sync::watch::channel(None);
+    spawn_motion_ticker(tx.clone(), motion_rx);
 
     // The connection is opened as an effect like any other, so the interface is
     // drawn and responsive while it happens. When the picker was shown, this
@@ -1483,15 +1492,10 @@ async fn event_loop(
             history.resume();
         }
 
-        // Start and stop the ticker with the animation, so nothing spins while
-        // the client is sitting idle.
-        let animating = model.is_animating();
-        let ticking = activity.borrow().is_some();
-        if animating && !ticking {
-            let _ = activity.send(Some(std::time::Instant::now()));
-        } else if !animating && ticking {
-            let _ = activity.send(None);
-        }
+        // Start and stop each ticker with what it animates, so nothing spins
+        // while the client is sitting idle.
+        sync_ticker(&activity, model.is_busy_animating());
+        sync_ticker(&motion_activity, model.is_in_motion());
 
         draw(&mut terminal, &mut model, &keymap)?;
     }
@@ -1607,6 +1611,58 @@ fn spawn_ticker(
                         return;
                     }
                 }
+            }
+        }
+    });
+}
+
+/// Starts a ticker when its animation begins and stops it when it ends.
+///
+/// The start instant is taken now, so a ticker that was asleep never reports
+/// the time it spent asleep as elapsed.
+fn sync_ticker(activity: &tokio::sync::watch::Sender<Option<std::time::Instant>>, wanted: bool) {
+    let running = activity.borrow().is_some();
+    if wanted && !running {
+        let _ = activity.send(Some(std::time::Instant::now()));
+    } else if !wanted && running {
+        let _ = activity.send(None);
+    }
+}
+
+/// Emits motion frames while a short transition is active.
+///
+/// Each frame carries the time since the previous one, or since the ticker was
+/// woken for the first, so the motion clock only advances while something is
+/// moving. A change to the activity, whether a stop or a fresh start, is
+/// re-read before the next frame is sent.
+fn spawn_motion_ticker(
+    tx: mpsc::UnboundedSender<Message>,
+    mut activity: tokio::sync::watch::Receiver<Option<std::time::Instant>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            let started = *activity.borrow_and_update();
+            let Some(mut last) = started else {
+                if activity.changed().await.is_err() {
+                    return;
+                }
+                continue;
+            };
+            loop {
+                tokio::time::sleep(crate::ui::motion::FRAME_INTERVAL).await;
+                match activity.has_changed() {
+                    Ok(false) => {}
+                    Ok(true) => break,
+                    Err(_) => return,
+                }
+                let now = std::time::Instant::now();
+                let message = Message::MotionFrame {
+                    elapsed: now.saturating_duration_since(last),
+                };
+                if tx.send(message).is_err() {
+                    return;
+                }
+                last = now;
             }
         }
     });

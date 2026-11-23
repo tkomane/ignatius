@@ -3886,6 +3886,10 @@ pub struct Model {
     pub running_for: Option<Duration>,
     /// When true, indicators are drawn as static text.
     pub reduced_motion: bool,
+    /// The motion clock and the short transitions that decorate a state
+    /// change. Only the reducer changes it; widgets read it through
+    /// [`Model::motion`].
+    pub(crate) motion: crate::ui::motion::Motion,
     /// Whether the result pane shows one row down the screen instead of a grid.
     ///
     /// A preference, not a property of a result: it survives a new query,
@@ -4073,10 +4077,69 @@ impl Model {
 
     /// Whether anything is currently worth animating.
     ///
-    /// The runtime uses this to stop ticking, so an idle client wakes nothing.
+    /// The runtime uses the two halves of this to stop each ticker, so an idle
+    /// client wakes nothing.
     #[must_use]
     pub const fn is_animating(&self) -> bool {
+        self.is_busy_animating() || self.is_in_motion()
+    }
+
+    /// Whether a busy indicator is on screen: the spinner and meter of a
+    /// running statement, or the boot reveal while connecting.
+    ///
+    /// These are driven by the 90 ms ticker, whose timing the spinner speed,
+    /// the boot reveal and the mouse clock depend on.
+    #[must_use]
+    pub const fn is_busy_animating(&self) -> bool {
         self.phase.is_busy() || matches!(self.connection, ConnectionState::Connecting { .. })
+    }
+
+    /// Whether a short transition is active, which the runtime drives with
+    /// motion frames at about thirty a second until it settles.
+    #[must_use]
+    pub const fn is_in_motion(&self) -> bool {
+        self.motion.is_active()
+    }
+
+    /// The motion clock and active transitions, for widgets to read.
+    #[must_use]
+    pub const fn motion(&self) -> &crate::ui::motion::Motion {
+        &self.motion
+    }
+
+    /// Whether a transition may start now.
+    ///
+    /// Motion plays only in the interactive terminal, and never under reduced
+    /// motion, with ASCII glyphs, with colour off, or at 16 colours, where
+    /// every transition would show its final state immediately anyway.
+    #[must_use]
+    pub fn allows_motion(&self) -> bool {
+        let theme = &self.presentation.theme;
+        self.motion.is_enabled()
+            && !self.reduced_motion
+            && !self.presentation.reduced_motion
+            && !self.presentation.glyphs.is_ascii()
+            && theme.color
+            && theme.depth.shows_transitions()
+    }
+
+    /// Whether a surface is open that must be painted exactly as it is.
+    ///
+    /// Confirmations, reviews, prompts, the password prompt and the connection
+    /// trust surface are where paint-before-accept matters, so while one of
+    /// them is open every transition is settled and none starts. Each is named
+    /// here rather than inferred, so a new one is a deliberate addition.
+    #[must_use]
+    pub const fn holds_motion_still(&self) -> bool {
+        self.password_prompt.is_some()
+            || self.parameter_prompt.is_some()
+            || self.name_prompt.is_some()
+            || self.connection_details
+            || self.pending_run.is_some()
+            || self.pending_plan.is_some()
+            || self.pending_copy.is_some()
+            || self.update_prompt.is_some()
+            || self.pending_update.is_some()
     }
 
     /// Advances the pure monotonic mouse clock by `elapsed`.
