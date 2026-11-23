@@ -1259,8 +1259,230 @@ fn viewport_matrix_100x30_80x24_60x20_30x6_and_live_resize_preserve_meaning() {
 
 const SHOWCASE_AREA: Rect = Rect::new(0, 0, 124, 34);
 
+/// The SQL every showcase workbench has just run.
+const SHOWCASE_SQL: &str = "-- Inspect active customer orders and NULL distinction\n\
+     SELECT id, customer, status, amount_cents, notes\n\
+     FROM public.orders\n\
+     WHERE status IN ('paid', 'pending')\n\
+     ORDER BY id ASC;";
+
+/// The same statement on one line, as the reviewed-update source.
+const SHOWCASE_SOURCE_SQL: &str = "SELECT id, customer, status, amount_cents, notes FROM public.orders WHERE status IN ('paid', 'pending') ORDER BY id ASC;";
+
+/// The columns of `public.orders`, in catalogue order.
+const SHOWCASE_ORDER_COLUMNS: [(&str, &str, bool); 5] = [
+    ("id", "integer", false),
+    ("customer", "text", false),
+    ("status", "text", false),
+    ("amount_cents", "integer", false),
+    ("notes", "text", true),
+];
+
+/// Synthetic rows in server order (`ORDER BY id`): every status is one the
+/// statement's `WHERE` admits, and the ids skip the rows it filtered out.
+/// The notes keep SQL NULL, an empty string and the literal text `NULL`
+/// apart, and each of them sorts into the visible window by amount.
+const SHOWCASE_ORDER_ROWS: [(&str, &str, &str, &str, Option<&str>); 14] = [
+    (
+        "1",
+        "Ada Lovelace",
+        "paid",
+        "14500",
+        Some("priority tier 1"),
+    ),
+    ("2", "Grace Hopper", "paid", "28900", None),
+    ("4", "Edsger Dijkstra", "pending", "19200", Some("")),
+    ("5", "Barbara Liskov", "paid", "51000", Some("NULL")),
+    (
+        "7",
+        "Alan Turing",
+        "paid",
+        "128000",
+        Some("invoice by email"),
+    ),
+    ("8", "Katherine Johnson", "pending", "7350", None),
+    ("9", "Donald Knuth", "paid", "64200", Some("gift wrap")),
+    (
+        "11",
+        "Margaret Hamilton",
+        "paid",
+        "89900",
+        Some("split shipment"),
+    ),
+    ("12", "John Backus", "pending", "3999", None),
+    (
+        "14",
+        "Frances Allen",
+        "paid",
+        "45600",
+        Some("call before delivery"),
+    ),
+    (
+        "15",
+        "Ken Thompson",
+        "pending",
+        "18750",
+        Some("net 30 terms"),
+    ),
+    ("17", "Radia Perlman", "paid", "33300", None),
+    ("18", "Tony Hoare", "paid", "2100", Some("sample order")),
+    (
+        "20",
+        "Shafi Goldwasser",
+        "pending",
+        "11000",
+        Some("repeat customer"),
+    ),
+];
+
+fn showcase_order_columns() -> Vec<crate::postgres::ColumnInfo> {
+    SHOWCASE_ORDER_COLUMNS
+        .into_iter()
+        .map(|(name, data_type, nullable)| crate::postgres::ColumnInfo {
+            name: name.into(),
+            data_type: data_type.into(),
+            nullable,
+            primary_key: name == "id",
+            default: None,
+        })
+        .collect()
+}
+
+/// The result of [`SHOWCASE_SQL`], in server order.
+fn showcase_result_set() -> ResultSet {
+    let mut set = ResultSet::new(
+        SHOWCASE_ORDER_COLUMNS
+            .iter()
+            .map(|(name, _, _)| (*name).to_owned())
+            .collect(),
+        100,
+    );
+    for (id, customer, status, amount, notes) in SHOWCASE_ORDER_ROWS {
+        assert!(set.push(vec![
+            Cell::Text(id.into()),
+            Cell::Text(customer.into()),
+            Cell::Text(status.into()),
+            Cell::Text(amount.into()),
+            notes.map_or(Cell::Null, |notes| Cell::Text(notes.into())),
+        ]));
+    }
+    set
+}
+
+/// A successful execution of [`SHOWCASE_SQL`] as the session reports it.
+fn showcase_execution(job: JobId, elapsed: Duration) -> Execution {
+    Execution {
+        notice_report: NoticeReport::default(),
+        job,
+        statements: vec![StatementResult {
+            result_set: Some(showcase_result_set()),
+            rows_affected: Some(SHOWCASE_ORDER_ROWS.len() as u64),
+            elapsed,
+            notices: Vec::new(),
+        }],
+        status: ExecutionStatus::Succeeded,
+        elapsed,
+        error: None,
+        transaction: TransactionState::Autocommit,
+    }
+}
+
+/// The completion catalogue snapshot, consistent with the Objects tree and
+/// shaped the way `postgres::metadata::completion_catalog` builds it:
+/// relations carry no detail, functions carry `returns ...`.
+fn showcase_completion_catalog() -> crate::query::completion::CompletionCatalog {
+    use crate::query::completion::{
+        CatalogColumn, CatalogObject, CatalogObjectKind, CatalogRelation, CompletionCatalog,
+    };
+
+    let object = |kind, schema: &str, name: &str, detail: Option<&str>| CatalogObject {
+        kind,
+        schema: schema.into(),
+        name: name.into(),
+        readable: true,
+        detail: detail.map(str::to_owned),
+    };
+    let relation = |schema: &str, name: &str, columns: &[(&str, &str)]| CatalogRelation {
+        schema: schema.into(),
+        name: name.into(),
+        columns: columns
+            .iter()
+            .map(|(name, data_type)| CatalogColumn {
+                name: (*name).into(),
+                data_type: (*data_type).into(),
+            })
+            .collect(),
+    };
+    let order_columns = SHOWCASE_ORDER_COLUMNS
+        .iter()
+        .map(|(name, data_type, _)| (*name, *data_type))
+        .collect::<Vec<_>>();
+    CompletionCatalog {
+        objects: vec![
+            object(CatalogObjectKind::Table, "public", "customers", None),
+            object(CatalogObjectKind::Table, "public", "orders", None),
+            object(CatalogObjectKind::Table, "public", "rendering_cases", None),
+            object(CatalogObjectKind::Table, "public", "type_coverage", None),
+            object(CatalogObjectKind::View, "public", "recent_orders", None),
+            object(CatalogObjectKind::View, "reporting", "order_totals", None),
+            object(
+                CatalogObjectKind::Function,
+                "public",
+                "customer_region",
+                Some("returns text"),
+            ),
+            object(
+                CatalogObjectKind::Function,
+                "public",
+                "first_order_date",
+                Some("returns date"),
+            ),
+        ],
+        relations: vec![
+            relation(
+                "public",
+                "customers",
+                &[("id", "integer"), ("name", "text"), ("region", "text")],
+            ),
+            relation("public", "orders", &order_columns),
+            relation(
+                "public",
+                "rendering_cases",
+                &[("label", "text"), ("value", "text")],
+            ),
+            relation(
+                "public",
+                "type_coverage",
+                &[
+                    ("as_int", "integer"),
+                    ("as_json", "jsonb"),
+                    ("as_ts", "timestamp with time zone"),
+                ],
+            ),
+            relation(
+                "public",
+                "recent_orders",
+                &[
+                    ("id", "integer"),
+                    ("customer", "text"),
+                    ("amount_cents", "integer"),
+                ],
+            ),
+            relation(
+                "reporting",
+                "order_totals",
+                &[
+                    ("region", "text"),
+                    ("orders", "bigint"),
+                    ("total_cents", "bigint"),
+                ],
+            ),
+        ],
+    }
+}
+
 fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
-    use crate::postgres::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary};
+    use crate::postgres::{ObjectKind, ObjectSummary, SchemaSummary};
 
     let mut model = Model::new(100);
     model.size = (SHOWCASE_AREA.width, SHOWCASE_AREA.height);
@@ -1307,74 +1529,36 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
     model.tree.set_schemas(schemas);
     model.tree.expand_schema(&[0]);
 
-    // Expand Table group under public ([0, 0])
+    // Expand the table group under public ([0, 0]). Production lists the
+    // relations by name and gives each its comment as the detail.
     model.tree.selected = 1;
     let (req, path, _) = model.tree.expand_selected().expect("expand table group");
+    let table = |name: &str, comment: Option<&str>| ObjectSummary {
+        schema: "public".into(),
+        name: name.into(),
+        kind: ObjectKind::Table,
+        readable: true,
+        detail: comment.map(str::to_owned),
+    };
     model.tree.apply(
         req,
         &path,
         crate::app::tree::MetadataPayload::Objects(vec![
-            ObjectSummary {
-                schema: "public".into(),
-                name: "orders".into(),
-                kind: ObjectKind::Table,
-                readable: true,
-                detail: Some("4 rows".into()),
-            },
-            ObjectSummary {
-                schema: "public".into(),
-                name: "rendering_cases".into(),
-                kind: ObjectKind::Table,
-                readable: true,
-                detail: Some("3 rows".into()),
-            },
-            ObjectSummary {
-                schema: "public".into(),
-                name: "type_coverage".into(),
-                kind: ObjectKind::Table,
-                readable: true,
-                detail: Some("2 rows".into()),
-            },
+            table("customers", None),
+            table("orders", Some("sales ledger")),
+            table("rendering_cases", None),
+            table("type_coverage", None),
         ]),
     );
 
-    // Expand orders table columns ([0, 0, 0])
-    model.tree.selected = 2;
+    // Expand the orders table ([0, 0, 1]): its columns and its index.
+    model.tree.selected = 3;
     let (req_cols, path_cols, _) = model.tree.expand_selected().expect("expand orders table");
     model.tree.apply(
         req_cols,
         &path_cols,
         crate::app::tree::MetadataPayload::Relation {
-            columns: vec![
-                ColumnInfo {
-                    name: "id".into(),
-                    data_type: "integer".into(),
-                    nullable: false,
-                    primary_key: true,
-                    default: None,
-                },
-                ColumnInfo {
-                    name: "customer".into(),
-                    data_type: "text".into(),
-                    nullable: false,
-                    primary_key: false,
-                    default: None,
-                },
-                ColumnInfo {
-                    name: "status".into(),
-                    data_type: "text".into(),
-                    nullable: false,
-                    primary_key: false,
-                    default: None,
-                },
-                ColumnInfo {
-                    name: "amount_cents".into(),
-                    data_type: "integer".into(),
-                    nullable: false,
-                    primary_key: false,
-                    default: None,
-                },
-            ],
+            columns: showcase_order_columns(),
             indexes: vec![ObjectSummary {
                 kind: ObjectKind::Index,
                 schema: "public".into(),
@@ -1384,72 +1568,26 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
             }],
         },
     );
-    model.tree.selected = 2;
+    model.tree.selected = 3;
 
-    model.editor.set_text(
-        "-- Inspect active customer orders and NULL distinction\n\
-         SELECT id, customer, status, amount_cents, notes\n\
-         FROM public.orders\n\
-         WHERE status IN ('paid', 'pending')\n\
-         ORDER BY id ASC;",
-    );
+    // The completion snapshot is loaded with the tree, so neither the
+    // completion menu nor a diagnostic says it is missing.
+    model.completion.catalog = crate::app::completion::CatalogStatus::Ready {
+        catalog: showcase_completion_catalog(),
+        loaded_at: "2026-11-23 09:41:07 +02:00".into(),
+    };
+
+    model.editor.set_text(SHOWCASE_SQL);
     model.editor.set_cursor(62);
 
-    let mut set = ResultSet::new(
-        vec![
-            "id".into(),
-            "customer".into(),
-            "status".into(),
-            "amount_cents".into(),
-            "notes".into(),
-        ],
-        100,
-    );
-    assert!(set.push(vec![
-        Cell::Text("1".into()),
-        Cell::Text("Ada Lovelace".into()),
-        Cell::Text("paid".into()),
-        Cell::Text("14500".into()),
-        Cell::Text("priority tier 1".into()),
-    ]));
-    assert!(set.push(vec![
-        Cell::Text("2".into()),
-        Cell::Text("Grace Hopper".into()),
-        Cell::Text("paid".into()),
-        Cell::Text("28900".into()),
-        Cell::Null,
-    ]));
-    assert!(set.push(vec![
-        Cell::Text("3".into()),
-        Cell::Text("Edsger Dijkstra".into()),
-        Cell::Text("pending".into()),
-        Cell::Text("9200".into()),
-        Cell::Text("".into()),
-    ]));
-    assert!(set.push(vec![
-        Cell::Text("4".into()),
-        Cell::Text("Barbara Liskov".into()),
-        Cell::Text("paid".into()),
-        Cell::Text("51000".into()),
-        Cell::Text("NULL".into()),
-    ]));
-    model.last_execution = Some(Execution {
-        notice_report: NoticeReport::default(),
-        job: JobId(1),
-        statements: vec![StatementResult {
-            result_set: Some(set),
-            rows_affected: Some(4),
-            elapsed: Duration::from_millis(240),
-            notices: Vec::new(),
-        }],
-        status: ExecutionStatus::Succeeded,
-        elapsed: Duration::from_millis(240),
-        error: None,
-        transaction: TransactionState::Autocommit,
-    });
+    model.last_execution = Some(showcase_execution(JobId(1), Duration::from_millis(240)));
     model.last_elapsed = Some(Duration::from_millis(240));
     model.result_grid.reset_view();
-    model.result_grid.toggle_sort(0);
+    // A local sort on the amount, largest first, rather than repeating the
+    // server's ORDER BY id. The selected column is the one being sorted.
+    model.result_grid.toggle_sort(3);
+    model.result_grid.toggle_sort(3);
+    model.selected_column = 3;
 
     model
 }
@@ -1458,6 +1596,23 @@ fn render_showcase(model: &Model) -> Buffer {
     let mut buf = Buffer::empty(SHOWCASE_AREA);
     crate::ui::render(model, &Keymap::new(), SHOWCASE_AREA, &mut buf);
     buf
+}
+
+/// Runs the editor buffer through the reducer and returns the job it started.
+fn showcase_run(model: &mut Model, sql: &str) -> JobId {
+    let effects = update(model, Message::Action(Action::RunBuffer));
+    let job = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Execute { job, sql: sent } => {
+                assert_eq!(sent.trim(), sql.trim(), "the buffer is what runs");
+                Some(*job)
+            }
+            _ => None,
+        })
+        .expect("running the buffer starts a job");
+    assert!(model.phase.is_busy(), "the statement is in flight");
+    job
 }
 
 fn showcase_development_model(theme_choice: ThemeChoice) -> Model {
@@ -1494,8 +1649,8 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         writer.as_mut(),
         &field,
         "workbench-field-industrial",
-        "Field Industrial",
-        "Workbench with a populated results grid",
+        "field-industrial",
+        "The workbench in the field-industrial theme, with a populated result grid",
         &["[DEV]", "Ada Lovelace", "[null]"],
     );
     let mut material = showcase_development_model(ThemeChoice::Material);
@@ -1505,8 +1660,8 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         writer.as_mut(),
         &material,
         "workbench-material",
-        "Material 3 Tonal",
-        "Workbench before the first query",
+        "material",
+        "The workbench in the material theme before the first query",
         &["[DEV]", "No query has run yet.", "SQL is ready to run."],
     );
     let atelier = showcase_base_model(ThemeChoice::Atelier);
@@ -1514,8 +1669,8 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         writer.as_mut(),
         &atelier,
         "workbench-atelier",
-        "Atelier Editorial Dark",
-        "Obsidian-espresso editorial palette with terracotta and gold accents",
+        "atelier",
+        "The workbench in the atelier theme, a warm dark editorial palette",
         &["[PROD]", "Ada Lovelace", "[null]"],
     );
     let paper = showcase_development_model(ThemeChoice::Paper);
@@ -1523,8 +1678,8 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         writer.as_mut(),
         &paper,
         "workbench-paper",
-        "Archival Rag Paper",
-        "Warm editorial paper palette with Sienna and Prussian ink accents",
+        "paper",
+        "The workbench in the paper theme, a warm light editorial palette",
         &["[DEV]", "Ada Lovelace", "[null]"],
     );
 }
@@ -1535,8 +1690,8 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
 
     let mut model = showcase_development_model(ThemeChoice::Material);
     model.editor.set_text(
-        "SELECT order_id FROM public.orders WHERE total >= 100;\n\
-         SELECT order_id FROM public.orders WHERE 100 <= total;",
+        "SELECT id FROM public.orders WHERE amount_cents >= 10000;\n\
+         SELECT id FROM public.orders WHERE 10000 <= amount_cents;",
     );
     model.editor.set_cursor(0);
     let effects = update(&mut model, Message::Action(Action::QueryBench));
@@ -1567,7 +1722,7 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
             .map(|(duration_ms, iteration)| BenchSample {
                 iteration,
                 duration_ms,
-                rows_returned: 10,
+                rows_returned: 12,
             })
             .collect::<Vec<_>>();
         let stats = compute_bench_stats(name, &sql, &config, &samples);
@@ -1584,8 +1739,8 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
         writer,
         &model,
         "query-bench",
-        "Query Benchmarks",
-        "A/B latency summary in rollback mode",
+        "Benchmark",
+        "An A/B latency summary of two statements in rollback mode",
         &[
             "[BENCHMARK]",
             "[MODE: ROLLBACK]",
@@ -1597,40 +1752,112 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
 }
 
 fn showcase_snapshot_scene(writer: Option<&mut impl Write>) {
-    use crate::snapshot::{ColumnSnapshot, SchemaSnapshot, TableSnapshot};
+    use crate::snapshot::{
+        ColumnSnapshot, ConstraintSnapshot, IndexSnapshot, SchemaSnapshot, TableSnapshot,
+        ViewSnapshot, sha256_hex,
+    };
 
+    // The current catalogue is the one the Objects tree shows. The pinned
+    // baseline is the same catalogue from before `legacy_note` became
+    // `notes`, so the drift is one dropped and one added column.
     let mut model = showcase_development_model(ThemeChoice::FieldIndustrial);
+    let table = |name: &str, columns: &[(&str, &str, bool)], key: Option<&str>| {
+        let primary = key.map(|key| format!("{name}_pkey ({key})"));
+        TableSnapshot {
+            schema: "public".into(),
+            name: name.into(),
+            columns: columns
+                .iter()
+                .zip(1..)
+                .map(|((column, data_type, nullable), ordinal)| ColumnSnapshot {
+                    name: (*column).into(),
+                    data_type: (*data_type).into(),
+                    nullable: *nullable,
+                    default_expr: None,
+                    ordinal,
+                })
+                .collect(),
+            constraints: key
+                .map(|key| ConstraintSnapshot {
+                    name: format!("{name}_pkey"),
+                    kind: "PRIMARY KEY".into(),
+                    definition: format!("PRIMARY KEY ({key})"),
+                })
+                .into_iter()
+                .collect(),
+            indexes: primary
+                .map(|_| IndexSnapshot {
+                    name: format!("{name}_pkey"),
+                    is_unique: true,
+                    is_primary: true,
+                    definition: format!(
+                        "CREATE UNIQUE INDEX {name}_pkey ON public.{name} USING btree ({})",
+                        key.unwrap_or_default()
+                    ),
+                })
+                .into_iter()
+                .collect(),
+            rls_enabled: false,
+            rls_forced: false,
+            policies: vec![],
+        }
+    };
+    let view = |schema: &str, name: &str, definition: &str| ViewSnapshot {
+        schema: schema.into(),
+        name: name.into(),
+        materialized: false,
+        definition_sha256: sha256_hex(definition.as_bytes()),
+    };
     let mut snapshot = SchemaSnapshot::new(None);
-    snapshot.tables.push(TableSnapshot {
-        schema: "public".into(),
-        name: "orders".into(),
-        columns: vec![
-            ColumnSnapshot {
-                name: "order_id".into(),
-                data_type: "bigint".into(),
-                nullable: false,
-                default_expr: None,
-                ordinal: 1,
-            },
-            ColumnSnapshot {
-                name: "legacy_note".into(),
-                data_type: "text".into(),
-                nullable: true,
-                default_expr: None,
-                ordinal: 2,
-            },
-        ],
-        constraints: vec![],
-        indexes: vec![],
-        rls_enabled: false,
-        rls_forced: false,
-        policies: vec![],
-    });
-    let baseline = snapshot.clone().finalize();
-    snapshot.tables[0].columns[1].name = "delivery_note".into();
+    snapshot.tables = vec![
+        table(
+            "customers",
+            &[
+                ("id", "integer", false),
+                ("name", "text", false),
+                ("region", "text", true),
+            ],
+            Some("id"),
+        ),
+        table("orders", &SHOWCASE_ORDER_COLUMNS, Some("id")),
+        table(
+            "rendering_cases",
+            &[("label", "text", false), ("value", "text", true)],
+            Some("label"),
+        ),
+        table(
+            "type_coverage",
+            &[
+                ("as_int", "integer", true),
+                ("as_json", "jsonb", true),
+                ("as_ts", "timestamp with time zone", true),
+            ],
+            None,
+        ),
+    ];
+    snapshot.views = vec![
+        view(
+            "public",
+            "recent_orders",
+            " SELECT id, customer, amount_cents FROM orders;",
+        ),
+        view(
+            "reporting",
+            "order_totals",
+            " SELECT region, count(*) AS orders, sum(amount_cents) AS total_cents FROM orders;",
+        ),
+    ];
+    let current = snapshot.clone().finalize();
+    let notes = snapshot.tables[1]
+        .columns
+        .iter_mut()
+        .find(|column| column.name == "notes")
+        .expect("orders has notes");
+    notes.name = "legacy_note".into();
+    let baseline = snapshot.finalize();
     for (action, capture) in [
         (Action::SchemaSnapshot, baseline),
-        (Action::Insert('r'), snapshot.finalize()),
+        (Action::Insert('r'), current),
     ] {
         let pin_baseline = action == Action::SchemaSnapshot;
         let effects = update(&mut model, Message::Action(action));
@@ -1652,8 +1879,8 @@ fn showcase_snapshot_scene(writer: Option<&mut impl Write>) {
         writer,
         &model,
         "schema-snapshot",
-        "Schema Snapshot & Drift",
-        "Catalog fingerprint and changes against a pinned baseline",
+        "Schema snapshot",
+        "A catalogue fingerprint and its drift against a pinned baseline",
         &[
             "[SNAPSHOT v1]",
             "[SHA256:",
@@ -1667,7 +1894,7 @@ fn showcase_runbook_scene(writer: Option<&mut impl Write>) {
     let mut model = showcase_development_model(ThemeChoice::Material);
     model.editor.set_text(
         "-- @cell check-orders\nSELECT count(*) FROM public.orders;\n\
-         -- @cell annotate-order\nUPDATE public.orders SET note = 'reviewed' WHERE order_id = 1;",
+         -- @cell annotate-order\nUPDATE public.orders SET notes = 'reviewed' WHERE id = 1;",
     );
     update(&mut model, Message::Action(Action::SqlRunbook));
     update(&mut model, Message::Action(Action::Insert('2')));
@@ -1675,20 +1902,17 @@ fn showcase_runbook_scene(writer: Option<&mut impl Write>) {
         writer,
         &model,
         "sql-runbook",
-        "SQL Runbook",
-        "Safety dry-run with the write cell blocked",
+        "Runbook",
+        "A runbook dry run with the write cell blocked",
         &["[RUNBOOK]", "[WRITES: BLOCKED]", "planned=1", "blocked=1"],
     );
 }
 
 #[test]
 fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
-    use crate::app::completion::CompletionMenu;
     use crate::app::palette::{Palette, PaletteCommand, PaletteEntry};
-    use crate::postgres::{ColumnInfo, ObjectKind};
-    use crate::query::completion::{
-        Candidate, CandidateKind, CatalogObjectKind, CompletionResult, CompletionScope,
-    };
+    use crate::postgres::ObjectKind;
+    use crate::query::completion::CompletionScope;
 
     let capture_path =
         std::env::var_os("IGNATIUS_SHOWCASE_CAPTURE_DIR").map(std::path::PathBuf::from);
@@ -1717,8 +1941,8 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     );
     assert!(text.contains("[null]"), "overview contains [null]");
     assert!(
-        text.contains("sorted by id"),
-        "overview contains sorted by id"
+        text.contains("sorted by amount_cents descending"),
+        "overview contains sorted by amount_cents descending"
     );
     if let Some(ref mut w) = writer {
         capture_showcase_scene(
@@ -1726,72 +1950,34 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             &buf,
             SHOWCASE_AREA,
             "workbench-overview",
-            "Interactive PostgreSQL Workbench",
-            "Connected workbench with object tree, editor, and result grid",
+            "Workbench",
+            "The connected workbench with the Objects tree, the editor and a sorted result grid",
         );
     }
 
-    // 2. "completion-menu"
+    // 2. "completion-menu": production completion at a real cursor, so the
+    // candidates, their order and their details are exactly what the menu
+    // offers after `FROM` in a statement that defines a CTE.
     let mut model = showcase_base_model(ThemeChoice::Dark);
-    let candidates = vec![
-        Candidate {
-            label: "orders".into(),
-            insert_text: "orders".into(),
-            kind: CandidateKind::Object(CatalogObjectKind::Table),
-            schema: Some("public".into()),
-            source: None,
-            detail: Some("table (4 columns)".into()),
-        },
-        Candidate {
-            label: "recent_orders".into(),
-            insert_text: "recent_orders".into(),
-            kind: CandidateKind::Object(CatalogObjectKind::View),
-            schema: Some("reporting".into()),
-            source: None,
-            detail: Some("view".into()),
-        },
-        Candidate {
-            label: "amount_cents".into(),
-            insert_text: "amount_cents".into(),
-            kind: CandidateKind::Column,
-            schema: None,
-            source: Some("orders".into()),
-            detail: Some("integer".into()),
-        },
-        Candidate {
-            label: "coalesce".into(),
-            insert_text: "coalesce".into(),
-            kind: CandidateKind::Object(CatalogObjectKind::Function),
-            schema: Some("pg_catalog".into()),
-            source: None,
-            detail: Some("function".into()),
-        },
-        Candidate {
-            label: "active_orders".into(),
-            insert_text: "active_orders".into(),
-            kind: CandidateKind::Cte,
-            schema: None,
-            source: None,
-            detail: Some("CTE".into()),
-        },
-        Candidate {
-            label: "WHERE".into(),
-            insert_text: "WHERE".into(),
-            kind: CandidateKind::Keyword,
-            schema: None,
-            source: None,
-            detail: None,
-        },
-    ];
-    let result = CompletionResult {
-        replacement: 0..0,
-        prefix: String::new(),
-        scope: CompletionScope::Mixed,
-        candidates,
-        matching_count: 6,
-        total_count: 18,
-    };
-    model.completion.menu = Some(CompletionMenu::new(result, true));
+    model.editor.set_text(
+        "-- Pending orders by customer\n\
+         WITH active_orders AS (\n\
+         \x20   SELECT id, customer, amount_cents\n\
+         \x20   FROM public.orders\n\
+         \x20   WHERE status = 'pending'\n\
+         )\n\
+         SELECT customer, amount_cents\n\
+         FROM ",
+    );
+    let end = model.editor.text().len();
+    model.editor.set_cursor(end);
+    assert!(update(&mut model, Message::Action(Action::Complete)).is_empty());
+    let menu = model
+        .completion
+        .menu
+        .as_ref()
+        .expect("explicit completion opens");
+    assert_eq!(menu.result.scope, CompletionScope::Relations);
     let buf = render_showcase(&model);
     let text = buffer_to_string(&buf);
     assert!(
@@ -1803,8 +1989,16 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
         "completion menu contains orders candidate"
     );
     assert!(
-        text.contains("coalesce"),
-        "completion menu contains coalesce candidate"
+        text.contains("first_order_date"),
+        "completion menu contains a function candidate"
+    );
+    assert!(
+        text.contains("defined in this statement"),
+        "completion menu describes the CTE as production does"
+    );
+    assert!(
+        !text.contains("not loaded yet"),
+        "completion menu does not deny the loaded catalogue"
     );
     if let Some(ref mut w) = writer {
         capture_showcase_scene(
@@ -1812,8 +2006,8 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             &buf,
             SHOWCASE_AREA,
             "completion-menu",
-            "Context-Aware Autocompletion",
-            "Inline completion menu with table, view, column, and keyword candidates",
+            "Completion",
+            "Completion at a relation position: a CTE, tables, views, functions and keywords",
         );
     }
 
@@ -1822,24 +2016,40 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     let entries = vec![
         PaletteEntry {
             label: "revenue_by_region".into(),
-            detail: "SELECT region, COUNT(*) AS orders, SUM(amount_cents) AS total_cents\n\
-                     FROM reporting.order_totals\n\
-                     WHERE placed_at >= CURRENT_DATE - INTERVAL '30 days'\n\
-                     GROUP BY region\n\
-                     ORDER BY total_cents DESC;"
-                .into(),
+            detail: [
+                "SELECT c.region,",
+                "       count(*) AS orders,",
+                "       sum(o.amount_cents) AS total_cents",
+                "FROM public.orders o",
+                "JOIN public.customers c ON c.name = o.customer",
+                "WHERE o.status = 'paid'",
+                "GROUP BY c.region",
+                "ORDER BY total_cents DESC;",
+            ]
+            .join("\n"),
             group: "saved",
             command: PaletteCommand::Open("revenue_by_region".into()),
         },
         PaletteEntry {
             label: "active_customer_orders".into(),
-            detail: "SELECT * FROM public.orders WHERE status IN ('paid', 'pending');".into(),
+            detail: [
+                "SELECT id, customer, amount_cents",
+                "FROM public.orders",
+                "WHERE status IN ('paid', 'pending')",
+                "ORDER BY id;",
+            ]
+            .join("\n"),
             group: "saved",
             command: PaletteCommand::Open("active_customer_orders".into()),
         },
         PaletteEntry {
             label: "null_audit_report".into(),
-            detail: "SELECT * FROM synthetic_values WHERE note = 'NULL';".into(),
+            detail: [
+                "SELECT label, value",
+                "FROM public.rendering_cases",
+                "WHERE value IS NULL OR value IN ('', 'NULL');",
+            ]
+            .join("\n"),
             group: "saved",
             command: PaletteCommand::Open("null_audit_report".into()),
         },
@@ -1865,53 +2075,72 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             &buf,
             SHOWCASE_AREA,
             "palette-preview",
-            "Command Palette with Saved Query Preview",
-            "Command and query palette with live SQL preview pane",
+            "Saved queries",
+            "The palette over saved queries, with the selected query's SQL previewed",
         );
     }
 
-    // 4. "plan-explorer"
+    // 4. "plan-explorer": the editor holds the statement the plan is for,
+    // and the plan is self-consistent: a nested loop probing an index once
+    // per outer row, where every parent's measured time covers its children.
     let mut model = showcase_base_model(ThemeChoice::Dark);
+    model.editor.set_text(
+        [
+            "-- Paid orders with their customer's region",
+            "SELECT o.id, c.name, c.region, o.amount_cents",
+            "FROM public.orders o",
+            "JOIN public.customers c ON c.name = o.customer",
+            "WHERE o.status = 'paid';",
+        ]
+        .join("\n"),
+    );
+    model.editor.set_cursor(50);
     model.focus = Focus::Results;
     let plan_json = r#"[
   {
     "Plan": {
-      "Node Type": "Hash Join",
-      "Startup Cost": 12.5,
-      "Total Cost": 45.2,
+      "Node Type": "Nested Loop",
+      "Join Type": "Inner",
+      "Startup Cost": 0.28,
+      "Total Cost": 47.9,
       "Plan Rows": 10,
-      "Actual Startup Time": 0.4,
-      "Actual Total Time": 15.2,
+      "Actual Startup Time": 0.05,
+      "Actual Total Time": 11.8,
       "Actual Rows": 420,
       "Actual Loops": 1,
       "Plans": [
         {
           "Node Type": "Seq Scan",
           "Relation Name": "orders",
+          "Alias": "o",
           "Startup Cost": 0.0,
-          "Total Cost": 25.0,
+          "Total Cost": 25.5,
           "Plan Rows": 10,
-          "Actual Startup Time": 0.1,
-          "Actual Total Time": 8.5,
+          "Actual Startup Time": 0.01,
+          "Actual Total Time": 2.9,
           "Actual Rows": 420,
-          "Actual Loops": 1
+          "Actual Loops": 1,
+          "Filter": "(status = 'paid'::text)",
+          "Rows Removed by Filter": 180
         },
         {
           "Node Type": "Index Scan",
           "Relation Name": "customers",
-          "Index Name": "customers_pkey",
-          "Startup Cost": 0.2,
-          "Total Cost": 8.3,
+          "Alias": "c",
+          "Index Name": "customers_name_key",
+          "Index Cond": "(name = o.customer)",
+          "Startup Cost": 0.28,
+          "Total Cost": 2.2,
           "Plan Rows": 1,
-          "Actual Startup Time": 0.05,
-          "Actual Total Time": 0.1,
+          "Actual Startup Time": 0.015,
+          "Actual Total Time": 0.018,
           "Actual Rows": 1,
           "Actual Loops": 420
         }
       ]
     },
-    "Planning Time": 0.42,
-    "Execution Time": 16.1
+    "Planning Time": 0.38,
+    "Execution Time": 12.3
   }
 ]"#;
     let doc = PlanDocument::parse(plan_json, true).expect("valid plan");
@@ -1937,59 +2166,55 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             &buf,
             SHOWCASE_AREA,
             "plan-explorer",
-            "EXPLAIN ANALYZE Plan Explorer",
-            "Visual execution plan tree with attention marker and row estimate mismatch",
+            "Query plan",
+            "An EXPLAIN ANALYZE plan tree with an attention marker on a row estimate mismatch",
         );
     }
 
-    // 5. "error-diagnostics"
+    // 5. "error-diagnostics": the statement runs through the reducer and
+    // fails the way `postgres::error::from_query_error` reports an undefined
+    // column: the server's message, position, SQLSTATE and severity, and the
+    // product's own advice for 42703. PostgreSQL attaches no schema, table or
+    // column fields to 42703, so production shows no `Object context:` row
+    // (and no `Catalogue:` row, which only follows it) for this error. That
+    // row is covered with server-supplied fields in `results/tests.rs`.
     let mut model = showcase_base_model(ThemeChoice::Dark);
-    model
-        .editor
-        .set_text("SELECT id, custmer_id, amount_cents FROM public.orders WHERE status = 'paid';");
-    model.editor.set_cursor(11);
-    model.error_location = Some(crate::query::error_location::ErrorLocation {
-        cursor: 11,
-        token: Some(11..21),
-        line: 1,
-        column: 12,
-        statement_number: 1,
-        character: 11,
-    });
-    model.error_expanded = true;
-    model.focus = Focus::Results;
-    let mut error = Diagnostic::new(
+    let sql = "SELECT id, custmer_id, amount_cents FROM public.orders WHERE status = 'paid';";
+    model.editor.set_text(sql);
+    model.editor.set_cursor(sql.len());
+    let job = showcase_run(&mut model, sql);
+    let error = Diagnostic::new(
         DiagnosticKind::Query,
         "column \"custmer_id\" does not exist",
-        "executing buffer",
+        "running statement 1",
+    )
+    .in_statement(1)
+    .technical("SQLSTATE", "42703")
+    .technical("Severity", "ERROR")
+    .likely_cause("the column does not exist on that relation")
+    .next_action("check the spelling, or inspect the table's columns")
+    .at_position(12);
+    update(
+        &mut model,
+        Message::ExecutionFinished(Box::new(Execution {
+            notice_report: NoticeReport::default(),
+            job,
+            statements: Vec::new(),
+            status: ExecutionStatus::Failed,
+            elapsed: Duration::from_millis(15),
+            error: Some(error),
+            transaction: TransactionState::Autocommit,
+        })),
     );
-    error.object = Some(crate::diagnostics::ObjectContext {
-        schema: Some("public".into()),
-        table: Some("orders".into()),
-        column: Some("custmer_id".into()),
-        constraint: None,
-    });
-    error.likely_cause = Some("the column name is misspelled or belongs to another table".into());
-    error.next_action = Some("check the columns of public.orders in the Objects tree".into());
-    error = error.technical("code", "42703");
-
-    model.error = Some(error.clone());
-    model.transaction = TransactionState::Autocommit;
-    model.last_execution = Some(Execution {
-        notice_report: NoticeReport::default(),
-        job: JobId(2),
-        statements: Vec::new(),
-        status: ExecutionStatus::Failed,
-        elapsed: Duration::from_millis(15),
-        error: Some(error),
-        transaction: TransactionState::Autocommit,
-    });
+    // The technical fields are what the expand key shows.
+    model.error_expanded = true;
+    assert_eq!(model.focus, Focus::Editor, "the error location takes focus");
     let buf = render_showcase(&model);
     let text = buffer_to_string(&buf);
     assert!(text.contains("While:"), "diagnostics contains While:");
     assert!(
-        text.contains("Object context:"),
-        "diagnostics contains Object context:"
+        !text.contains("Object context:"),
+        "42703 carries no server object fields, so there is no object context"
     );
     assert!(text.contains("Location:"), "diagnostics contains Location:");
     assert!(
@@ -1997,115 +2222,74 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
         "diagnostics contains Likely cause:"
     );
     assert!(text.contains("Next:"), "diagnostics contains Next:");
+    assert!(text.contains("SQLSTATE"), "diagnostics labels the SQLSTATE");
+    assert!(text.contains("42703"), "diagnostics shows the SQLSTATE");
+    assert!(
+        !text.contains("not loaded yet"),
+        "diagnostics do not deny the loaded catalogue"
+    );
     if let Some(ref mut w) = writer {
         capture_showcase_scene(
             w,
             &buf,
             SHOWCASE_AREA,
             "error-diagnostics",
-            "Structured Query Diagnostics",
-            "Actionable diagnostic panel with object context and location pointer",
+            "Query error",
+            "A server error with its location marked in the statement and its SQLSTATE",
         );
     }
 
     // 6. "reviewed-update"
     let mut model = showcase_development_model(ThemeChoice::Dark);
     model.focus = Focus::Results;
+    // The selected cell behind the review is the one being updated: Ada
+    // Lovelace's status, wherever the local sort displays her row.
+    model.selected_row = model
+        .displayed_rows()
+        .iter()
+        .position(|row| *row == 0)
+        .expect("source row 0 is displayed");
+    model.selected_column = 2;
     let candidate = crate::app::model::UpdateCandidate {
         result_job: JobId(1),
         source_row: 0,
         result_column: 2,
-        source_sql: "SELECT id, customer, status, amount_cents, notes FROM public.orders WHERE status IN ('paid', 'pending') ORDER BY id ASC;".into(),
+        source_sql: SHOWCASE_SOURCE_SQL.into(),
     };
-    let source = crate::query::parse_update_source(
-        "SELECT id, customer, status, amount_cents, notes FROM public.orders WHERE status IN ('paid', 'pending') ORDER BY id ASC;",
-        &["id".into(), "customer".into(), "status".into(), "amount_cents".into(), "notes".into()],
-        2,
-    ).expect("update source");
+    let column_names = SHOWCASE_ORDER_COLUMNS
+        .iter()
+        .map(|(name, _, _)| (*name).to_owned())
+        .collect::<Vec<_>>();
+    let source = crate::query::parse_update_source(SHOWCASE_SOURCE_SQL, &column_names, 2)
+        .expect("update source");
     let relation = crate::postgres::metadata::UpdateRelation {
         schema: "public".into(),
         relation: "orders".into(),
         kind: ObjectKind::Table,
         readable: true,
         writable: true,
-        columns: vec![
-            ColumnInfo {
-                name: "id".into(),
-                data_type: "integer".into(),
-                nullable: false,
-                primary_key: true,
-                default: None,
-            },
-            ColumnInfo {
-                name: "customer".into(),
-                data_type: "text".into(),
-                nullable: false,
-                primary_key: false,
-                default: None,
-            },
-            ColumnInfo {
-                name: "status".into(),
-                data_type: "text".into(),
-                nullable: false,
-                primary_key: false,
-                default: None,
-            },
-            ColumnInfo {
-                name: "amount_cents".into(),
-                data_type: "integer".into(),
-                nullable: false,
-                primary_key: false,
-                default: None,
-            },
-            ColumnInfo {
-                name: "notes".into(),
-                data_type: "text".into(),
-                nullable: true,
-                primary_key: false,
-                default: None,
-            },
-        ],
+        columns: showcase_order_columns(),
     };
+    let (id, customer, status, amount, notes) = SHOWCASE_ORDER_ROWS[0];
     let plan = crate::query::plan_update(
         &source,
         "public",
         "orders",
+        &column_names,
         &[
-            "id".into(),
-            "customer".into(),
-            "status".into(),
-            "amount_cents".into(),
-            "notes".into(),
+            Cell::Text(id.into()),
+            Cell::Text(customer.into()),
+            Cell::Text(status.into()),
+            Cell::Text(amount.into()),
+            notes.map_or(Cell::Null, |notes| Cell::Text(notes.into())),
         ],
-        &[
-            Cell::Text("1".into()),
-            Cell::Text("Ada Lovelace".into()),
-            Cell::Text("paid".into()),
-            Cell::Text("14500".into()),
-            Cell::Text("priority tier 1".into()),
-        ],
-        &[
-            crate::query::UpdateColumn {
-                name: "id".into(),
-                primary_key: true,
-            },
-            crate::query::UpdateColumn {
-                name: "customer".into(),
-                primary_key: false,
-            },
-            crate::query::UpdateColumn {
-                name: "status".into(),
-                primary_key: false,
-            },
-            crate::query::UpdateColumn {
-                name: "amount_cents".into(),
-                primary_key: false,
-            },
-            crate::query::UpdateColumn {
-                name: "notes".into(),
-                primary_key: false,
-            },
-        ],
+        &column_names
+            .iter()
+            .map(|name| crate::query::UpdateColumn {
+                name: name.clone(),
+                primary_key: name == "id",
+            })
+            .collect::<Vec<_>>(),
         "delivered",
     )
     .expect("update plan");
@@ -2124,8 +2308,8 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             &buf,
             SHOWCASE_AREA,
             "reviewed-update",
-            "Guarded Cell Update Review",
-            "Safety review overlay displaying the exact bound statement before execution",
+            "Reviewed update",
+            "The review of a generated UPDATE, showing the exact statement before it runs",
         );
     }
 
@@ -2161,8 +2345,8 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             &buf,
             SHOWCASE_AREA,
             "workbench-light",
-            "Light Theme Workbench",
-            "Full workbench interface rendered in crisp, accessible light mode",
+            "light",
+            "The workbench in the light theme",
         );
     }
 
