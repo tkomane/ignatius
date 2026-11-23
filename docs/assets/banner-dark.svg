@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 196" width="760" height="169" role="img" aria-labelledby="ignatius-dark-title ignatius-dark-desc">
-  <title id="ignatius-dark-title">Ignatius PostgreSQL Workbench (Atelier Dark)</title>
-  <desc id="ignatius-dark-desc">Editorial studio wordmark for Ignatius, the PostgreSQL client you can point at production.</desc>
+  <title id="ignatius-dark-title">Ignatius, a quiet instrument for PostgreSQL (dark)</title>
+  <desc id="ignatius-dark-desc">Ignatius wordmark on warm espresso: a quiet instrument for PostgreSQL. Production is a word, not a colour. PostgreSQL 14 to 18, no telemetry.</desc>
   <defs>
     <linearGradient id="card-bg-dark" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#1D1A17" />
@@ -71,7 +71,7 @@
     <text x="2" y="14"
           font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif"
           font-size="10.5" font-weight="600" letter-spacing="2.6" fill="#E6825C">
-      POSTGRESQL TERMINAL WORKBENCH  &#183;  RUST
+      POSTGRESQL  &#183;  IN THE TERMINAL
     </text>
 
     <text x="0" y="68"
@@ -85,7 +85,7 @@
     <text x="2" y="106"
           font-family="'New York', 'Iowan Old Style', Baskerville, Georgia, 'Times New Roman', serif"
           font-style="italic" font-size="16" letter-spacing="0.15" fill="#ADA396">
-      The PostgreSQL client you can point at production.
+      A quiet instrument for PostgreSQL.
     </text>
   </g>
 
@@ -99,14 +99,14 @@
     <text x="26" y="17.5"
           font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
           font-size="10" letter-spacing="0.25" fill="#F2ECE1">
-      TLS VERIFY-FULL &#183; READ-ONLY FIRST
+      PROD IS A WORD, NOT A COLOUR
     </text>
 
     <!-- Compatibility spec -->
     <text x="2" y="52"
           font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
           font-size="10.8" letter-spacing="0.5" fill="#ADA396">
-      PG 14..18  &#183;  ZERO TELEMETRY
+      PG 14..18  &#183;  NO TELEMETRY
     </text>
 
     <!-- Keycap chips -->
@@ -125,11 +125,11 @@
         Ctrl+K
       </text>
 
-      <rect x="148" y="0" width="108" height="24" rx="5" fill="#2A241F" stroke="#534B42" stroke-width="1" />
-      <text x="202" y="15.5" text-anchor="middle"
+      <rect x="148" y="0" width="66" height="24" rx="5" fill="#2A241F" stroke="#534B42" stroke-width="1" />
+      <text x="181" y="15.5" text-anchor="middle"
             font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
-            font-size="10" fill="#8EC5BC">
-        ATELIER EDITION
+            font-size="10.5" fill="#8EC5BC">
+        Ctrl+P
       </text>
     </g>
   </g>
