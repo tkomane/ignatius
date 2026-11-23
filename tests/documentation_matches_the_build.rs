@@ -44,6 +44,7 @@ const AGENT_DELIVERY_PLAN: &str = include_str!("../docs/product/agent-delivery-p
 const VISION: &str = include_str!("../docs/product/vision.md");
 const STATUS: &str = include_str!("../docs/status.md");
 const VERIFICATION: &str = include_str!("../docs/operations/verification.md");
+const CONSTITUTION: &str = include_str!("../.specify/memory/constitution.md");
 
 #[test]
 fn every_chord_the_build_offers_is_in_the_keymap_document() {
@@ -1209,6 +1210,7 @@ fn pgadmin_parity_roadmap_and_architecture_plan_matches_the_build() {
         ("docs/product/vision.md", VISION),
         ("docs/status.md", STATUS),
         ("docs/operations/verification.md", VERIFICATION),
+        (".specify/memory/constitution.md", CONSTITUTION),
         ("README.md", README),
     ] {
         assert!(
@@ -1316,4 +1318,68 @@ fn restore_drills_document_formats_flags_and_exit_codes() {
         README.contains("ignatius restore-drill"),
         "the README must show the restore drill command"
     );
+}
+
+#[test]
+fn constitution_editorial_craft_principle_and_widget_token_discipline() {
+    for required in [
+        "### XI. Editorial craft and tactile restraint",
+        "**Version**: 1.2.0",
+        "Theme::keycap",
+        "Theme::recessed_pill",
+        "Theme::capsule",
+        "Visual tokens",
+    ] {
+        assert!(
+            CONSTITUTION.contains(required),
+            "constitution.md must record `{required}` under Principle XI"
+        );
+    }
+
+    fn collect_production_widget_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", dir.display()));
+        for entry in entries {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().and_then(|n| n.to_str()) == Some("tests") {
+                    continue;
+                }
+                collect_production_widget_files(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                && path.file_name().and_then(|n| n.to_str()) != Some("tests.rs")
+            {
+                out.push(path);
+            }
+        }
+    }
+
+    let widgets_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui/widgets");
+    let mut files = Vec::new();
+    collect_production_widget_files(&widgets_root, &mut files);
+    assert!(
+        !files.is_empty(),
+        "expected production widget files under {}",
+        widgets_root.display()
+    );
+
+    for path in files {
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        for (line_no, line) in source.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            for forbidden in ["Color::Rgb(", "Color::Indexed("] {
+                assert!(
+                    !line.contains(forbidden),
+                    "{}:{} uses forbidden raw `{forbidden}`; route all colours through Theme/Token",
+                    path.display(),
+                    line_no + 1
+                );
+            }
+        }
+    }
 }

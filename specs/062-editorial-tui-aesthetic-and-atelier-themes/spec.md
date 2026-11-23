@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m16-editorial-tui-aesthetic`  
 **Created**: 2026-11-21  
-**Status**: In Progress  
+**Status**: Delivered & Constitutionalised (Constitution Principle XI, v1.2.0)  
 **Milestone**: M16 - Editorial High-Art TUI Polish & Atelier/Paper Themes
 
 ## Problem Statement
@@ -61,5 +61,6 @@ When operating the workbench in full-screen mode across any built-in theme, ASCI
 
 ## Constitution & Quality Constraints
 
+- Conforms to Constitution Principle XI (`Editorial craft and tactile restraint`, `v1.2.0`) and Principle VI (`Accessible meaning survives styling loss`): four-tier elevation, zero raw `Color::Rgb`/`Color::Indexed` literals in `src/ui/widgets/`, `>= 4.5:1` contrast across all four surface tiers, and `Basic16`/`NO_COLOR`/`--ascii` parity.
 - Pure presentation changes in `src/ui/**` require no credential-route or threat-model changes (`secrecy::SecretString` and `diagnostics::redaction` remain untouched).
 - All existing integration, contract, and unit suites must pass with `--locked --all-targets --all-features` and live fixture database running.

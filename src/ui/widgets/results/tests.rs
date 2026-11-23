@@ -803,3 +803,152 @@ fn results_header_row_fills_grid_width_gutter_uses_muted_and_empty_hints_stay_cr
     assert!(empty_text.contains("Connection required."), "{empty_text}");
     assert!(empty_text.contains("---"), "{empty_text}");
 }
+
+#[test]
+fn grid_rule_places_cross_junctions_under_every_column_divider() {
+    let model = model_with(
+        &["id", "customer", "notes"],
+        &[vec![
+            Cell::Text("1".into()),
+            Cell::Text("Ada".into()),
+            Cell::Text("tier 1".into()),
+        ]],
+    );
+    let area = Rect::new(0, 0, 80, 12);
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Atelier, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Nerd),
+        false,
+    );
+    let buf = render(&model, &pres, area);
+
+    let header_y = (0..area.height)
+        .find(|&y| {
+            let line: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            line.contains('#') && line.contains("customer")
+        })
+        .expect("grid header row");
+    let rule_y = header_y + 1;
+    let divider_xs: Vec<u16> = (0..area.width)
+        .filter(|&x| buf[(x, header_y)].symbol() == "\u{2502}")
+        .collect();
+    assert_eq!(divider_xs.len(), 2, "expected 2 column dividers");
+    for x in divider_xs {
+        assert_eq!(
+            buf[(x, rule_y)].symbol(),
+            "\u{253c}",
+            "expected cross junction below column divider at x={x}"
+        );
+        assert_eq!(
+            buf[(x, rule_y)].fg,
+            pres.theme.color(Token::Border).unwrap()
+        );
+    }
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let abuf = render(&model, &ascii, area);
+    let aheader_y = (0..area.height)
+        .find(|&y| {
+            let line: String = (0..area.width).map(|x| abuf[(x, y)].symbol()).collect();
+            line.contains('#') && line.contains("customer")
+        })
+        .expect("ascii grid header row");
+    assert!(buffer_to_string(&abuf).is_ascii());
+    for x in (1..(area.width - 1)).filter(|&x| abuf[(x, aheader_y)].symbol() == "|") {
+        assert_eq!(abuf[(x, aheader_y + 1)].symbol(), "+");
+    }
+}
+
+#[test]
+fn render_error_preserves_caret_column_and_styles_code_strip() {
+    use crate::diagnostics::{Diagnostic, DiagnosticKind};
+    use crate::query::error_location::ErrorLocation;
+
+    let mut model = Model::new(100);
+    let sql = "SELECT id, custmer_id FROM public.orders;";
+    model.editor.set_text(sql);
+    let mut error = Diagnostic::new(
+        DiagnosticKind::Query,
+        "column \"custmer_id\" does not exist",
+        "executing buffer",
+    );
+    error.technical.push(crate::diagnostics::TechnicalField {
+        label: "code".into(),
+        value: "42703".into(),
+    });
+    model.error_location = Some(ErrorLocation {
+        cursor: 11,
+        token: Some(11..21),
+        line: 1,
+        column: 12,
+        statement_number: 1,
+        character: 12,
+    });
+
+    let area = Rect::new(0, 0, 80, 18);
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Atelier, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Nerd),
+        false,
+    );
+    let mut buf = Buffer::empty(area);
+    super::render_error(&model, &error, &pres, area, &mut buf);
+
+    let find_line = |needle: &str| -> (u16, String) {
+        for y in 0..area.height {
+            let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if row.contains(needle) {
+                return (y, row);
+            }
+        }
+        panic!("missing {needle:?} in:\n{}", buffer_to_string(&buf));
+    };
+
+    let (sql_y, sql_row) = find_line("custmer_id FROM");
+    let (caret_y, caret_row) = find_line("^");
+    assert_eq!(
+        caret_y,
+        sql_y + 1,
+        "caret must sit directly beneath SQL row"
+    );
+    let token_col = sql_row[..sql_row.find("custmer_id").unwrap()]
+        .chars()
+        .count();
+    let caret_col = caret_row[..caret_row.find('^').unwrap()].chars().count();
+    assert_eq!(
+        caret_col, token_col,
+        "caret column ({caret_col}) must align with custmer_id ({token_col}):\n{sql_row}\n{caret_row}"
+    );
+    assert_eq!(
+        buf[(token_col as u16, sql_y)].bg,
+        pres.theme.surface(Token::SurfaceAlt).bg.unwrap(),
+        "SQL marker strip must use SurfaceAlt"
+    );
+    assert_eq!(
+        buf[(token_col as u16, sql_y)].fg,
+        pres.theme.color(Token::Danger).unwrap(),
+        "offending token must highlight with Token::Danger"
+    );
+    assert!(
+        buf[(token_col as u16, sql_y)]
+            .modifier
+            .contains(Modifier::UNDERLINED)
+    );
+
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = Presentation::new(
+            Theme::new(ThemeChoice::Dark, depth != ColorDepth::None).with_depth(depth),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut lbuf = Buffer::empty(area);
+        super::render_error(&model, &error, &low, area, &mut lbuf);
+        let ltext = buffer_to_string(&lbuf);
+        assert!(ltext.is_ascii(), "{depth:?}: {ltext:?}");
+        assert_eq!(lbuf[(token_col as u16, sql_y)].bg, Color::Reset);
+    }
+}

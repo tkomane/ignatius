@@ -562,3 +562,66 @@ fn palette_spotlight_strip_split_title_and_preview_gutter_across_depths() {
         assert_eq!(low_buf[(divider_x, row0_y)].symbol(), "|");
     }
 }
+
+#[test]
+fn palette_uses_purpose_icons_and_preview_hairline() {
+    let saved_pal = Palette::over_saved_queries(vec![
+        PaletteEntry {
+            label: "revenue_by_region".into(),
+            detail: "SELECT region FROM reporting.order_totals;".into(),
+            group: "saved",
+            command: PaletteCommand::Open("revenue_by_region".into()),
+        },
+        PaletteEntry {
+            label: "active_orders".into(),
+            detail: "SELECT id FROM public.orders;".into(),
+            group: "saved",
+            command: PaletteCommand::Open("active_orders".into()),
+        },
+    ]);
+    let nerd = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Nerd),
+        false,
+    );
+    let mut buf = Buffer::empty(AREA);
+    render_palette(&saved_pal, &nerd, AREA, &mut buf);
+    let text = buffer_to_string(&buf);
+
+    let editor_glyph = nerd.icon(crate::ui::glyphs::Icon::Editor);
+    assert!(
+        text.contains(&format!("{editor_glyph}Saved queries")),
+        "saved queries palette should display the Editor icon: {text}"
+    );
+    assert!(
+        text.contains("\u{2500}\u{2500}\u{2500}\u{2500}"),
+        "preview pane should separate metadata from SQL with a hairline rule: {text}"
+    );
+
+    let mut history_pal = Palette::over_history(vec![PaletteEntry {
+        label: "SELECT 1;".into(),
+        detail: "1 row".into(),
+        group: "history",
+        command: PaletteCommand::Open("SELECT 1;".into()),
+    }]);
+    history_pal.query = String::new();
+    let mut hist_buf = Buffer::empty(AREA);
+    render_palette(&history_pal, &nerd, AREA, &mut hist_buf);
+    let clock_glyph = nerd.icon(crate::ui::glyphs::Icon::Clock);
+    let hist_text = buffer_to_string(&hist_buf);
+    assert!(
+        hist_text.contains(&format!("{clock_glyph}History")),
+        "history palette should display the Clock icon: {hist_text}"
+    );
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(AREA);
+    render_palette(&saved_pal, &ascii, AREA, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(ascii_text.is_ascii(), "{ascii_text:?}");
+    assert!(ascii_text.contains("----"), "{ascii_text}");
+}

@@ -159,3 +159,12 @@ matching still apply. Scrolling sends nothing and does not prove reading.
 There is almost none, and what exists can be turned off with
 `ui.reduced-motion`. Progress is text, because text is readable by a screen
 reader, survives a slow terminal, and does not imply precision that is not there.
+
+## Visual craft constitutional alignment
+
+Calm density, clear focus markers, four-tier surface elevation, the three-tier
+badge grammar (`Theme::keycap`, `Theme::recessed_pill`, `Theme::capsule`),
+typographic hierarchy, and deterministic showcase generation are constitutionalised
+in `.specify/memory/constitution.md` under Principle XI (`Editorial craft and
+tactile restraint`, `v1.2.0`), operating alongside Principle VI (`Accessible
+meaning survives styling loss`).

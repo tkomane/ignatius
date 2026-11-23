@@ -2,7 +2,10 @@
 
 Widgets ask for meaning, never for a colour. `Token::Danger`, not "red". Swapping
 a theme therefore cannot change what a widget means, and a token a theme forgot
-would be a compile error rather than an invisible element.
+would be a compile error rather than an invisible element. Under Constitution
+Principle XI (`Editorial craft and tactile restraint`, `v1.2.0`), raw `Color::Rgb`
+and `Color::Indexed` literals are prohibited across production UI widgets in
+`src/ui/widgets/`.
 
 The authority is `src/ui/theme.rs`.
 

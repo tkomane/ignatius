@@ -63,6 +63,37 @@ pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> To
         Kind::Plain => Token::Text,
     }
 }
+
+/// Groups contiguous same-styled syntax runs using `Theme`/`Token` styling.
+pub(crate) fn highlighted_sql_spans(
+    source: &str,
+    theme: &crate::ui::theme::Theme,
+    on_stripe: bool,
+) -> Vec<Span<'static>> {
+    let syntax = crate::query::highlight::tokens(source);
+    let mut spans = Vec::new();
+    let mut run = String::new();
+    let mut run_style: Option<ratatui::style::Style> = None;
+    for (byte, ch) in source.char_indices() {
+        let token = syntax_token(crate::query::highlight::kind_at(&syntax, byte));
+        let style = if on_stripe {
+            theme.on_stripe(token)
+        } else {
+            theme.style(token)
+        };
+        if run_style != Some(style) {
+            if let Some(previous) = run_style {
+                spans.push(Span::styled(std::mem::take(&mut run), previous));
+            }
+            run_style = Some(style);
+        }
+        run.push(ch);
+    }
+    if let Some(previous) = run_style {
+        spans.push(Span::styled(run, previous));
+    }
+    spans
+}
 /// Horizontal hairline rule glyph for the active tier.
 pub(crate) const fn hairline_rule(presentation: &Presentation) -> &'static str {
     if presentation.glyphs.is_ascii() {

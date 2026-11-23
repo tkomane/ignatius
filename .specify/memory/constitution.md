@@ -1,3 +1,20 @@
+<!--
+Sync Impact Report
+- Version change: 1.1.0 -> 1.2.0
+- Added sections:
+  - ### XI. Editorial craft and tactile restraint (Core Principles)
+  - Visual tokens constraint (Additional Constraints)
+- Modified sections:
+  - Governance footer metadata (Last Amended 2026-11-23)
+- Updated affected docs and contracts:
+  - specs/062-editorial-tui-aesthetic-and-atelier-themes/spec.md
+  - docs/design/theme-tokens.md
+  - docs/design/interaction-principles.md
+  - README.md
+  - tests/documentation_matches_the_build.rs
+- Deferred TODOs: none
+-->
+
 # Ignatius Constitution
 
 Ignatius is a local-first, keyboard-first PostgreSQL client for the terminal.
@@ -109,6 +126,43 @@ supported signals. Local state writes are atomic and migratable. Users have a
 documented recovery route for corrupted configuration, an unavailable keyring, a
 broken connection, an interrupted export, and an incompatible terminal.
 
+### XI. Editorial craft and tactile restraint
+
+Ignatius pairs terminal precision with calm editorial typography, tonal elevation,
+and tactile affordances, never visual noise or ungrounded decoration:
+
+- **Four-tier tonal elevation with honest degradation.** Every painted surface
+  belongs to `Surface`, `SurfacePane`, `SurfaceAlt`, or `SurfaceOverlay`.
+  Floating overlays paint a `Clear` pass before rendering their block surface to
+  prevent bleed-through, while `Basic16` and `None` leave surface backgrounds
+  transparent cleanly.
+- **Verified contrast across every painted surface.** Every non-border
+  foreground token across built-in and custom palettes satisfies `>= 4.5:1`
+  WCAG contrast against all four surface tiers (`>= 7.0:1` in `high-contrast`),
+  pinned by automated tests. Dim modifiers must never wash out interactive
+  badges or primary labels.
+- **Three-tier tactile badge grammar.** Primary action rails and empty-state
+  hints elevate onto `Theme::keycap`; secondary modal metadata rests on
+  non-dimmed `Theme::recessed_pill` wrapped through width-aware
+  `render_capsule_bar`; high-salience posture and safety markers (`[PROD]`,
+  `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) render as full-contrast
+  `Theme::capsule`.
+- **Calm typographic hierarchy.** Pane headers split into focused and muted
+  semantic spans; structural rules, dividers, and inactive tree guides recede
+  into `Token::Border`; `Token::SyntaxComment` and `Token::NullValue` set in
+  italic at `TrueColor` and `Indexed256` (stripped cleanly from upright badges
+  via `Theme::surface_badge`); truncation uses ellipses gracefully and never
+  corrupts SQL alignment or error carets.
+- **Opt-in semantic symbolism without icon dependency.** `GlyphTier::Nerd` pairs
+  the PostgreSQL Devicon brand glyph with verified single-cell Codicon and
+  Material symbols; Nerd Font support is never inferred, and `unicode` and
+  `ascii` modes remain 100% self-explanatory under Principle VI.
+- **Curated, deterministic public artefacts.** Showcase screenshots and landing
+  branding are rendered deterministically from real widget buffers
+  (`scripts/render-showcase.py` + `src/ui/acceptance/tests.rs`), visually
+  audited, and shipped with adaptive dark and light presentation
+  (`banner-dark.svg` and `banner-light.svg`).
+
 ## Additional Constraints
 
 - **Architecture.** A testable unidirectional state model: input and async events
@@ -116,6 +170,9 @@ broken connection, an interrupted export, and an incompatible terminal.
   and an executor performs them. UI widgets render state and emit intent; they do
   not open connections or write files. Stale async results are rejected by job
   identity. Global mutable state is avoided.
+- **Visual tokens.** Every colour in production UI widgets flows through `Theme`
+  and `Token` in `src/ui/theme.rs`; raw `Color::Rgb` or `Color::Indexed`
+  literals are prohibited in production widget modules (`src/ui/widgets/`).
 - **Secrets.** No secret appears in source, committed configuration, logs,
   diagnostics, screenshots, process arguments or test fixtures. Secrets use
   dedicated types that do not print themselves, and all displayable text passes
@@ -158,4 +215,4 @@ must either be removed or justified in writing in the relevant plan, in a
 
 Operational guidance for working in this repository lives in `CLAUDE.md`.
 
-**Version**: 1.1.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-11-19
+**Version**: 1.2.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-11-23
