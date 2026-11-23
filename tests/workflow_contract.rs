@@ -359,6 +359,7 @@ fn shared_ci_runs_the_complete_declared_coverage() {
     for expected in [
         "workflow_dispatch:",
         "schedule:",
+        "group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}",
         "cancel-in-progress: true",
         "cargo test --locked --workspace --all-targets --all-features",
         "cargo test --locked --workspace --doc --all-features",
@@ -379,14 +380,23 @@ fn shared_ci_runs_the_complete_declared_coverage() {
         );
     }
 
-    for version in ["14", "15", "16", "17", "18"] {
-        assert!(
-            workflow.contains(&format!("\"{version}\"")),
-            "shared CI does not cover supported PostgreSQL {version}"
-        );
-    }
+    let platform_tests = job_block(&workflow, "test");
+    assert!(
+        platform_tests.contains("- name: Linux\n            runner: ubuntu-24.04"),
+        "Linux tests must run on the Ubuntu 24.04 GNU release baseline"
+    );
 
     let integration = job_block(&workflow, "integration");
+    assert!(
+        integration
+            .lines()
+            .any(|line| line.trim() == r#"postgres: ["14", "15", "16", "17", "18"]"#),
+        "the TCP/TLS matrix must run every supported PostgreSQL major before merge"
+    );
+    assert!(
+        !integration.lines().any(|line| line.starts_with("    if:")),
+        "all CI triggers must run the TCP/TLS matrix"
+    );
     for expected in [
         "IGNATIUS_TEST_PG_URI: postgres://",
         "IGNATIUS_TEST_PG_TLS_URI: postgres://",
@@ -618,7 +628,9 @@ fn shared_ci_uses_reviewed_immutable_postgresql_fixtures() {
     );
     for expected in [
         "postgres-fixture-drift:\n    name: Reviewed PostgreSQL fixture drift",
-        "if: github.event_name == 'schedule'",
+        "      check_postgres_fixture_drift:\n        description:",
+        "        type: boolean\n        default: false",
+        "if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.check_postgres_fixture_drift)",
         "docker buildx imagetools inspect --format \"{{.Manifest.Digest}}\"",
         "review and update docker/postgres-images.env",
     ] {
