@@ -32,7 +32,7 @@ BASELINE = 18 * SCALE
 # Outer studio mat and floating macOS window geometry.
 MAT_PAD_X, MAT_PAD_TOP, MAT_PAD_BOTTOM = 44 * SCALE, 34 * SCALE, 48 * SCALE
 TITLEBAR_H = 38 * SCALE
-WIN_PAD_X, WIN_PAD_Y = 16 * SCALE, 10 * SCALE
+WIN_PAD_X, WIN_PAD_Y = 14 * SCALE, 14 * SCALE
 WINDOW_RADIUS = 13 * SCALE
 
 DEFAULT_FG = (242, 236, 225)
@@ -295,7 +295,7 @@ def studio_palette(scene_name: str, surface_bg):
             "win_rim": (78, 69, 60),
             "win_border": (48, 43, 38),
             "divider": (46, 41, 36),
-            "shadow_alpha": 140,
+            "shadow_alpha": 96,
         }
     if "material" in scene_name or "query-bench" in scene_name or "sql-runbook" in scene_name:
         return {
@@ -311,7 +311,7 @@ def studio_palette(scene_name: str, surface_bg):
             "win_rim": (70, 79, 96),
             "win_border": (44, 50, 62),
             "divider": (42, 48, 59),
-            "shadow_alpha": 145,
+            "shadow_alpha": 96,
         }
     if "field" in scene_name or "schema-snapshot" in scene_name:
         return {
@@ -327,7 +327,7 @@ def studio_palette(scene_name: str, surface_bg):
             "win_rim": (74, 82, 100),
             "win_border": (46, 52, 66),
             "divider": (46, 52, 64),
-            "shadow_alpha": 145,
+            "shadow_alpha": 96,
         }
     # Midnight Dark (overview, palette, completion, plan, error, update)
     return {
@@ -343,7 +343,7 @@ def studio_palette(scene_name: str, surface_bg):
         "win_rim": (68, 76, 106),
         "win_border": (42, 48, 70),
         "divider": (42, 47, 66),
-        "shadow_alpha": 150,
+        "shadow_alpha": 96,
     }
 
 
@@ -390,8 +390,9 @@ def draw_buffer(image, scene, mask, buf_x0, buf_y0):
         if styles & REVERSED:
             fg, bg = bg, fg
         if styles & DIM:
-            # Smooth editorial attenuation instead of harsh 50% dim.
-            fg = lerp_rgb(bg, fg, 0.72)
+            # Terminals attenuate DIM text to roughly 55-65% of full ink, so
+            # the capture does the same rather than flattering muted text.
+            fg = lerp_rgb(bg, fg, 0.62)
         x = buf_x0 + col * CELL_WIDTH
         y = buf_y0 + row * CELL_HEIGHT
         draw.rectangle(
@@ -441,10 +442,10 @@ def draw_buffer(image, scene, mask, buf_x0, buf_y0):
                 )
 
 
-def render_scene(scene, fonts, chrome_fonts, mask):
+def render_scene(scene, fonts, chrome_fonts, mask, frame_spec=None):
     cols, rows = scene["width"], scene["height"]
     surface_bg = scene_surface_bg(scene)
-    spec = studio_palette(scene["scene"], surface_bg)
+    spec = frame_spec or studio_palette(scene.get("studio", scene["scene"]), surface_bg)
 
     buf_w = cols * CELL_WIDTH
     buf_h = rows * CELL_HEIGHT
@@ -549,6 +550,46 @@ def render_scene(scene, fonts, chrome_fonts, mask):
     return composed, meta
 
 
+def render_sequence(name, frames, fonts, chrome_fonts, mask, out_dir):
+    """Assemble one captured sequence into an animated PNG and a still poster.
+
+    Every frame is a real widget buffer captured at an explicit motion time by
+    the acceptance harness; nothing is tweened here. The window chrome and the
+    studio mat come from the first frame so only the terminal content moves.
+    The poster is the frame marked `poster`, or the last frame, and is what a
+    reader who prefers reduced motion sees instead.
+    """
+    if not re.fullmatch(r"[a-z0-9-]+", name):
+        raise ValueError(f"Invalid sequence name {name!r}")
+    frames = sorted(frames, key=lambda scene: scene["frame"])
+    indexes = [scene["frame"] for scene in frames]
+    if indexes != list(range(len(frames))):
+        raise ValueError(f"{name}: frames must be numbered 0..{len(frames) - 1}, got {indexes}")
+    first = frames[0]
+    spec = studio_palette(first.get("studio", name), scene_surface_bg(first))
+    images, durations, poster = [], [], None
+    for scene in frames:
+        image, meta = render_scene(scene, fonts, chrome_fonts, mask, frame_spec=spec)
+        delay = int(scene["delay_ms"])
+        if not 10 <= delay <= 10_000:
+            raise ValueError(f"{name}: frame {scene['frame']} delay {delay} ms is out of range")
+        images.append(image)
+        durations.append(delay)
+        if scene.get("poster"):
+            poster = (image, meta)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    images[0].save(
+        out_dir / f"{name}.png",
+        save_all=True,
+        append_images=images[1:],
+        duration=durations,
+        loop=0,
+        optimize=True,
+    )
+    still, meta = poster or (images[-1], render_scene(frames[-1], fonts, chrome_fonts, mask, frame_spec=spec)[1])
+    still.save(out_dir / f"{name}-still.png", optimize=True, pnginfo=meta)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -558,6 +599,12 @@ def main():
     parser.add_argument("--font-dir", type=Path, required=True)
     parser.add_argument("--fallback-font", type=Path, required=True)
     parser.add_argument("--font-family", default="CommitMonoNerdFontMono")
+    parser.add_argument(
+        "--motion-output",
+        type=Path,
+        default=None,
+        help="Directory for animated sequences (defaults to the output directory)",
+    )
     args = parser.parse_args()
 
     fonts = {
@@ -574,16 +621,23 @@ def main():
     chrome_fonts = load_chrome_fonts(fonts[False, False])
     mask = glyph_masks(fonts, ImageFont.truetype(args.fallback_font, FONT_SIZE))
     scenes = set()
+    sequences = {}
     args.output.mkdir(parents=True, exist_ok=True)
     with args.capture.open(encoding="utf-8") as capture:
         for line in capture:
             scene = json.loads(line)
+            if "sequence" in scene:
+                sequences.setdefault(scene["sequence"], []).append(scene)
+                continue
             name = scene["scene"]
             if not re.fullmatch(r"[a-z0-9-]+", name) or name in scenes:
                 raise ValueError(f"Invalid or duplicate scene name {name!r}")
             scenes.add(name)
             image, meta = render_scene(scene, fonts, chrome_fonts, mask)
             image.save(args.output / f"{name}.png", optimize=True, pnginfo=meta)
+    motion_dir = args.motion_output or args.output
+    for name, frames in sequences.items():
+        render_sequence(name, frames, fonts, chrome_fonts, mask, motion_dir)
 
 
 if __name__ == "__main__":
