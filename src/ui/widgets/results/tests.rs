@@ -1576,7 +1576,7 @@ fn the_heartbeat_is_a_comet_with_a_fading_tail_at_truecolour() {
     let area = Rect::new(0, 0, 60, 12);
     let text = buffer_to_string(&render(&running(10, false), &presentation, area));
     assert!(text.contains("Running"), "{text}");
-    assert!(text.contains("1.5s"), "{text}");
+    assert!(text.contains("1.5 s"), "{text}");
 
     let cells = heartbeat_cells(&render(&running(10, false), &presentation, area));
     let heads: Vec<usize> = (0..cells.len())
@@ -1698,7 +1698,7 @@ fn reduced_motion_keeps_the_words_and_draws_no_heartbeat() {
     );
     assert_eq!(first, later, "byte-identical across frames");
     let text = buffer_to_string(&first);
-    assert!(text.contains("Running") && text.contains("1.5s"), "{text}");
+    assert!(text.contains("Running") && text.contains("1.5 s"), "{text}");
     let rows: Vec<&str> = text.lines().collect();
     assert!(
         rows[2].contains("asks the server to cancel"),

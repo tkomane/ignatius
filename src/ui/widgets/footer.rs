@@ -88,7 +88,7 @@ pub(crate) fn render_footer(
         status = format!(" {leader}Cancelled");
     }
     if let Some(elapsed) = model.running_for.filter(|_| model.phase.is_busy()) {
-        status.push_str(&format!(" {:.1}s", elapsed.as_secs_f64()));
+        status.push_str(&format!(" {}", super::live_seconds(elapsed)));
     }
     let mut spans = vec![Span::styled(status, theme.on_stripe(status_token))];
 

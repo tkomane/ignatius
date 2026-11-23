@@ -2028,7 +2028,7 @@ fn a_running_query_shows_motion_a_word_and_an_honest_elapsed_time() {
 
     let text = render_to_string(&model, &Keymap::new(), &rich(), 100, 30);
     assert!(text.contains("Running"), "the state is a word: {text}");
-    assert!(text.contains("2.4s"), "the elapsed time is shown: {text}");
+    assert!(text.contains("2.4 s"), "the elapsed time is shown: {text}");
     assert!(
         text.contains("Ctrl+C asks the server to cancel."),
         "the way out is offered"
@@ -2123,7 +2123,7 @@ fn reduced_motion_replaces_animation_with_the_same_words() {
 
     assert_eq!(first, second, "reduced motion must not animate");
     assert!(first.contains("Running"), "the state is still stated");
-    assert!(first.contains("1.0s"), "the elapsed time is still shown");
+    assert!(first.contains("1.0 s"), "the elapsed time is still shown");
 }
 
 #[test]

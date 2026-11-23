@@ -70,6 +70,12 @@ pub(crate) fn bound_key(model: &Model, action: &crate::app::Action) -> Option<St
         .find(|binding| binding.action == *action)
         .map(|binding| crate::query::value::sanitize_for_display(&binding.key))
 }
+/// A live clock, to a tenth of a second, spaced like every other duration
+/// the interface states (`1.2 s`).
+pub(crate) fn live_seconds(elapsed: std::time::Duration) -> String {
+    format!("{:.1} s", elapsed.as_secs_f64())
+}
+
 /// The theme token that draws a syntax kind.
 pub(crate) const fn syntax_token(kind: crate::query::highlight::TokenKind) -> Token {
     use crate::query::highlight::TokenKind as Kind;

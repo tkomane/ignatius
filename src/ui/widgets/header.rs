@@ -78,6 +78,22 @@ pub(crate) fn render_header(
         }
     }
 
+    // The database alone, which is what the target shortens to first.
+    let mut database_spans = match &model.connection {
+        ConnectionState::Connected(info) => Some(vec![
+            Span::styled(
+                presentation.icon(Icon::Database),
+                theme.on_stripe(Token::Focus),
+            ),
+            Span::styled(
+                sanitize_for_display(&info.database),
+                theme.on_stripe(Token::Header),
+            ),
+        ])
+        .filter(|database| spans_width(database) < spans_width(&target_spans)),
+        _ => None,
+    };
+
     let mut left = Vec::new();
 
     // Failed connection step if any
@@ -133,13 +149,10 @@ pub(crate) fn render_header(
             ),
         ]));
     } else {
-        left.push(Part::safety(vec![
-            Span::raw("  "),
-            Span::styled(
-                format!("[{}]", environment.label()),
-                theme.on_stripe(env_token),
-            ),
-        ]));
+        // A quiet classification is bounded, so a long custom name can never
+        // push a safety capsule off the row.
+        let label = quiet_environment_label(&environment, presentation);
+        left.push(Part::quiet_label(label, theme.on_stripe(env_token)));
     }
 
     // Read-only capsule
@@ -202,41 +215,39 @@ pub(crate) fn render_header(
         _ => {}
     }
 
-    // Active watch loop capsule
+    // Active watch loop capsule. A running loop repeats a statement on its
+    // own, so it is a side effect in progress: it outlasts the full target and
+    // its stop hint goes with it as one unit.
     if let Some(watch) = &model.watch {
         right.push((
             Part::yielding(
-                4,
-                vec![Span::styled(
-                    format!(" [WATCH: {}s #{}] ", watch.interval_secs, watch.iteration),
-                    capsule_style(presentation, Token::Focus),
-                )],
-            ),
-            " ",
-        ));
-        right.push((
-            Part::yielding(
-                2,
-                vec![Span::styled(
-                    "(\\watch stop)",
-                    theme.on_stripe(Token::Muted),
-                )],
+                WATCH_RANK,
+                vec![
+                    Span::styled(
+                        format!(" [WATCH: {}s #{}] ", watch.interval_secs, watch.iteration),
+                        capsule_style(presentation, Token::Focus),
+                    ),
+                    Span::raw(" "),
+                    Span::styled("(\\watch stop)", theme.on_stripe(Token::Muted)),
+                ],
             ),
             " ",
         ));
     }
 
-    // Running / completed elapsed indicator. A live clock is a truthful wait
-    // indicator and yields late; a completed time yields early.
+    // Running / completed elapsed indicator. A completed time is among the
+    // first things to go on a short row; a live clock goes after the provider
+    // badge, and both go before the target shortens, because the footer and
+    // the Results pane carry the same clock.
     if let Some(d) = model.running_for {
         let text = if !presentation.reduced_motion {
             format!(
-                "{} {:.1}s",
+                "{} {}",
                 presentation.glyphs.spinner(model.frame),
-                d.as_secs_f64()
+                super::live_seconds(d)
             )
         } else {
-            format!("{:.1}s", d.as_secs_f64())
+            super::live_seconds(d)
         };
         right.push((
             Part::yielding(4, vec![Span::styled(text, theme.on_stripe(Token::Info))]),
@@ -249,15 +260,9 @@ pub(crate) fn render_header(
             TimingDisplay::Always => true,
         };
         if show {
-            // The same unit spacing as the Results summary (`240 ms`), so the
-            // one duration reads the same in both places.
-            let text = if d >= Duration::from_secs(1) {
-                format!("{:.2} s", d.as_secs_f64())
-            } else if d.as_millis() == 0 {
-                "<1 ms".to_owned()
-            } else {
-                format!("{} ms", d.as_millis())
-            };
+            // The Results summary's own formatter, so the one duration reads
+            // the same in both places.
+            let text = crate::query::result::elapsed_label(d);
             right.push((
                 Part::yielding(2, vec![Span::styled(text, theme.on_stripe(Token::Muted))]),
                 "  ",
@@ -276,10 +281,12 @@ pub(crate) fn render_header(
         ));
     }
 
-    // When the row is short, decoration yields first, in order, then the
-    // target shortens and finally the product badge goes. The environment,
-    // `[READ ONLY]` and transaction capsules never yield: a safety marker
-    // must be on screen in every layout that draws a header.
+    // When the row is short, things give way in a fixed order: decoration
+    // first (ranks below the target's), then the target shortens to its
+    // database and then further, then the product badge goes, then a quiet
+    // environment label shortens, and a running watch loop goes last. The
+    // environment, `[READ ONLY]` and transaction capsules never yield: a
+    // safety marker must be on screen in every layout that draws a header.
     let total_width = usize::from(area.width);
     let unicode = !presentation.glyphs.is_ascii();
     let mut brand_spans = Some(brand_spans);
@@ -287,22 +294,18 @@ pub(crate) fn render_header(
                 target: &[Span<'static>],
                 left: &[Part],
                 right: &[(Part, &'static str)]| {
-        let left_width = brand.as_deref().map_or(0, spans_width)
-            + spans_width(target)
-            + left
-                .iter()
-                .map(|part| spans_width(&part.spans))
-                .sum::<usize>();
-        let right_width = right_group_width(right);
-        left_width + usize::from(right_width > 0) * 2 + right_width <= total_width
+        header_width(brand, target, left, right) <= total_width
     };
-    while !fits(&brand_spans, &target_spans, &left, &right) {
+    let drop_up_to = |rank: u8, left: &mut Vec<Part>, right: &mut Vec<(Part, &'static str)>| {
         let lowest = left
             .iter()
             .filter_map(|part| part.yields)
             .chain(right.iter().filter_map(|(part, _)| part.yields))
+            .filter(|yields| *yields <= rank)
             .min();
-        let Some(lowest) = lowest else { break };
+        let Some(lowest) = lowest else {
+            return false;
+        };
         if let Some(index) = left.iter().position(|part| part.yields == Some(lowest)) {
             left.remove(index);
         } else if let Some(index) = right
@@ -311,16 +314,18 @@ pub(crate) fn render_header(
         {
             right.remove(index);
         }
+        true
+    };
+    while !fits(&brand_spans, &target_spans, &left, &right)
+        && drop_up_to(TARGET_RANK - 1, &mut left, &mut right)
+    {}
+    if !fits(&brand_spans, &target_spans, &left, &right)
+        && let Some(database) = database_spans.take()
+    {
+        target_spans = database;
     }
     if !fits(&brand_spans, &target_spans, &left, &right) {
-        let others = brand_spans.as_deref().map_or(0, spans_width)
-            + left
-                .iter()
-                .map(|part| spans_width(&part.spans))
-                .sum::<usize>()
-            + right_group_width(&right)
-            + usize::from(!right.is_empty()) * 2;
-        let room = total_width.saturating_sub(others);
+        let room = total_width.saturating_sub(header_width(&brand_spans, &[], &left, &right));
         // A target shorter than a few cells says nothing, so it goes whole.
         target_spans = if room >= 6 {
             fit_spans(target_spans, room, unicode)
@@ -331,6 +336,19 @@ pub(crate) fn render_header(
     if !fits(&brand_spans, &target_spans, &left, &right) {
         brand_spans = None;
     }
+    if !fits(&brand_spans, &target_spans, &left, &right)
+        && let Some(index) = left.iter().position(|part| part.quiet.is_some())
+    {
+        let others = header_width(&brand_spans, &target_spans, &left, &right)
+            - spans_width(&left[index].spans);
+        let room = total_width.saturating_sub(others);
+        if !left[index].shrink_quiet(room, unicode) {
+            left.remove(index);
+        }
+    }
+    while !fits(&brand_spans, &target_spans, &left, &right)
+        && drop_up_to(u8::MAX, &mut left, &mut right)
+    {}
 
     let mut left_spans: Vec<Span<'static>> = brand_spans.unwrap_or_default();
     left_spans.extend(target_spans);
@@ -399,12 +417,24 @@ pub(crate) fn render_header(
     }
 }
 
+/// Yield ranks below this go before the target shortens.
+const TARGET_RANK: u8 = 6;
+
+/// A running watch loop yields after the target, the badge and a quiet label.
+const WATCH_RANK: u8 = 9;
+
+/// The most cells a quiet environment label may take inside its brackets.
+const QUIET_LABEL_CELLS: usize = 14;
+
 /// A run of header spans and how readily it gives way on a short row.
 struct Part {
     spans: Vec<Span<'static>>,
     /// Lower numbers yield first; `None` never yields, because it is a safety
     /// marker.
     yields: Option<u8>,
+    /// For a quiet environment label: its full words and style, so it can be
+    /// shortened rather than clipped.
+    quiet: Option<(String, Style)>,
 }
 
 impl Part {
@@ -412,6 +442,7 @@ impl Part {
         Self {
             spans,
             yields: None,
+            quiet: None,
         }
     }
 
@@ -419,8 +450,59 @@ impl Part {
         Self {
             spans,
             yields: Some(rank),
+            quiet: None,
         }
     }
+
+    fn quiet_label(label: String, style: Style) -> Self {
+        Self {
+            spans: vec![Span::raw("  "), Span::styled(format!("[{label}]"), style)],
+            yields: None,
+            quiet: Some((label, style)),
+        }
+    }
+
+    /// Shortens a quiet label to fit `room` cells, keeping at least a few
+    /// characters of it. Returns false when even that does not fit.
+    fn shrink_quiet(&mut self, room: usize, unicode: bool) -> bool {
+        let Some((label, style)) = &self.quiet else {
+            return false;
+        };
+        // Two cells of spacing and two brackets surround the words.
+        let words = room.saturating_sub(4);
+        if words < 4 {
+            return false;
+        }
+        let short = truncate_to_width(label, words, unicode);
+        self.spans = vec![Span::raw("  "), Span::styled(format!("[{short}]"), *style)];
+        true
+    }
+}
+
+/// A quiet environment label, sanitised and bounded to a readable prefix.
+fn quiet_environment_label(environment: &Environment, presentation: &Presentation) -> String {
+    truncate_to_width(
+        &sanitize_for_display(&environment.label()),
+        QUIET_LABEL_CELLS,
+        !presentation.glyphs.is_ascii(),
+    )
+}
+
+/// The header's drawn width for a set of parts: both groups and the gap.
+fn header_width(
+    brand: &Option<Vec<Span<'static>>>,
+    target: &[Span<'static>],
+    left: &[Part],
+    right: &[(Part, &'static str)],
+) -> usize {
+    let left_width = brand.as_deref().map_or(0, spans_width)
+        + spans_width(target)
+        + left
+            .iter()
+            .map(|part| spans_width(&part.spans))
+            .sum::<usize>();
+    let right_width = right_group_width(right);
+    left_width + usize::from(right_width > 0) * 2 + right_width
 }
 
 fn spans_width(spans: &[Span<'static>]) -> usize {
@@ -499,9 +581,9 @@ fn connection_state_spans(model: &Model, presentation: &Presentation) -> Vec<Spa
         ));
         spans.push(Span::styled(
             format!(
-                "{}{:.1}s",
+                "{}{}",
                 presentation.icon(Icon::Clock),
-                elapsed.as_secs_f64()
+                super::live_seconds(elapsed)
             ),
             theme.style(Token::Muted),
         ));
@@ -576,17 +658,25 @@ pub(crate) fn render_compact_header(
             )
         },
     );
-    let label = format!(" [{}] ", environment.label());
-    // The safety markers lead, so a narrow row clips the database name and
-    // the focus word before it could clip `[READ ONLY]` or a transaction.
-    let mut spans = vec![if environment.is_production() {
-        Span::styled(
-            label,
-            capsule_style(presentation, Token::EnvironmentProduction),
-        )
-    } else {
-        Span::styled(label, theme.style(Token::EnvironmentNonProduction))
-    }];
+    // The safety capsules lead, so nothing to their left can push them off a
+    // narrow row. Quieter facts follow, each drawn whole or shortened with a
+    // visible ellipsis, never clipped mid-word.
+    let unicode = !presentation.glyphs.is_ascii();
+    let mut spans = Vec::new();
+    let capsule_environment =
+        environment.is_production() || matches!(environment, Environment::Staging);
+    if capsule_environment {
+        let token = if environment.is_production() {
+            Token::EnvironmentProduction
+        } else {
+            Token::Warning
+        };
+        spans.push(Span::styled(
+            format!(" [{}] ", environment.label()),
+            capsule_style(presentation, token),
+        ));
+        spans.push(Span::raw(" "));
+    }
     if model.connection.info().is_some_and(|info| info.read_only) {
         spans.push(Span::styled(
             " [READ ONLY] ",
@@ -611,16 +701,50 @@ pub(crate) fn render_compact_header(
         }
         _ => {}
     }
-    spans.push(Span::styled(connection, theme.style(Token::Text)));
-    spans.extend(connection_state_spans(model, presentation));
-    spans.push(Span::styled(
-        format!(
-            " {}[{}]",
-            presentation.icon(Icon::Focus),
-            model.focus.label()
-        ),
-        theme.style(Token::Focus),
-    ));
+
+    let width = usize::from(area.width);
+    let mut used = spans_width(&spans);
+    let quiet_style = theme.style(Token::EnvironmentNonProduction);
+    let quiet_label =
+        (!capsule_environment).then(|| quiet_environment_label(&environment, presentation));
+    if let Some(label) = quiet_label {
+        let whole = format!("[{label}] ");
+        if used + display_width(&whole) <= width {
+            used += display_width(&whole);
+            spans.push(Span::styled(whole, quiet_style));
+        } else if width.saturating_sub(used) >= 7 {
+            let short = truncate_to_width(&label, width - used - 3, unicode);
+            let short = format!("[{short}] ");
+            used += display_width(&short);
+            spans.push(Span::styled(short, quiet_style));
+        }
+    }
+    let room = width.saturating_sub(used);
+    if display_width(&connection) <= room {
+        used += display_width(&connection);
+        spans.push(Span::styled(connection, theme.style(Token::Text)));
+        let state = connection_state_spans(model, presentation);
+        let focus = Span::styled(
+            format!(
+                " {}[{}]",
+                presentation.icon(Icon::Focus),
+                model.focus.label()
+            ),
+            theme.style(Token::Focus),
+        );
+        if used + spans_width(&state) <= width {
+            used += spans_width(&state);
+            spans.extend(state);
+            if used + display_width(&focus.content) <= width {
+                spans.push(focus);
+            }
+        }
+    } else if room >= 6 {
+        spans.push(Span::styled(
+            truncate_to_width(&connection, room, unicode),
+            theme.style(Token::Text),
+        ));
+    }
     Paragraph::new(Line::from(spans))
         .style(theme.surface(Token::SurfaceAlt))
         .render(area, buf);

@@ -59,13 +59,18 @@ brackets:
   has failed and needs a rollback; an idle session is not badged.
 
 No safety capsule ever yields to a short row. When the header cannot fit
-everything, decoration goes first (the history or catalogue notice and
-`[MUTED]`, then the completed time and the `\watch stop` hint, then the
-provider badge, then the live clock and the watch capsule, then a failed
-connection's stage), the target shortens with a visible ellipsis, and the
-product badge goes last; the environment,
-`[READ ONLY]` and transaction capsules stay in every width and in the compact
-header used below 80x24, where they lead the row.
+everything, things give way in a fixed order: the history or catalogue notice
+and `[MUTED]`, then the completed time, then the provider badge, then the live
+clock, then a failed connection's stage; then the target shortens to its
+database and then with a visible ellipsis; then the product badge goes; then a
+quiet environment label shortens; and a running `\watch` loop, capsule and stop
+hint together, goes last, because it is a side effect in progress. The
+environment, `[READ ONLY]` and transaction capsules stay at every width. A
+quiet environment label (`[LOCAL]`, `[UNCLASSIFIED]`, `[DEV]` or a custom name)
+is bounded to a readable prefix with an ellipsis, so a long custom name never
+pushes a capsule off the row. The compact header used below 80x24 leads with
+the safety capsules, then the quiet label, the database and the focused pane,
+each whole or shortened, never clipped mid-word.
 
 Transport state is not in the steady-state header. Once connected, `verified`,
 `verification skipped` and `plaintext` are routine there by the spec 025
@@ -74,8 +79,10 @@ in the write-confirmation overlays where they matter, and in Connection
 details on demand.
 
 The completed elapsed time appears only when a statement took at least
-`200 ms`, preventing flicker on fast queries, and is spaced like the Results
-summary (`240 ms`). With colour off, and at 16 colours, every capsule degrades
+`200 ms`, preventing flicker on fast queries, and uses the Results summary's
+formatter (`240 ms`, `1250 ms`), so one duration reads the same in both places.
+Live clocks, in the header, the footer and the Results pane, read in tenths of
+a second with the same spacing (`1.2 s`). With colour off, and at 16 colours, every capsule degrades
 to reversed text with unchanged words and brackets (`[PROD]`, `[READ ONLY]`,
 `[TX ACTIVE]`, `[TX FAILED]`), so a monochrome screen reads the same.
 
@@ -207,8 +214,9 @@ motion there is no heartbeat at all; the word and the elapsed time remain.
 
 **The boot reveal wordmark** provides immediate feedback while a connection is
 being established. It operates under strict bounds: a `1.4 s` cap (it takes
-twelve ticks of the 90 ms busy clock, about 1.1 s), a left-to-right sweep with easing and a decode leading edge, an any-key
-skip that still delivers the typed key to its handler, immediate truncation on
+twelve ticks of the 90 ms busy clock, about 1.1 s), a left-to-right sweep with
+easing and a decode leading edge, an any-key skip that still delivers the typed
+key to its handler, immediate truncation on
 any connection outcome (success or failure), runs at most once per process,
 renders a static final frame from tick 0 under reduced motion, falls back to a
 compact monogram under 64 columns, is omitted entirely on too-small layouts

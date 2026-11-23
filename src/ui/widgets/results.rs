@@ -927,7 +927,6 @@ fn render_results_placeholder(
 fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation) -> Vec<Line<'a>> {
     let theme = &presentation.theme;
     let elapsed = model.running_for.unwrap_or_default();
-    let seconds = elapsed.as_secs_f64();
 
     let leader = if presentation.reduced_motion {
         String::new()
@@ -945,7 +944,11 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
         Span::styled(leader, theme.style(Token::Info)),
         Span::styled(word.to_owned(), theme.style(Token::Text)),
         Span::styled(
-            format!("  {}{seconds:.1}s", presentation.icon(Icon::Clock)),
+            format!(
+                "  {}{}",
+                presentation.icon(Icon::Clock),
+                super::live_seconds(elapsed)
+            ),
             theme.style(Token::Muted),
         ),
     ])];

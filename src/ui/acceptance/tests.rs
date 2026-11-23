@@ -1079,7 +1079,7 @@ fn reference_journeys_j1_through_j8_preserve_safety_recovery_and_visual_cues() {
         "J7: static indicator still states Running"
     );
     assert!(
-        frame0_text.contains("2.0s"),
+        frame0_text.contains("2.0 s"),
         "J7: static indicator shows elapsed duration"
     );
     model.phase = QueryPhase::Idle;
