@@ -1,5 +1,21 @@
 # Verification
 
+## Current GitHub Actions coverage
+
+CI tests plain and verified TLS with PostgreSQL 14 through 18 on pull requests,
+pushes to `main`, version tags, manual runs and the weekly schedule. A separate
+Linux job executes a query over a real PostgreSQL 18 Unix socket. The
+cross-platform Linux job runs on `ubuntu-24.04` to exercise the same glibc
+baseline as the GNU release target.
+
+The weekly CI run compares each upstream `postgres:<major>-alpine` manifest
+index with the reviewed digest in [the fixture map](../../docker/postgres-images.env).
+An authorized maintainer can repeat the comparison through the CI workflow's
+`check_postgres_fixture_drift` manual input. A moved or unreadable digest fails
+the comparison and the summary records the result for each major. Separate
+concurrency groups let the scheduled comparison finish when a push or manual
+run starts on the same ref.
+
 ## Installed Warp acceptance, PR 121 and ADR-0008 - 21 November 2026
 
 An isolated macOS 27.2.1 (`26B131`, arm64) run exercised the signed

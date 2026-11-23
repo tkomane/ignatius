@@ -326,12 +326,12 @@ archive helper, generates and verifies these sidecars,
 stages only the archive, record and verified sidecars under an exact upload
 root, checks that root with `cargo --locked xtask release evidence-scope`, and retains it
 as a run-scoped workflow artifact. The hardened workflow first freezes one
-source revision and runs release-note validation, the dependency policy, a
-full-history secret scan and the complete Linux verifier before retaining any
-target bundle. Each matrix job emits a per-target record with one shared
-run-attempt build identity. A final job downloads the three bundles, rechecks
-each five-file scope, verifies each archive and inventory against its manifest,
-and uses
+source revision and runs release-note validation, the locked all-features
+workspace dependency audit, a full-history secret scan and the complete Linux
+verifier before retaining any target bundle. Each matrix job emits a per-target
+record with one shared run-attempt build identity. A final job downloads the
+three bundles, rechecks each five-file scope, verifies each archive and
+inventory against its manifest, and uses
 `cargo --locked xtask release aggregate` to create a canonical three-target
 record. It then generates and verifies one combined manifest, collects one
 runtime sidecar per target, scans each retained target bundle and the final
@@ -347,6 +347,12 @@ reruns. If one archive job needs retrying, use **Re-run all jobs** or start a
 fresh full dispatch. A partial rerun leaves the aggregate without three bundles
 from one attempt and fails with an actionable recovery instruction instead of
 assembling mixed-attempt evidence.
+
+The GNU/Linux archive and both repeat builds run on GitHub's `ubuntu-24.04`
+image. The archived binary also runs there for the install and rollback checks
+to exercise the glibc 2.39 baseline.
+[Runner labels](https://github.com/actions/runner-images#available-images) and
+[Ubuntu libc package](https://packages.ubuntu.com/noble/libc6).
 
 The Windows reproducibility pair uses independent clean compiler outputs on
 one hosted Windows VM. It records and checks the selected native inputs around

@@ -98,7 +98,8 @@ jobs:
             echo "installed an unexpected cargo-deny version: $version" >&2
             exit 1
           fi
-          "$install_root/bin/cargo-deny" check advisories licenses bans sources
+          "$install_root/bin/cargo-deny" --locked --workspace --all-features \
+            check advisories licenses bans sources
           python3 scripts/check-driver-registry-advisories.py "$install_root/bin/cargo-deny"
           printf 'sbom_policy=pass\n' >> "$GITHUB_OUTPUT"
       - name: Scan immutable candidate history for secrets
@@ -122,7 +123,7 @@ jobs:
         env:
           IGNATIUS_PG_VERSION: "18"
           IGNATIUS_POSTGRES_IMAGE: ${{ steps.fixture.outputs.image }}
-        run: cargo xtask db up
+        run: cargo --locked xtask db up
       - name: Start the Unix socket verifier fixture
         shell: bash
         env:
@@ -150,8 +151,10 @@ jobs:
 
           ready=no
           for attempt in $(seq 1 60); do
+            # The entrypoint's temporary init server listens only on its socket.
+            # TCP readiness proves initialization ended before the socket test.
             if docker exec "$container" \
-              pg_isready -h /var/run/postgresql -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
+              pg_isready -h 127.0.0.1 -U ignatius_test -d ignatius_demo >/dev/null 2>&1; then
               ready=yes
               echo "release socket fixture ready after ${attempt}s"
               break
@@ -167,7 +170,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo xtask verify
+          cargo --locked xtask verify
       - name: Remove verifier fixtures
         if: always()
         shell: bash
@@ -186,7 +189,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Build against the glibc 2.39 baseline used by the runtime job.
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             format: tar.gz
             binary: ignatius
@@ -510,7 +514,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - runner: macos-latest
             target: aarch64-apple-darwin
@@ -871,13 +875,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Build against the glibc 2.39 baseline used by the runtime job.
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             format: tar.gz
             binary: ignatius
             rustflags: "-D warnings"
             repeat: one
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             format: tar.gz
             binary: ignatius
