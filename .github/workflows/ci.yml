@@ -8,6 +8,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      check_postgres_fixture_drift:
+        description: Compare reviewed PostgreSQL fixture digests with current official tags
+        type: boolean
+        default: false
   schedule:
     # Ecosystem advisories and supported PostgreSQL images can change without
     # a source commit. Recheck them weekly at 05:17 Africa/Johannesburg.
@@ -16,10 +21,10 @@ on:
 permissions:
   contents: read
 
-# A newer commit makes an older CI result stale. Keep release candidates out of
-# this group: their workflow deliberately preserves every requested run.
+# Supersede stale runs within the same event and ref. Keep the weekly registry
+# check and manual rehearsals independent of ordinary pushes.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -105,7 +110,7 @@ jobs:
       matrix:
         include:
           - name: Linux
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - name: macOS
             runner: macos-latest
           - name: Windows
@@ -145,9 +150,8 @@ jobs:
             exit 1
           fi
 
-  # Protocol and transport claims need real plain and TLS servers. Pull
-  # requests cover the oldest and newest supported majors; main, manual and
-  # weekly runs cover every supported major from PostgreSQL 14 through 18.
+  # Run plain and TLS contracts for every supported major before merge,
+  # including revisions to reviewed fixture digests for intermediate majors.
   integration:
     name: PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
@@ -155,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ${{ fromJSON(github.event_name == 'pull_request' && '["14","18"]' || '["14","15","16","17","18"]') }}
+        postgres: ["14", "15", "16", "17", "18"]
     env:
       IGNATIUS_PG_VERSION: ${{ matrix.postgres }}
     steps:
@@ -326,13 +330,11 @@ jobs:
             docker rm --force "$IGNATIUS_SOCKET_CONTAINER" || true
           fi
 
-  # A digest fixes each ordinary run to reviewed server bytes. The weekly
-  # comparison still tells us when an upstream major tag moves, so a security
-  # update becomes a deliberate source-controlled digest review rather than
-  # invisible fixture drift.
+  # Pinned fixtures use reviewed bytes. Check for upstream changes weekly
+  # and allow an explicit manual comparison after a digest update.
   postgres-fixture-drift:
     name: Reviewed PostgreSQL fixture drift
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.check_postgres_fixture_drift)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
