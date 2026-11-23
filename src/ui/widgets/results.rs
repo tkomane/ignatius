@@ -430,10 +430,25 @@ pub(crate) fn render_results(
 pub(crate) fn status_word_style(theme: &Theme, settle: Option<f32>) -> Style {
     let mut style = theme.style(Token::Muted);
     style.add_modifier.remove(Modifier::DIM);
-    match settle.and_then(|progress| theme.mix(Token::Success, Token::Muted, progress)) {
+    match settle
+        .filter(|_| settle_inks_are_legible(theme))
+        .and_then(|progress| theme.mix(Token::Success, Token::Muted, progress))
+    {
         Some(ink) => style.fg(ink),
         None => style,
     }
+}
+
+/// Whether both ends of the settle read as text on the pane the title sits on.
+///
+/// A custom theme may admit its success colour at 3:1, which is enough for a
+/// badge but not for a word, so a settle there is skipped rather than painted
+/// in an ink the word cannot be read in. The resting ink always passes.
+fn settle_inks_are_legible(theme: &Theme) -> bool {
+    let pane = theme.rgb(Token::SurfacePane);
+    [Token::Success, Token::Muted]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(pane) >= 4.5)
 }
 
 /// One row down the screen, one column per line.
@@ -1162,6 +1177,7 @@ fn render_grid(
             order_candidates.push(toolbar(&[range_label.as_deref(), Some(&sort)]));
             order_candidates.push(sort);
             order_candidates.push(LOCAL_SORT_SHORT.to_owned());
+            order_candidates.push(LOCAL_SORT_SHORTEST.to_owned());
         }
         None => {
             order_candidates.push(toolbar(&[
@@ -1527,6 +1543,9 @@ const LOCAL_SORT_QUALIFIER: &str = "(local, retained rows only)";
 
 /// A local sort stated in the fewest words that still say both facts.
 const LOCAL_SORT_SHORT: &str = "local sort, retained rows only";
+
+/// The narrowest statement of a local sort that still names both facts.
+const LOCAL_SORT_SHORTEST: &str = "local sort, retained only";
 
 /// The order of an unsorted grid: whatever order the server sent.
 const SERVER_ORDER: &str = "order: server";

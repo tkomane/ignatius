@@ -186,7 +186,9 @@ Two transitions decorate a change that has already happened:
   news that is not calm. A `\watch` loop and a generated cell update do not
   settle either. Only the word's ink moves, never a background, and the
   resting word is muted ink without dimming, so the last frame of the fade
-  is exactly the resting frame and nothing changes when it ends.
+  is exactly the resting frame and nothing changes when it ends. A custom
+  theme whose success colour reads below 4.5:1 on the pane gets no settle,
+  because a word is never painted in an ink it cannot be read in.
 
 Focus changes and overlays do not move. Focus already has its heavier border,
 its colour and the `[focused]` word in the same frame, and the palette and

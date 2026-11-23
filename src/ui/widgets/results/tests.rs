@@ -1014,6 +1014,11 @@ fn a_narrow_toolbar_drops_whole_segments_instead_of_cutting_words() {
         for width in 20u16..=140 {
             let area = Rect::new(0, 0, width, 20);
             let (order, state) = toolbar_lines(&render(&model, &presentation, area), area);
+            // A local sort is stated in some form in every pane that can
+            // hold the shortest statement of it.
+            if sorted && usize::from(width) >= 2 + "local sort, retained only".len() {
+                assert!(order.contains("local"), "width {width}: {order:?}");
+            }
             for line in [&order, &state] {
                 assert!(
                     !line.contains('\u{2026}') && !line.contains("..."),
@@ -1026,6 +1031,7 @@ fn a_narrow_toolbar_drops_whole_segments_instead_of_cutting_words() {
                             "order: server",
                             "sorted by amount ascending (local, retained rows only)",
                             "local sort, retained rows only",
+                            "local sort, retained only",
                             "selected column 2: amount",
                             "2 columns",
                             "types: unavailable",
@@ -1463,6 +1469,21 @@ fn a_settle_tints_only_its_own_completed_result() {
         render(&still, &presentation, area)
     );
 
+    // A cancelled outcome keeps its static colours even under a settle that
+    // names its job.
+    let mut cancelled = settling(Duration::ZERO);
+    if let Some(execution) = cancelled.last_execution.as_mut() {
+        execution.status = ExecutionStatus::Cancelled;
+    }
+    let mut cancelled_still = cancelled.clone();
+    cancelled_still.motion.settle();
+    let cancelled_frame = render(&cancelled, &presentation, area);
+    assert!(buffer_to_string(&cancelled_frame).contains("Query cancelled by server"));
+    assert_eq!(
+        cancelled_frame,
+        render(&cancelled_still, &presentation, area)
+    );
+
     // No colour means no tint: the frame is the resting frame.
     for depth in [ColorDepth::Basic16, ColorDepth::None] {
         let low = presentation_at(depth);
@@ -1703,5 +1724,33 @@ fn reduced_motion_keeps_the_words_and_draws_no_heartbeat() {
     assert!(
         rows[2].contains("asks the server to cancel"),
         "the words follow directly, with no heartbeat row: {text}"
+    );
+}
+
+#[test]
+fn a_custom_success_ink_too_faint_for_a_word_skips_the_settle() {
+    use crate::ui::theme::{Rgb, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    // Admitted at 3:1 for badges, but under 4.5:1 on the pane the title sits on.
+    let faint = Rgb(0x30, 0x8c, 0x50);
+    let definition = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Success, faint);
+    let theme = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+        .expect("a custom palette admitted at 3:1")
+        .selected_theme(true, ColorDepth::TrueColor);
+    assert!(faint.contrast(theme.rgb(Token::SurfacePane)) < 4.5);
+    let presentation = Presentation::new(theme, Glyphs::new(GlyphTier::Unicode), false);
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+    for step in [0u64, 60, 200] {
+        assert_eq!(
+            render(&settling(Duration::from_millis(step)), &presentation, area),
+            resting,
+            "{step} ms: the faint ink is never painted"
+        );
+    }
+    // A built-in palette still settles.
+    let built_in = presentation_at(ColorDepth::TrueColor);
+    assert_eq!(
+        Some(status_cell(&render(&settling(Duration::ZERO), &built_in, area)).fg),
+        built_in.theme.color(Token::Success)
     );
 }
