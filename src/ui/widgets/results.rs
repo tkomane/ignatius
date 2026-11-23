@@ -26,13 +26,29 @@ pub(crate) fn grid_header_rows(
     spacing: crate::app::model::Spacing,
     area: Rect,
 ) -> usize {
+    // The column header row, then the optional types row and the rule.
+    grid_column_header_row(model, spacing, area)
+        + 2
+        + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+}
+
+/// The inner row the column header is painted on, shared with hit testing.
+///
+/// The rows above it are, in paint order: the retention warning, the order
+/// line, the state line, and either one notice or the density's blank rows.
+/// A click handler that assumed a fixed row would land on the rule or the
+/// types row in compact density and under a warning.
+pub(crate) fn grid_column_header_row(
+    model: &Model,
+    spacing: crate::app::model::Spacing,
+    area: Rect,
+) -> usize {
     let notice = model.cell_update_notice.is_some()
         || model.clipboard_notice.is_some()
         || model.refresh_notice.is_some()
         || model.result_grid.note.is_some();
     retention_warning_lines(model, area).len()
-        + 4
-        + usize::from(model.result_grid.show_types && set.column_types.iter().any(Option::is_some))
+        + 2
         + usize::from(u16::from(notice).max(spacing.toolbar_blank_rows))
 }
 

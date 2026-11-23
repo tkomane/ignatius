@@ -673,6 +673,70 @@ fn compact_results_use_the_whole_body() {
     );
 }
 
+/// The row the result column header is painted on, read from the frame itself
+/// rather than from the prelude arithmetic under test.
+fn painted_header_row(model: &Model, area: Rect, inside: Rect) -> u16 {
+    let mut buf = Buffer::empty(area);
+    crate::ui::layout::render(model, &Keymap::new(), area, &mut buf);
+    (inside.y..inside.y + inside.height)
+        .find(|&y| {
+            let row: String = (inside.x..inside.x + inside.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect();
+            row.trim_start().starts_with('#') && row.contains("c0")
+        })
+        .expect("the column header is painted")
+}
+
+#[test]
+fn a_header_click_lands_on_the_header_wherever_the_prelude_puts_it() {
+    // The header row moves with the density, the types row, a notice and the
+    // retention warning. A click on the painted header must resolve to the
+    // header cell in every one of them, never to the rule or a data row.
+    let area = Rect::new(0, 0, 100, 30);
+    let body = body_area(area);
+    let mut cases: Vec<(&str, Model)> = Vec::new();
+    cases.push(("comfortable", grid_model(2, 4)));
+    let mut compact = grid_model(2, 4);
+    compact.presentation = compact
+        .presentation
+        .clone()
+        .with_density(crate::config::Density::Compact);
+    cases.push(("compact", compact.clone()));
+    let mut typed = compact.clone();
+    typed.result_grid.show_types = true;
+    typed.last_execution.as_mut().expect("execution").statements[0]
+        .result_set
+        .as_mut()
+        .expect("result")
+        .set_column_types(vec![Some("int4".into()), Some("text".into())]);
+    cases.push(("compact with types", typed));
+    let mut warned = grid_model(2, 4);
+    warned.retained_data_loss.limited_sets = 1;
+    cases.push(("retention warning", warned));
+    let mut noted = compact;
+    noted.result_grid.note = Some("Column widths reset.".into());
+    cases.push(("compact with a note", noted));
+
+    for (name, mut model) in cases {
+        model.focus = Focus::Results;
+        let (_, results) = main_panes(body, false, &model.splits);
+        let inside = inner(results);
+        let header_y = painted_header_row(&model, area, inside);
+        let content_x = inside.x + 3;
+        assert_eq!(
+            region_at(&model, area, content_x, header_y),
+            Some(Region::ResultsHeaderCell { column: 0 }),
+            "{name}: a click on the painted header row {header_y}"
+        );
+        assert_ne!(
+            region_at(&model, area, content_x, header_y + 1),
+            Some(Region::ResultsHeaderCell { column: 0 }),
+            "{name}: the row under the header is not the header"
+        );
+    }
+}
+
 #[test]
 fn borders_and_out_of_area_cells_are_misses() {
     let model = Model::new(100);

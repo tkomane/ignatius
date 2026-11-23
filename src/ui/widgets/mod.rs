@@ -601,7 +601,7 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
         .saturating_add(u16::try_from(gutter.saturating_add(1)).unwrap_or(u16::MAX));
 
     let top = usize::from(row.saturating_sub(inner.y));
-    if top == 3 {
+    if top == results::grid_column_header_row(model, model.presentation.spacing(), inner) {
         if let Some(column) = column_at(&window, &widths, content_x, column) {
             return Some(Region::ResultsHeaderCell { column });
         }
