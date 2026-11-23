@@ -448,6 +448,11 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
         "docs/product/roadmap.md does not record Feature 025 US1-US10 merge status"
     );
 
+    assert!(
+        !ICONS_AND_MOTION.contains("exactly three moving things"),
+        "docs/design/icons-and-motion.md still limits motion to three moving things"
+    );
+
     for (document, expected) in [
         (THEME_TOKENS, "## Painted surfaces and elevation"),
         (THEME_TOKENS, "SurfacePane"),
@@ -461,7 +466,15 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
         (TERMINAL_COMPATIBILITY, "COLORTERM"),
         (TERMINAL_COMPATIBILITY, "OSC 11"),
         (TERMINAL_COMPATIBILITY, "ui.theme = \"auto\""),
-        (ICONS_AND_MOTION, "There are exactly three moving things"),
+        (
+            ICONS_AND_MOTION,
+            "Every moving thing follows the same seven rules",
+        ),
+        (
+            ICONS_AND_MOTION,
+            "**Safety surfaces never move or recede.**",
+        ),
+        (ICONS_AND_MOTION, "No transition lasts longer than 800 ms"),
         (ICONS_AND_MOTION, "boot reveal wordmark"),
         (ICONS_AND_MOTION, "200 ms"),
         (ICONS_AND_MOTION, "TLS verify-full"),

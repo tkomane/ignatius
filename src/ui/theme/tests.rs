@@ -1140,3 +1140,73 @@ fn keycap_and_recessed_pill_respect_all_depths_and_strip_dim() {
         }
     }
 }
+
+// ------------------------------------------------- transition colour mixing
+
+#[test]
+fn rgb_mix_reaches_both_ends_and_rounds_between_them() {
+    let from = Rgb(0, 100, 255);
+    let to = Rgb(255, 0, 55);
+    assert_eq!(from.mix(to, 0.0), from);
+    assert_eq!(from.mix(to, 1.0), to);
+    assert_eq!(from.mix(to, 0.5), Rgb(128, 50, 155));
+    assert_eq!(from.mix(to, -2.0), from, "clamped below");
+    assert_eq!(from.mix(to, 9.0), to, "clamped above");
+    assert_eq!(from.mix(to, f32::NAN), to, "not a number settles");
+    assert_eq!(from.mix(from, 0.37), from);
+}
+
+#[test]
+fn token_mix_interpolates_only_at_truecolour() {
+    for (theme, (from, to)) in themes().into_iter().flat_map(|theme| {
+        [
+            (Token::Border, Token::Focus),
+            (Token::Success, Token::Muted),
+        ]
+        .map(|pair| (theme.clone(), pair))
+    }) {
+        let true_color = theme.clone().with_depth(ColorDepth::TrueColor);
+        assert_eq!(true_color.mix(from, to, 0.0), Some(theme.rgb(from).into()));
+        assert_eq!(true_color.mix(from, to, 1.0), Some(theme.rgb(to).into()));
+        assert_eq!(
+            true_color.mix(from, to, 0.5),
+            Some(theme.rgb(from).mix(theme.rgb(to), 0.5).into())
+        );
+
+        let indexed = theme.clone().with_depth(ColorDepth::Indexed256);
+        let before = Color::Indexed(quantize_256(theme.rgb(from)));
+        let after = Color::Indexed(quantize_256(theme.rgb(to)));
+        assert_eq!(indexed.mix(from, to, 0.0), Some(before));
+        assert_eq!(indexed.mix(from, to, 0.49), Some(before));
+        assert_eq!(
+            indexed.mix(from, to, 0.5),
+            Some(after),
+            "steps at the midpoint"
+        );
+        assert_eq!(indexed.mix(from, to, 1.0), Some(after));
+
+        let basic = theme.clone().with_depth(ColorDepth::Basic16);
+        for amount in [0.0, 0.3, 0.7, 1.0] {
+            assert_eq!(
+                basic.mix(from, to, amount),
+                basic.color(to),
+                "16 colours show the final state immediately"
+            );
+        }
+
+        let none = theme.clone().with_depth(ColorDepth::None);
+        let off = Theme::new(ThemeChoice::Dark, false);
+        for amount in [0.0, 0.5, 1.0] {
+            assert_eq!(none.mix(from, to, amount), None);
+            assert_eq!(off.mix(from, to, amount), None);
+        }
+    }
+}
+
+#[test]
+fn transitions_are_visible_only_at_truecolour_and_256_colours() {
+    assert!(ColorDepth::TrueColor.shows_transitions());
+    assert!(ColorDepth::Indexed256.shows_transitions());
+    assert!(!ColorDepth::Basic16.shows_transitions());
+    assert!(!ColorDepth::None.shows_transitions());
+}
