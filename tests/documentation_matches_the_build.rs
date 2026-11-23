@@ -452,6 +452,29 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
         !ICONS_AND_MOTION.contains("exactly three moving things"),
         "docs/design/icons-and-motion.md still limits motion to three moving things"
     );
+    // The header renders `[READ ONLY]`, `[TX ACTIVE]` and `[TX FAILED]`, and
+    // keeps transport state out of its steady state, so the design documents
+    // must not describe other capsules.
+    for (document, name) in [
+        (ICONS_AND_MOTION, "docs/design/icons-and-motion.md"),
+        (
+            INFORMATION_ARCHITECTURE,
+            "docs/design/information-architecture.md",
+        ),
+    ] {
+        for stale in [
+            "READ-ONLY",
+            "[TX ACT]",
+            "[TX FAIL]",
+            "TLS verify-full",
+            "at 60 Hz",
+        ] {
+            assert!(
+                !document.contains(stale),
+                "{name} still describes {stale:?}, which the build does not draw"
+            );
+        }
+    }
 
     for (document, expected) in [
         (THEME_TOKENS, "## Painted surfaces and elevation"),
@@ -477,8 +500,19 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
         (ICONS_AND_MOTION, "No transition lasts longer than 800 ms"),
         (ICONS_AND_MOTION, "boot reveal wordmark"),
         (ICONS_AND_MOTION, "200 ms"),
-        (ICONS_AND_MOTION, "TLS verify-full"),
-        (ICONS_AND_MOTION, "READ-ONLY"),
+        (ICONS_AND_MOTION, "`[READ ONLY]`"),
+        (ICONS_AND_MOTION, "`[TX ACTIVE]`"),
+        (ICONS_AND_MOTION, "`[TX FAILED]`"),
+        (
+            ICONS_AND_MOTION,
+            "Transport state is not in the steady-state header.",
+        ),
+        (
+            ICONS_AND_MOTION,
+            "so it never fills, never arrives and never completes",
+        ),
+        (ICONS_AND_MOTION, "twelve ticks of the 90 ms busy clock"),
+        (ICONS_AND_MOTION, "a quiet instrument for PostgreSQL"),
         (INTERACTION, "Paste is bounded and explicit"),
         (INTERACTION, "The pointer enhances without replacing"),
         (

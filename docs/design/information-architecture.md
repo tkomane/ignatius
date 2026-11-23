@@ -3,7 +3,7 @@
 ## The full layout, at 80x24 and wider
 
 ```text
- Ignatius  [PROD]  [read-write] │  app@pg-01:5432/orders │  TLS TLSv1.3 verify-full │  42 ms
+  ◈ Ignatius:  ◉ app@pg-01:5432/orders  [PROD]   [READ ONLY]   │ [TX ACTIVE]   240 ms
 ╭  public › tables (18) ───────╮┏  Editor  line 4, column 18 [modified] [focused] ━━━━━━━┓
 │▾  public                     │┃  1 SELECT customer_id, total, created_at               ┃
 ││ ▾  tables (18)              │┃  2 FROM orders                                         ┃
@@ -52,9 +52,11 @@ is lost when the icons are. When focused, the active row is highlighted with a
 full-width selection bar across the entire sidebar width.
 
 **Header.** Facts about the connection that change rarely but matter constantly:
-product name, environment classification, read/write posture, target, transport
-state, and the elapsed time of the last statement. Nothing here is about the
-current keystroke.
+product name, target, environment classification, a read-only posture, an open
+or failed transaction, and the elapsed time of the last statement once it took
+200 ms or more. Transport state is routine once connected and stays out of the
+steady-state header; Connection details states it on demand. Nothing here is
+about the current keystroke.
 
 **Editor pane.** The SQL buffer, its cursor position, whether it has unsaved
 edits, and whether it has focus. All four are in the title so the pane body is
@@ -77,11 +79,15 @@ The menu is local after the snapshot load and never changes the editor before En
 summary. Below the headers, the viewport range line reports position with exact
 precision: `rows M-N of Total retained` (qualifying when results are truncated or
 filtered), and explicitly stating `0 rows returned` when a query yields an empty
-set (never misleadingly reporting `rows 0-0`). Truncation is stated in the
-summary, never implied by an absence. When an error is present it replaces this
-pane, because an error is the result. While a new query runs, any retained rows
-from a cancelled query are labelled `Previous result`. A failed transaction
-shows `ROLLBACK` before diagnostic details.
+set (never misleadingly reporting `rows 0-0`). A local sort is stated once,
+with its qualifier, as `sorted by id ascending (local, retained rows only)`, and
+an unsorted grid says `order: server`. When the pane is too narrow for every
+fact, whole facts drop, least important first, rather than a word or a count
+being cut. Truncation is stated in the summary, never implied by an absence.
+When an error is present it replaces this pane, because an error is the result.
+While a new query runs, any retained rows from a cancelled query are labelled
+`Previous result`. A failed transaction shows `ROLLBACK` before diagnostic
+details.
 
 The same pane has a second shape, reached with `Ctrl+K x`: one row down the
 screen, one column per line, with the names aligned. It exists because a grid
@@ -126,7 +132,11 @@ and opening the surface performs no refresh or network request. The title keeps
 **Footer.** Query status (`Ready`, `Running`, `Cancellation requested` or
 `Query cancelled by server`), transaction state, the session's search path and
 up to six key hints. At narrow widths, `Cancelled` leaves room for the full
-transaction status.
+transaction status. `Ready` sits beside a neutral idle mark, not a success mark,
+because idle is not news. While an overlay owns input the hints are that
+overlay's own keys in its own words, such as `Enter Choose`, `Up/Down Move` and
+`Esc Close` for the palette; a prompt, confirmation or review offers only
+`Esc Cancel`, because its acceptance wording belongs beside what is accepted.
 
 ## Narrow and small
 
