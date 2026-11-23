@@ -183,11 +183,18 @@ pub fn hint_actions(model: &Model) -> Vec<Action> {
 }
 
 /// Uses the rendering presentation, including an explicit test override.
+///
+/// While an overlay owns input this is empty: every workbench action would be
+/// swallowed by the overlay, and [`overlay_hint_actions`] says what the
+/// overlay's own keys do instead.
 #[must_use]
 pub fn hint_actions_for(
     model: &Model,
     presentation: &crate::app::model::Presentation,
 ) -> Vec<Action> {
+    if overlay_hint_actions(model).is_some() {
+        return Vec::new();
+    }
     let ctx = context(model);
     let mut candidates = match ctx.focus {
         Focus::Editor if model.phase.is_busy() => vec![
@@ -284,6 +291,84 @@ pub fn hint_actions_for(
         .filter(|action| action_is_available(model, action))
         .take(presentation.spacing().footer_hint_cap)
         .collect()
+}
+
+/// The keys the footer offers while an overlay owns input, each with what it
+/// does there, or `None` while the workbench owns input.
+///
+/// Surfaces are checked in the order the reducer peels them, so the rail
+/// names the surface a key would actually reach, and each lists only keys its
+/// handler acts on. A prompt, confirmation or review offers only its way out:
+/// Enter there may wait for a typed word or a finished review, or may run or
+/// write, and the wording for accepting belongs on the surface itself, beside
+/// what is being accepted. The keymap supplies each key; the label is the
+/// overlay's own word for it.
+#[must_use]
+pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>> {
+    let cancel = vec![(Action::Dismiss, "Cancel")];
+    let close = vec![(Action::Dismiss, "Close")];
+    if model.password_prompt.is_some()
+        || model.parameter_prompt.is_some()
+        || model.name_prompt.is_some()
+    {
+        return Some(cancel);
+    }
+    if model.connection_details {
+        return Some(close);
+    }
+    if model.prefix_pending
+        || model.pending_run.is_some()
+        || model.pending_plan.is_some()
+        || model.pending_copy.is_some()
+        || model.update_prompt.is_some()
+        || model.pending_update.is_some()
+    {
+        return Some(cancel);
+    }
+    if model.palette.is_some() {
+        return Some(vec![
+            (Action::Activate, "Choose"),
+            (Action::Move(Direction::Down), "Move"),
+            (Action::Dismiss, "Close"),
+        ]);
+    }
+    if model.notice_details.is_some() || model.help_open {
+        return Some(close);
+    }
+    if model.completion.menu.is_some() {
+        return Some(vec![
+            (Action::Activate, "Accept"),
+            (Action::Move(Direction::Down), "Move"),
+            (Action::Dismiss, "Cancel"),
+        ]);
+    }
+    let dashboard = model.inspector.is_some()
+        || model.definition.is_some()
+        || model.schema_diagram.is_some()
+        || model.server_activity.is_some()
+        || model.security_audit.is_some()
+        || model.schema_diff.is_some()
+        || model.import_wizard.is_some()
+        || model.routine_runner.is_some()
+        || model.maintenance_ops.is_some()
+        || model.query_performance.is_some()
+        || model.index_advisor.is_some()
+        || model.wal_observability.is_some()
+        || model.connection_pool.is_some()
+        || model.data_masking.is_some()
+        || model.data_sync.is_some()
+        || model.synthetic_seed.is_some()
+        || model.snippet_library.is_some()
+        || model.lint_findings.is_some()
+        || model.logical_replication.is_some()
+        || model.cluster_config.is_some()
+        || model.data_browser.is_some()
+        || model.plan_diff.is_some()
+        || model.result_analytics.is_some()
+        || model.query_bench.is_some()
+        || model.schema_snapshot.is_some()
+        || model.sql_runbook.is_some();
+    dashboard.then_some(close)
 }
 
 /// Returns the actions offered by the general command palette.

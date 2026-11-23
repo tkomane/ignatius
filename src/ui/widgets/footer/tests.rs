@@ -581,3 +581,116 @@ fn compact_footer_at_forty_by_eight_keeps_divider_and_non_color_parity() {
         }
     }
 }
+
+fn connected_editor_model() -> Model {
+    let mut model = Model::new(100);
+    model.connection =
+        crate::app::model::ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+            target: "app@localhost:5432/orders".into(),
+            database: "orders".into(),
+            user: "app".into(),
+            server_version: "18.0".into(),
+            backend_pid: "1".into(),
+            search_path: "public".into(),
+            read_only: false,
+            tls: crate::postgres::TlsState::Disabled,
+            environment: crate::connection::Environment::Local,
+        }));
+    model.focus = crate::app::model::Focus::Editor;
+    model.editor.set_text("SELECT 1;");
+    model
+}
+
+fn footer_text(model: &Model, width: u16) -> String {
+    let area = Rect::new(0, 0, width, 1);
+    let mut buffer = Buffer::empty(area);
+    render_footer(
+        model,
+        &Keymap::new(),
+        &presentation(ThemeChoice::Dark, true, GlyphTier::Unicode),
+        area,
+        &mut buffer,
+    );
+    crate::ui::layout::buffer_to_string(&buffer)
+}
+
+#[test]
+fn an_open_overlay_replaces_workbench_hints_with_its_own_keys() {
+    let workbench = connected_editor_model();
+    let plain = footer_text(&workbench, 160);
+    assert!(plain.contains("Ctrl+R Run"), "{plain}");
+
+    let mut palette = workbench.clone();
+    palette.palette = Some(crate::app::palette::Palette::new(Vec::new()));
+    let text = footer_text(&palette, 160);
+    assert!(text.contains("Enter Choose"), "{text}");
+    assert!(text.contains("Up/Down Move"), "{text}");
+    assert!(text.contains("Esc Close"), "{text}");
+    assert!(
+        !text.contains("Ctrl+R"),
+        "a swallowed key is advertised: {text}"
+    );
+    assert!(
+        !text.contains("Plan"),
+        "a swallowed key is advertised: {text}"
+    );
+    // The status, transaction and search path segments stay.
+    for segment in ["Ready", "public"] {
+        assert!(text.contains(segment), "{segment}: {text}");
+    }
+
+    let mut help = workbench.clone();
+    help.help_open = true;
+    let text = footer_text(&help, 160);
+    assert!(text.contains("Esc Close"), "{text}");
+    assert!(!text.contains("Ctrl+R"), "{text}");
+
+    // A confirmation offers only its way out; accepting is worded on the
+    // surface beside what is being accepted.
+    let mut confirming = workbench.clone();
+    confirming.prefix_pending = true;
+    let text = footer_text(&confirming, 160);
+    assert!(text.contains("Esc Cancel"), "{text}");
+    assert!(!text.contains("Enter"), "{text}");
+    assert!(!text.contains("Ctrl+R"), "{text}");
+
+    // A dashboard that is not in the pane-blocking list still owns input.
+    let mut snippets = workbench;
+    snippets.snippet_library = Some(crate::app::model::SnippetLibraryState::default());
+    let text = footer_text(&snippets, 160);
+    assert!(text.contains("Esc Close"), "{text}");
+    assert!(!text.contains("Ctrl+R"), "{text}");
+}
+
+#[test]
+fn every_pane_blocking_overlay_has_footer_keys_of_its_own() {
+    let mut model = connected_editor_model();
+    model.palette = Some(crate::app::palette::Palette::new(Vec::new()));
+    assert!(crate::ui::widgets::overlay_blocks_panes(&model));
+    assert!(crate::app::discovery::hint_actions_for(&model, &model.presentation).is_empty());
+    let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay keys");
+    assert!(hints.len() <= crate::app::discovery::MAX_CONTEXTUAL_HINTS);
+    for (action, _) in hints {
+        assert!(
+            super::overlay_key(&Keymap::new(), &action).is_some(),
+            "{action:?} has no key"
+        );
+    }
+}
+
+#[test]
+fn an_idle_footer_does_not_wear_a_success_mark() {
+    let mut model = connected_editor_model();
+    model.error = Some(crate::diagnostics::Diagnostic::new(
+        crate::diagnostics::DiagnosticKind::Query,
+        "syntax error",
+        "executing buffer",
+    ));
+    let text = footer_text(&model, 120);
+    assert!(text.contains("Ready"), "{text}");
+    assert!(
+        !text.contains('\u{2713}'),
+        "a check mark beside Ready: {text}"
+    );
+    assert!(text.contains("\u{25cb} Ready"), "{text}");
+}

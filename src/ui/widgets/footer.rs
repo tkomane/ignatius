@@ -48,7 +48,9 @@ pub(crate) fn render_footer(
             });
     let (status_icon, status_token) = match model.phase {
         QueryPhase::Idle if server_cancelled => (Icon::Warning, Token::Warning),
-        QueryPhase::Idle => (Icon::Success, Token::Muted),
+        // Idle is neither news nor success: right after an error a check mark
+        // beside `Ready` would read as though something had gone well.
+        QueryPhase::Idle => (Icon::Idle, Token::Muted),
         QueryPhase::Running { .. } => (Icon::Info, Token::Info),
         QueryPhase::CancellationRequested { .. } => (Icon::Warning, Token::Warning),
     };
@@ -264,11 +266,29 @@ pub(crate) fn render_footer(
     let mut hints_width = 0usize;
     let mut hints_rendered = 0usize;
 
-    for action in crate::app::discovery::hint_actions_for(model, presentation)
-        .into_iter()
-        .take(presentation.footer_hint_cap())
-    {
-        let Some((key, label)) = keymap.contextual_hint(&action) else {
+    // While an overlay owns input the rail offers that overlay's keys, in its
+    // words; workbench keys there would be swallowed and do nothing.
+    let candidates: Vec<(crate::app::Action, Option<&'static str>)> =
+        crate::app::discovery::overlay_hint_actions(model).map_or_else(
+            || {
+                crate::app::discovery::hint_actions_for(model, presentation)
+                    .into_iter()
+                    .map(|action| (action, None))
+                    .collect()
+            },
+            |hints| {
+                hints
+                    .into_iter()
+                    .map(|(action, label)| (action, Some(label)))
+                    .collect()
+            },
+        );
+    for (action, overlay_label) in candidates.into_iter().take(presentation.footer_hint_cap()) {
+        let hint = match overlay_label {
+            Some(label) => overlay_key(keymap, &action).map(|key| (key, label)),
+            None => keymap.contextual_hint(&action),
+        };
+        let Some((key, label)) = hint else {
             continue;
         };
         let key_width = display_width(&key);
@@ -316,6 +336,26 @@ pub(crate) fn render_footer(
         .style(theme.surface(Token::SurfaceAlt))
         .render(area, buf);
     true
+}
+
+/// The key the keymap binds to an overlay action. Vertical movement names
+/// only the up and down keys, because a list moves in one dimension.
+fn overlay_key(keymap: &Keymap, action: &crate::app::Action) -> Option<String> {
+    use crate::app::message::{Action, Direction};
+    if let Action::Move(Direction::Up | Direction::Down) = action {
+        let key = |direction| {
+            keymap
+                .bindings()
+                .iter()
+                .find(|binding| binding.action == Action::Move(direction))
+                .map(crate::ui::keymap::Binding::key_label)
+        };
+        return match (key(Direction::Up), key(Direction::Down)) {
+            (Some(up), Some(down)) => Some(format!("{up}/{down}")),
+            (one, other) => one.or(other),
+        };
+    }
+    keymap.contextual_hint(action).map(|(key, _)| key)
 }
 
 #[cfg(test)]
