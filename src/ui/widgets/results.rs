@@ -262,8 +262,24 @@ pub(crate) fn render_results(
         format!("{}Results", presentation.icon(Icon::Rows)),
         primary_style,
     ));
+    // A complete, successful result settles: its status word starts in the
+    // success ink and fades to its resting ink. Only the word of the job that
+    // started the settle is tinted, and only while it is that job's own
+    // status rather than a refresh or a previous result.
+    let settle = model
+        .motion()
+        .result_settle()
+        .filter(|(job, _)| {
+            *job == execution.job
+                && execution.status == ExecutionStatus::Succeeded
+                && !model.running_refresh
+                && !previous_cancellation
+        })
+        .map(|(_, progress)| progress);
+    title_spans.push(Span::styled("  ", theme.style(Token::Muted)));
+    title_spans.push(Span::styled(status, status_word_style(theme, settle)));
     title_spans.push(Span::styled(
-        format!("  {status}  {summary}"),
+        format!("  {summary}"),
         theme.style(Token::Muted),
     ));
     // What the filter admits is stated in full: how many match, of how many are
@@ -399,6 +415,24 @@ pub(crate) fn render_results(
         );
     } else {
         render_grid(model, set, keymap, presentation, focused, inner, buf);
+    }
+}
+
+/// The Results title status word, at rest or `settle` of the way through its
+/// settle.
+///
+/// At rest the word is muted ink without the dim modifier. The settle fades
+/// the foreground alone from the success ink to exactly that resting ink, so
+/// the modifiers are the same in every frame and the last frame of the fade is
+/// the resting frame: nothing changes when the settle ends. `Theme::mix`
+/// keeps the fade depth-honest: truecolour interpolates, 256 colours step at
+/// the midpoint, and no colour means no tint at all.
+pub(crate) fn status_word_style(theme: &Theme, settle: Option<f32>) -> Style {
+    let mut style = theme.style(Token::Muted);
+    style.add_modifier.remove(Modifier::DIM);
+    match settle.and_then(|progress| theme.mix(Token::Success, Token::Muted, progress)) {
+        Some(ink) => style.fg(ink),
+        None => style,
     }
 }
 

@@ -1320,3 +1320,191 @@ fn the_error_detail_key_comes_from_the_keymap_and_offers_the_collapse() {
     assert!(rows.contains("F11 to collapse."), "{rows}");
     assert!(!rows.contains("to expand"), "{rows}");
 }
+
+// ------------------------------------------------------ result settle (063)
+
+/// A completed result of job 1, settling as the interactive runtime would
+/// start it, `elapsed` into the settle.
+fn settling(elapsed: Duration) -> Model {
+    let mut model = model_with(&["id"], &text_rows(2));
+    model.motion.enable();
+    model.motion.begin_result_settle(JobId(1));
+    model.motion.advance(elapsed);
+    model
+}
+
+/// The cell under the first character of the status word `Completed`.
+fn status_cell(buf: &Buffer) -> ratatui::buffer::Cell {
+    let title: String = (0..buf.area.width).map(|x| buf[(x, 0)].symbol()).collect();
+    let x = title[..title.find("Completed").expect("the status word")]
+        .chars()
+        .count() as u16;
+    buf[(x, 0)].clone()
+}
+
+fn settle_frames(depth: ColorDepth) -> Vec<(Duration, Buffer)> {
+    let presentation = presentation_at(depth);
+    let area = Rect::new(0, 0, 80, 12);
+    (0..=20u64)
+        .map(|step| {
+            let at = Duration::from_millis(step * 30);
+            (at, render(&settling(at), &presentation, area))
+        })
+        .collect()
+}
+
+#[test]
+fn a_settle_fades_only_the_status_word_ink_into_its_exact_resting_frame() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let theme = &presentation.theme;
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+    let frames = settle_frames(ColorDepth::TrueColor);
+
+    let first = status_cell(&frames[0].1);
+    assert_eq!(
+        Some(first.fg),
+        theme.color(Token::Success),
+        "starts in success ink"
+    );
+    let settled = frames.last().expect("frames");
+    assert!(settled.0 >= crate::ui::motion::TransitionKind::ResultSettle.duration());
+    assert_eq!(settled.1, resting, "the settled frame is the resting frame");
+    assert_eq!(
+        Some(status_cell(&resting).fg),
+        theme.mix(Token::Success, Token::Muted, 1.0),
+        "the fade ends on exactly the resting ink"
+    );
+
+    let mut inks = Vec::new();
+    for (at, frame) in &frames {
+        assert_eq!(
+            buffer_to_string(frame),
+            buffer_to_string(&resting),
+            "{at:?}: the words are identical in every frame"
+        );
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let (cell, rest) = (&frame[(x, y)], &resting[(x, y)]);
+                assert_eq!(cell.bg, rest.bg, "{at:?} ({x},{y}): never a background");
+                assert_eq!(cell.modifier, rest.modifier, "{at:?} ({x},{y}): no pop");
+                if y > 0 {
+                    assert_eq!(cell.fg, rest.fg, "{at:?} ({x},{y}): only the title moves");
+                }
+            }
+        }
+        inks.push(status_cell(frame).fg);
+    }
+    inks.dedup();
+    assert!(inks.len() > 3, "truecolour interpolates: {inks:?}");
+
+    // The summary beside the word keeps its own dimmed muted ink throughout.
+    let title: String = (0..area.width)
+        .map(|x| frames[0].1[(x, 0)].symbol())
+        .collect();
+    let summary_x = title[..title.find("2 rows").expect("summary")]
+        .chars()
+        .count() as u16;
+    assert_eq!(
+        frames[0].1[(summary_x, 0)].style(),
+        resting[(summary_x, 0)].style()
+    );
+    assert!(
+        resting[(summary_x, 0)].modifier.contains(Modifier::DIM),
+        "the summary stays quiet"
+    );
+    assert!(
+        !status_cell(&resting).modifier.contains(Modifier::DIM),
+        "the resting status word is not dimmed, so the fade has nothing to pop into"
+    );
+}
+
+#[test]
+fn a_settle_steps_at_the_midpoint_in_256_colours() {
+    let theme = presentation_at(ColorDepth::Indexed256).theme;
+    let frames = settle_frames(ColorDepth::Indexed256);
+    for (at, frame) in &frames {
+        let progress = crate::ui::motion::Transition::new(
+            crate::ui::motion::TransitionKind::ResultSettle,
+            Duration::ZERO,
+        )
+        .progress(*at);
+        let expected = if progress < 0.5 {
+            theme.color(Token::Success)
+        } else {
+            theme.color(Token::Muted)
+        };
+        assert_eq!(
+            Some(status_cell(frame).fg),
+            expected,
+            "{at:?} at {progress}"
+        );
+    }
+}
+
+#[test]
+fn a_settle_tints_only_its_own_completed_result() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+
+    // Another job's settle never tints this result.
+    let mut other = settling(Duration::ZERO);
+    other.motion.begin_result_settle(JobId(2));
+    assert_eq!(render(&other, &presentation, area), resting);
+
+    // A refresh or a cancelled outcome under the same job keeps its colours.
+    let mut refreshing = settling(Duration::ZERO);
+    refreshing.running_refresh = true;
+    let mut still = refreshing.clone();
+    still.motion.settle();
+    assert_eq!(
+        render(&refreshing, &presentation, area),
+        render(&still, &presentation, area)
+    );
+
+    // No colour means no tint: the frame is the resting frame.
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = presentation_at(depth);
+        assert_eq!(
+            render(&settling(Duration::ZERO), &low, area),
+            render(&model_with(&["id"], &text_rows(2)), &low, area),
+            "{depth:?}"
+        );
+    }
+}
+
+#[test]
+fn every_settle_ink_keeps_text_contrast_on_the_pane_in_every_built_in_theme() {
+    use crate::ui::theme::Rgb;
+    for choice in [
+        ThemeChoice::Dark,
+        ThemeChoice::Light,
+        ThemeChoice::HighContrast,
+        ThemeChoice::FieldIndustrial,
+        ThemeChoice::Material,
+        ThemeChoice::Atelier,
+        ThemeChoice::Paper,
+    ] {
+        let theme = Theme::new(choice, true);
+        let pane = theme.rgb(Token::SurfacePane);
+        let threshold = if choice == ThemeChoice::HighContrast {
+            7.0
+        } else {
+            4.5
+        };
+        for step in 0..=20u8 {
+            let amount = f32::from(step) / 20.0;
+            let ink: Rgb = theme
+                .rgb(Token::Success)
+                .mix(theme.rgb(Token::Muted), amount);
+            let contrast = ink.contrast(pane);
+            assert!(
+                contrast >= threshold,
+                "{choice:?} at {amount}: {} on {} is {contrast:.2}:1",
+                ink.hex(),
+                pane.hex()
+            );
+        }
+    }
+}

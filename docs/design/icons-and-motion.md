@@ -161,8 +161,9 @@ Two transitions decorate a change that has already happened:
   cancellation, a lost connection or a limited result gets no transition and
   keeps its static colours, because fading any of them toward calm would soften
   news that is not calm. A `\watch` loop and a generated cell update do not
-  settle either. The motion core starts the settle now; the Results title
-  draws it from Feature 063 Wave 2.
+  settle either. Only the word's ink moves, never a background, and the
+  resting word is muted ink without dimming, so the last frame of the fade
+  is exactly the resting frame and nothing changes when it ends.
 
 Focus changes and overlays do not move. Focus already has its heavier border,
 its colour and the `[focused]` word in the same frame, and the palette and
