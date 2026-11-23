@@ -3931,9 +3931,11 @@ fn switch_theme(model: &mut Model) {
     );
 }
 
-/// Draws a frame through the runtime's entry point, curtain included.
+/// Draws a frame at the model's size through the runtime's entry point,
+/// curtain included.
 fn live_frame(model: &Model) -> Buffer {
-    let area = Rect::new(0, 0, CURTAIN_WIDTH, CURTAIN_HEIGHT);
+    let (width, height) = model.size;
+    let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
     super::render(model, &Keymap::new(), area, &mut buf);
     buf
@@ -3945,7 +3947,8 @@ fn still_frame(model: &Model, theme: &Theme) -> Buffer {
         theme: theme.clone(),
         ..model.presentation.clone()
     };
-    rendered_buffer(model, &presentation, CURTAIN_WIDTH, CURTAIN_HEIGHT)
+    let (width, height) = model.size;
+    rendered_buffer(model, &presentation, width, height)
 }
 
 /// A model `elapsed` into its curtain.
@@ -3966,31 +3969,63 @@ fn curtain_steps() -> impl Iterator<Item = Duration> {
     (0..=10).map(|step| Duration::from_millis(step * 32))
 }
 
+/// The layouts the curtain is checked in: the full workbench, the compact
+/// single-pane layout, and the full workbench under an ordinary dashboard
+/// overlay that leaves the theme key working.
+fn curtain_layouts(depth: crate::ui::theme::ColorDepth) -> [(&'static str, Model); 3] {
+    let full = curtain_model(depth);
+    let mut compact = curtain_model(depth);
+    compact.size = (70, 20);
+    assert_eq!(
+        layout_mode(Rect::new(0, 0, 70, 20)),
+        LayoutMode::Compact,
+        "the compact case really is compact"
+    );
+    let mut overlay = curtain_model(depth);
+    overlay.query_performance = Some(crate::app::model::QueryPerformanceState::default());
+    let theme = &full.presentation.theme;
+    assert_ne!(
+        still_frame(&overlay, theme),
+        still_frame(&full, theme),
+        "the overlay case really draws an overlay"
+    );
+    [("full", full), ("compact", compact), ("overlay", overlay)]
+}
+
 #[test]
-fn curtain_text_is_identical_in_every_frame_across_the_whole_cycle() {
+fn curtain_old_and_new_frames_carry_identical_text_across_the_whole_cycle() {
     use crate::ui::theme::ColorDepth;
     for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
-        let mut model = curtain_model(depth);
-        for _ in 0..8 {
-            switch_theme(&mut model);
-            let (outgoing, _) = model.motion().theme_curtain().expect("the curtain runs");
-            let outgoing = outgoing.clone();
-            let settled = still_frame(&model, &model.presentation.theme);
-            for elapsed in curtain_steps() {
-                let frame = live_frame(&at(&model, elapsed));
-                for (index, (cell, final_cell)) in
-                    frame.content.iter().zip(settled.content.iter()).enumerate()
-                {
+        for (layout, mut model) in curtain_layouts(depth) {
+            for _ in 0..8 {
+                switch_theme(&mut model);
+                let outgoing = model
+                    .motion()
+                    .theme_curtain()
+                    .unwrap_or_else(|| panic!("{layout}: the curtain runs"))
+                    .0
+                    .clone();
+                // The curtain only exchanges colours, so it is honest only if
+                // both themes draw exactly the same text for the same model.
+                let old = still_frame(&model, &outgoing);
+                let new = still_frame(&model, &model.presentation.theme);
+                for (index, (before, after)) in old.content.iter().zip(&new.content).enumerate() {
                     assert_eq!(
-                        cell.symbol(),
-                        final_cell.symbol(),
-                        "{depth:?} {:?} to {:?} at {elapsed:?}, cell {index}",
+                        before.symbol(),
+                        after.symbol(),
+                        "{layout} {depth:?} {:?} to {:?}, cell {index}",
                         outgoing.selection(),
                         model.presentation.theme.selection()
                     );
                 }
+                for elapsed in curtain_steps() {
+                    let frame = live_frame(&at(&model, elapsed));
+                    for (cell, after) in frame.content.iter().zip(&new.content) {
+                        assert_eq!(cell.symbol(), after.symbol(), "{layout} at {elapsed:?}");
+                    }
+                }
+                model.motion.settle();
             }
-            model.motion.settle();
         }
     }
 }
@@ -3999,36 +4034,41 @@ fn curtain_text_is_identical_in_every_frame_across_the_whole_cycle() {
 fn curtain_paints_every_cell_wholly_in_one_theme_behind_a_hard_left_to_right_edge() {
     use crate::ui::theme::ColorDepth;
     for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
-        let mut model = curtain_model(depth);
-        for _ in 0..8 {
-            switch_theme(&mut model);
-            let outgoing = model.motion().theme_curtain().unwrap().0.clone();
-            let old = still_frame(&model, &outgoing);
-            let new = still_frame(&model, &model.presentation.theme);
-            let mut previous_front = 0;
-            for elapsed in curtain_steps() {
-                let moment = at(&model, elapsed);
-                let frame = live_frame(&moment);
-                let progress = moment.motion().theme_curtain().map_or(1.0, |(_, p)| p);
-                let front = (0..CURTAIN_WIDTH)
-                    .filter(|column| {
-                        crate::ui::motion::curtain_shows_incoming(*column, CURTAIN_WIDTH, progress)
-                    })
-                    .count() as u16;
-                assert!(front >= previous_front, "the edge only moves right");
-                previous_front = front;
-                for row in 1..CURTAIN_HEIGHT - 1 {
-                    for column in 0..CURTAIN_WIDTH {
-                        let cell = &frame[(column, row)];
-                        let expected = if column < front { &new } else { &old };
-                        assert!(
-                            same_paint(cell, &expected[(column, row)]),
-                            "{depth:?} at {elapsed:?}: ({column}, {row}) is not wholly in one theme"
-                        );
+        for (layout, mut model) in curtain_layouts(depth) {
+            let (width, height) = model.size;
+            for _ in 0..8 {
+                switch_theme(&mut model);
+                let outgoing = model.motion().theme_curtain().unwrap().0.clone();
+                let old = still_frame(&model, &outgoing);
+                let new = still_frame(&model, &model.presentation.theme);
+                let mut previous_front = 0;
+                for elapsed in curtain_steps() {
+                    let moment = at(&model, elapsed);
+                    let frame = live_frame(&moment);
+                    let progress = moment.motion().theme_curtain().map_or(1.0, |(_, p)| p);
+                    let front = (0..width)
+                        .filter(|column| {
+                            crate::ui::motion::curtain_shows_incoming(*column, width, progress)
+                        })
+                        .count() as u16;
+                    assert!(
+                        front >= previous_front,
+                        "{layout}: the edge only moves right"
+                    );
+                    previous_front = front;
+                    for row in 1..height - 1 {
+                        for column in 0..width {
+                            let cell = &frame[(column, row)];
+                            let expected = if column < front { &new } else { &old };
+                            assert!(
+                                same_paint(cell, &expected[(column, row)]),
+                                "{layout} {depth:?} at {elapsed:?}: ({column}, {row}) is not wholly in one theme"
+                            );
+                        }
                     }
                 }
+                model.motion.settle();
             }
-            model.motion.settle();
         }
     }
 }
@@ -4037,31 +4077,36 @@ fn curtain_paints_every_cell_wholly_in_one_theme_behind_a_hard_left_to_right_edg
 fn curtain_rails_take_the_new_theme_in_the_first_frame() {
     use crate::ui::theme::ColorDepth;
     for depth in [ColorDepth::TrueColor, ColorDepth::Indexed256] {
-        let mut model = curtain_model(depth);
-        switch_theme(&mut model);
-        let outgoing = model.motion().theme_curtain().unwrap().0.clone();
-        let first = live_frame(&model);
-        let new = still_frame(&model, &model.presentation.theme);
-        let old = still_frame(&model, &outgoing);
-        let header: String = (0..CURTAIN_WIDTH)
-            .map(|column| first[(column, 0)].symbol())
-            .collect();
-        assert!(header.contains("PROD"), "the header carries the badge");
-        for column in 0..CURTAIN_WIDTH {
-            for row in [0, CURTAIN_HEIGHT - 1] {
-                assert!(
-                    same_paint(&first[(column, row)], &new[(column, row)]),
-                    "{depth:?}: rail cell ({column}, {row}) is not yet in the new theme"
-                );
+        for (layout, mut model) in curtain_layouts(depth) {
+            let (width, height) = model.size;
+            switch_theme(&mut model);
+            let outgoing = model.motion().theme_curtain().unwrap().0.clone();
+            let first = live_frame(&model);
+            let new = still_frame(&model, &model.presentation.theme);
+            let old = still_frame(&model, &outgoing);
+            let header: String = (0..width)
+                .map(|column| first[(column, 0)].symbol())
+                .collect();
+            assert!(
+                header.contains("PROD"),
+                "{layout}: the header carries the badge"
+            );
+            for column in 0..width {
+                for row in [0, height - 1] {
+                    assert!(
+                        same_paint(&first[(column, row)], &new[(column, row)]),
+                        "{layout} {depth:?}: rail cell ({column}, {row}) is not yet in the new theme"
+                    );
+                }
+                for row in 1..height - 1 {
+                    assert!(
+                        same_paint(&first[(column, row)], &old[(column, row)]),
+                        "{layout} {depth:?}: the body starts wholly in the old theme"
+                    );
+                }
             }
-            for row in 1..CURTAIN_HEIGHT - 1 {
-                assert!(
-                    same_paint(&first[(column, row)], &old[(column, row)]),
-                    "{depth:?}: the body starts wholly in the old theme"
-                );
-            }
+            assert_ne!(old, new, "{layout}: the two themes really differ");
         }
-        assert_ne!(old, new, "the two themes really differ");
     }
 }
 
@@ -4150,11 +4195,9 @@ fn curtain_settles_to_exactly_the_plain_new_theme_render() {
 fn freshly_built_models_render_settled() {
     let mut model = connected_model(Environment::Production);
     model.presentation = rich();
-    let area = Rect::new(0, 0, CURTAIN_WIDTH, CURTAIN_HEIGHT);
-    let mut live = Buffer::empty(area);
-    super::render(&model, &Keymap::new(), area, &mut live);
+    model.size = (CURTAIN_WIDTH, CURTAIN_HEIGHT);
     assert_eq!(
-        live,
+        live_frame(&model),
         rendered_buffer(&model, &model.presentation, CURTAIN_WIDTH, CURTAIN_HEIGHT)
     );
     assert!(!model.is_animating());
