@@ -951,28 +951,40 @@ fn material_surfaces_capsules_and_quantization_preserve_distinction() {
 #[test]
 fn atelier_and_paper_surfaces_contrast_capsules_and_quantization() {
     let atelier = Theme::new(ThemeChoice::Atelier, true);
-    assert_eq!(atelier.rgb(Token::Surface), Rgb(0x12, 0x11, 0x10));
-    assert_eq!(atelier.rgb(Token::SurfacePane), Rgb(0x1a, 0x18, 0x16));
-    assert_eq!(atelier.rgb(Token::SurfaceAlt), Rgb(0x23, 0x20, 0x1d));
-    assert_eq!(atelier.rgb(Token::SurfaceOverlay), Rgb(0x2d, 0x29, 0x25));
-    assert_eq!(atelier.rgb(Token::Focus), Rgb(0xe8, 0x83, 0x5c));
+    assert_eq!(atelier.rgb(Token::Surface), Rgb(0x14, 0x12, 0x10));
+    assert_eq!(atelier.rgb(Token::SurfacePane), Rgb(0x1b, 0x19, 0x17));
+    assert_eq!(atelier.rgb(Token::SurfaceAlt), Rgb(0x24, 0x21, 0x1e));
+    assert_eq!(atelier.rgb(Token::SurfaceOverlay), Rgb(0x2e, 0x2a, 0x26));
+    assert_eq!(atelier.rgb(Token::Focus), Rgb(0xe6, 0x82, 0x5c));
     assert_eq!(
         atelier.banner_anchors(),
-        (Rgb(0xe8, 0x83, 0x5c), Rgb(0xe6, 0xb8, 0x5c))
+        (Rgb(0xe6, 0x82, 0x5c), Rgb(0xe6, 0xbd, 0x6a))
     );
     assert!(atelier.background().luminance() < 0.05);
 
     let paper = Theme::new(ThemeChoice::Paper, true);
-    assert_eq!(paper.rgb(Token::Surface), Rgb(0xec, 0xe6, 0xda));
-    assert_eq!(paper.rgb(Token::SurfacePane), Rgb(0xf7, 0xf3, 0xeb));
-    assert_eq!(paper.rgb(Token::SurfaceAlt), Rgb(0xe4, 0xdd, 0xd0));
-    assert_eq!(paper.rgb(Token::SurfaceOverlay), Rgb(0xdd, 0xd5, 0xc5));
-    assert_eq!(paper.rgb(Token::Focus), Rgb(0x9e, 0x34, 0x18));
+    assert_eq!(paper.rgb(Token::Surface), Rgb(0xea, 0xe3, 0xd5));
+    assert_eq!(paper.rgb(Token::SurfacePane), Rgb(0xf6, 0xf1, 0xe7));
+    assert_eq!(paper.rgb(Token::SurfaceAlt), Rgb(0xe4, 0xdc, 0xcd));
+    assert_eq!(paper.rgb(Token::SurfaceOverlay), Rgb(0xdb, 0xd2, 0xc1));
+    assert_eq!(paper.rgb(Token::Focus), Rgb(0x9a, 0x31, 0x15));
     assert_eq!(
         paper.banner_anchors(),
-        (Rgb(0x9e, 0x34, 0x18), Rgb(0x24, 0x4b, 0x73))
+        (Rgb(0x9a, 0x31, 0x15), Rgb(0x25, 0x48, 0x6b))
     );
     assert!(paper.background().luminance() > 0.7);
+    assert!(
+        atelier
+            .style(Token::SyntaxComment)
+            .add_modifier
+            .contains(Modifier::ITALIC)
+    );
+    assert!(
+        atelier
+            .style(Token::NullValue)
+            .add_modifier
+            .contains(Modifier::ITALIC)
+    );
 
     for theme in [&atelier, &paper] {
         let tiers = surfaces(theme);
@@ -1079,6 +1091,7 @@ fn keycap_and_recessed_pill_respect_all_depths_and_strip_dim() {
         );
         assert!(pill_idx.add_modifier.contains(Modifier::BOLD));
         assert!(!pill_idx.add_modifier.contains(Modifier::DIM));
+        assert!(!pill_idx.add_modifier.contains(Modifier::ITALIC));
 
         // Basic16
         let b16 = Theme::new(choice, true).with_depth(ColorDepth::Basic16);

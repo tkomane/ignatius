@@ -707,13 +707,13 @@ config):
 - `material`: Google Material Design 3 Tonal Dark palette with blue primary, cyan
   secondary, and sage semantic tokens meeting WCAG contrast thresholds across
   all four surface tiers.
-- `atelier`: warm obsidian-espresso editorial dark palette (`#121110` / `#1A1816` /
-  `#23201D` / `#2D2925`) with terracotta focus (`#E8835C`), dusty steel
-  selection (`#9BB5C9`), and gold amber accents, WCAG-verified across all four
-  surface tiers.
-- `paper`: warm archival rag-paper editorial light palette (`#ECE6DA` / `#F7F3EB` /
-  `#E4DDD0` / `#DDD5C5`) with carbon ink (`#1E1B18`), Sienna focus (`#9E3418`),
-  and Prussian slate selection (`#244B73`), WCAG-verified across all four surface
+- `atelier`: warm obsidian-espresso editorial dark palette (`#141210` / `#1B1917` /
+  `#24211E` / `#2E2A26`) with terracotta focus (`#E6825C`), warm champagne
+  selection (`#D8BE9A`), eucalyptus info (`#8EC5BC`), and antique gold accents,
+  WCAG-verified across all four surface tiers.
+- `paper`: warm archival rag-paper editorial light palette (`#EAE3D5` / `#F6F1E7` /
+  `#E4DCCD` / `#DBD2C1`) with carbon ink (`#1E1B18`), Sienna focus (`#9A3115`),
+  and Prussian slate selection (`#25486B`), WCAG-verified across all four surface
   tiers.
 
 Non-interactive M12-M14 subcommands (`ignatius replication`, `cluster`, `browse`,

@@ -197,11 +197,11 @@ pub(crate) fn render_objects(
             continue;
         }
 
-        // Indent guides for unselected rows
+        // Indent guides for unselected rows stay whisper-quiet in Border tone
         for _ in 0..row.depth {
             spans.push(Span::styled(
                 presentation.glyphs.indent_guide(),
-                theme.style(Token::Muted),
+                theme.style(Token::Border),
             ));
         }
 

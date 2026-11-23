@@ -466,8 +466,9 @@ impl Theme {
             Token::Header | Token::Focus | Token::EnvironmentProduction => {
                 style.add_modifier(Modifier::BOLD)
             }
-            Token::Muted | Token::NullValue | Token::SyntaxComment => {
-                style.add_modifier(Modifier::DIM)
+            Token::Muted => style.add_modifier(Modifier::DIM),
+            Token::NullValue | Token::SyntaxComment => {
+                style.add_modifier(Modifier::DIM | Modifier::ITALIC)
             }
             _ => style,
         }
@@ -624,54 +625,54 @@ const fn material(token: Token) -> Rgb {
 }
 
 const fn atelier(token: Token) -> Rgb {
-    // Warm obsidian-espresso dark surfaces with terracotta, antique gold, and slate accents.
+    // Warm obsidian-espresso editorial surfaces with Anthropic terracotta, champagne, and eucalyptus ink.
     match token {
-        Token::Surface => Rgb(0x12, 0x11, 0x10),
-        Token::SurfacePane => Rgb(0x1a, 0x18, 0x16),
-        Token::SurfaceAlt => Rgb(0x23, 0x20, 0x1d),
-        Token::SurfaceOverlay => Rgb(0x2d, 0x29, 0x25),
-        Token::Text => Rgb(0xed, 0xe7, 0xdc),
-        Token::Header => Rgb(0xf7, 0xf2, 0xe8),
-        Token::Muted | Token::EnvironmentNonProduction => Rgb(0xab, 0xa2, 0x95),
-        Token::NullValue => Rgb(0xa6, 0x9d, 0x90),
-        Token::Border => Rgb(0x4e, 0x47, 0x40),
-        Token::Focus => Rgb(0xe8, 0x83, 0x5c),
-        Token::Selection => Rgb(0x9b, 0xb5, 0xc9),
-        Token::Success => Rgb(0x7e, 0xc4, 0x9b),
-        Token::Warning | Token::TransactionActive => Rgb(0xe6, 0xb8, 0x5c),
-        Token::Danger | Token::TransactionFailed => Rgb(0xea, 0x82, 0x7c),
-        Token::EnvironmentProduction => Rgb(0xf0, 0x8a, 0x84),
-        Token::Info => Rgb(0x80, 0xc1, 0xd4),
-        Token::SyntaxKeyword => Rgb(0xd4, 0x9c, 0xe0),
-        Token::SyntaxLiteral => Rgb(0x94, 0xcc, 0x8a),
-        Token::SyntaxNumber => Rgb(0xeb, 0xbf, 0x72),
-        Token::SyntaxComment => Rgb(0xa8, 0x9f, 0x92),
-        Token::SyntaxIdentifier => Rgb(0x88, 0xc7, 0xdc),
+        Token::Surface => Rgb(0x14, 0x12, 0x10),
+        Token::SurfacePane => Rgb(0x1b, 0x19, 0x17),
+        Token::SurfaceAlt => Rgb(0x24, 0x21, 0x1e),
+        Token::SurfaceOverlay => Rgb(0x2e, 0x2a, 0x26),
+        Token::Text => Rgb(0xf2, 0xec, 0xe1),
+        Token::Header => Rgb(0xfa, 0xf5, 0xec),
+        Token::Muted | Token::EnvironmentNonProduction => Rgb(0xad, 0xa3, 0x96),
+        Token::NullValue => Rgb(0xa6, 0x9c, 0x8f),
+        Token::Border => Rgb(0x4a, 0x43, 0x3c),
+        Token::Focus => Rgb(0xe6, 0x82, 0x5c),
+        Token::Selection => Rgb(0xd8, 0xbe, 0x9a),
+        Token::Success => Rgb(0x84, 0xc5, 0x9f),
+        Token::Warning | Token::TransactionActive => Rgb(0xe6, 0xbd, 0x6a),
+        Token::Danger | Token::TransactionFailed => Rgb(0xeb, 0x84, 0x7d),
+        Token::EnvironmentProduction => Rgb(0xee, 0x88, 0x7e),
+        Token::Info => Rgb(0x8e, 0xc5, 0xbc),
+        Token::SyntaxKeyword => Rgb(0xd9, 0xa3, 0xd2),
+        Token::SyntaxLiteral => Rgb(0x96, 0xc9, 0x8d),
+        Token::SyntaxNumber => Rgb(0xe9, 0xbf, 0x70),
+        Token::SyntaxComment => Rgb(0xa6, 0x9d, 0x90),
+        Token::SyntaxIdentifier => Rgb(0x9a, 0xc6, 0xc2),
     }
 }
 
 const fn paper(token: Token) -> Rgb {
-    // Warm archival rag-paper light surfaces with Sienna, Prussian, and forest ink accents.
+    // Warm Anthropic archival rag-paper light surfaces with rich Sienna, Prussian, and forest ink.
     match token {
-        Token::Surface => Rgb(0xec, 0xe6, 0xda),
-        Token::SurfacePane => Rgb(0xf7, 0xf3, 0xeb),
-        Token::SurfaceAlt => Rgb(0xe4, 0xdd, 0xd0),
-        Token::SurfaceOverlay => Rgb(0xdd, 0xd5, 0xc5),
+        Token::Surface => Rgb(0xea, 0xe3, 0xd5),
+        Token::SurfacePane => Rgb(0xf6, 0xf1, 0xe7),
+        Token::SurfaceAlt => Rgb(0xe4, 0xdc, 0xcd),
+        Token::SurfaceOverlay => Rgb(0xdb, 0xd2, 0xc1),
         Token::Text => Rgb(0x1e, 0x1b, 0x18),
-        Token::Header => Rgb(0x14, 0x12, 0x10),
-        Token::Muted | Token::EnvironmentNonProduction => Rgb(0x4d, 0x46, 0x3e),
-        Token::NullValue => Rgb(0x50, 0x49, 0x40),
-        Token::Border => Rgb(0xb0, 0xa6, 0x98),
-        Token::Focus => Rgb(0x9e, 0x34, 0x18),
-        Token::Selection => Rgb(0x24, 0x4b, 0x73),
-        Token::Success => Rgb(0x17, 0x5b, 0x3b),
-        Token::Warning | Token::TransactionActive | Token::SyntaxNumber => Rgb(0x73, 0x45, 0x00),
-        Token::Danger | Token::TransactionFailed => Rgb(0x99, 0x1b, 0x20),
-        Token::EnvironmentProduction => Rgb(0x8d, 0x14, 0x1b),
-        Token::Info | Token::SyntaxIdentifier => Rgb(0x12, 0x50, 0x67),
-        Token::SyntaxKeyword => Rgb(0x65, 0x26, 0x6b),
-        Token::SyntaxLiteral => Rgb(0x18, 0x59, 0x38),
-        Token::SyntaxComment => Rgb(0x4f, 0x48, 0x3f),
+        Token::Header => Rgb(0x14, 0x11, 0x0f),
+        Token::Muted | Token::EnvironmentNonProduction => Rgb(0x4b, 0x44, 0x3c),
+        Token::NullValue => Rgb(0x4f, 0x48, 0x40),
+        Token::Border => Rgb(0xb8, 0xae, 0x9e),
+        Token::Focus => Rgb(0x9a, 0x31, 0x15),
+        Token::Selection => Rgb(0x25, 0x48, 0x6b),
+        Token::Success => Rgb(0x18, 0x59, 0x3b),
+        Token::Warning | Token::TransactionActive | Token::SyntaxNumber => Rgb(0x71, 0x43, 0x04),
+        Token::Danger | Token::TransactionFailed => Rgb(0x96, 0x1b, 0x21),
+        Token::EnvironmentProduction => Rgb(0x8b, 0x16, 0x1e),
+        Token::Info | Token::SyntaxIdentifier => Rgb(0x14, 0x4f, 0x63),
+        Token::SyntaxKeyword => Rgb(0x66, 0x27, 0x5f),
+        Token::SyntaxLiteral => Rgb(0x19, 0x57, 0x37),
+        Token::SyntaxComment => Rgb(0x4e, 0x47, 0x3f),
     }
 }
 
@@ -752,7 +753,7 @@ impl Theme {
     fn surface_badge(&self, token: Token, surface_token: Token, strip_dim: bool) -> Style {
         let mut style = self.style(token);
         if strip_dim {
-            style.add_modifier.remove(Modifier::DIM);
+            style.add_modifier.remove(Modifier::DIM | Modifier::ITALIC);
         }
         if self.color && self.depth != ColorDepth::None {
             style = style.add_modifier(Modifier::BOLD);
@@ -783,10 +784,10 @@ impl Theme {
                 (Rgb(0x8A, 0xB4, 0xF8), Rgb(0x78, 0xD9, 0xEC))
             }
             ActivePalette::Builtin(ThemeChoice::Atelier) => {
-                (Rgb(0xE8, 0x83, 0x5C), Rgb(0xE6, 0xB8, 0x5C))
+                (Rgb(0xE6, 0x82, 0x5C), Rgb(0xE6, 0xBD, 0x6A))
             }
             ActivePalette::Builtin(ThemeChoice::Paper) => {
-                (Rgb(0x9E, 0x34, 0x18), Rgb(0x24, 0x4B, 0x73))
+                (Rgb(0x9A, 0x31, 0x15), Rgb(0x25, 0x48, 0x6B))
             }
             ActivePalette::Custom(_) => (self.rgb(Token::SyntaxKeyword), self.rgb(Token::Info)),
         }

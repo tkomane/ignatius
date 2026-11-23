@@ -1257,7 +1257,7 @@ fn viewport_matrix_100x30_80x24_60x20_30x6_and_live_resize_preserve_meaning() {
     );
 }
 
-const SHOWCASE_AREA: Rect = Rect::new(0, 0, 112, 32);
+const SHOWCASE_AREA: Rect = Rect::new(0, 0, 124, 34);
 
 fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
     use crate::postgres::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary};
@@ -1269,7 +1269,7 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
     model.keymap_snapshot = Keymap::new().snapshot();
     model.presentation = Presentation::new(
         Theme::new(theme_choice, true).with_depth(ColorDepth::TrueColor),
-        Glyphs::new(GlyphTier::Unicode),
+        Glyphs::new(GlyphTier::Nerd),
         false,
     );
     model.connection = ConnectionState::Connected(Box::new(SessionInfo {

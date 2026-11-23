@@ -1,25 +1,22 @@
 <div align="center">
 
-```
- ___   ___  _  _    _    _____  ___  _   _  ___
-|_ _| / __|| \| |  /_\  |_   _||_ _|| | | |/ __|
- | | | (_ || .` | / _ \   | |   | | | |_| |\__ \
-|___| \___||_|\_|/_/ \_\  |_|  |___| \___/ |___/
-------------------------------------------------
-the PostgreSQL client you can point at production
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg" />
+  <img src="docs/assets/banner-dark.svg" alt="Ignatius - PostgreSQL terminal workbench in Rust: TLS verify-full, read-only first, Atelier and Paper editions" width="96%" />
+</picture>
 
-### Calm confidence for real databases: `psql` honesty inside a high-art terminal workbench.
+### Calm confidence for real databases: `psql` honesty inside an editorial terminal workbench.
 
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
-[![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-dea584?logo=rust&logoColor=white)](Cargo.toml)
-[![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-336791?logo=postgresql&logoColor=white)](docs/support/compatibility.md)
-[![Capabilities](https://img.shields.io/badge/capabilities-M6--M16%20delivered-10b981?logo=checkmarx&logoColor=white)](docs/product/roadmap.md)
-[![Design](https://img.shields.io/badge/themes-atelier%20|%20paper%20|%20material%203%20|%20field%20industrial-e8835c?logo=color&logoColor=black)](docs/design/theme-tokens.md)
-[![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-brightgreen)](docs/security/data-handling.md)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-9A3115?labelColor=1B1917&logo=rust&logoColor=FAF5EC)](Cargo.toml)
+[![PostgreSQL](https://img.shields.io/badge/postgresql-14%20|%2015%20|%2016%20|%2017%20|%2018-25486B?labelColor=1B1917&logo=postgresql&logoColor=FAF5EC)](docs/support/compatibility.md)
+[![Capabilities](https://img.shields.io/badge/capabilities-M6--M16%20delivered-18593B?labelColor=1B1917&logo=checkmarx&logoColor=FAF5EC)](docs/product/roadmap.md)
+[![Design](https://img.shields.io/badge/themes-atelier%20|%20paper%20|%20material%203%20|%20field%20industrial-714304?labelColor=1B1917&logo=color&logoColor=FAF5EC)](docs/design/theme-tokens.md)
+[![Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20private-144F63?labelColor=1B1917)](docs/security/data-handling.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-4B443C?labelColor=1B1917)](LICENSE)
 
-*Editorial dark & rag-paper craft, Material Design 3 elevation, and Dieter Rams tactile restraint.*<br>
+*Editorial obsidian & rag-paper craft, Material Design 3 elevation, and Dieter Rams tactile restraint.*<br>
 *Fast, deterministic, built strictly in Rust (`ratatui` + `tokio-postgres`). Zero telemetry, zero accounts, zero cloud dependencies.*
 
 <p align="center">
@@ -34,9 +31,9 @@ the PostgreSQL client you can point at production
 
 <br />
 
-<img src="docs/assets/screenshots/workbench-atelier.png" alt="Ignatius workbench in Atelier Editorial Dark with terracotta focus, warm obsidian surfaces, elevated keycaps, object tree, SQL editor, and results grid" width="96%" />
+<img src="docs/assets/screenshots/workbench-atelier.png" alt="Ignatius workbench in Atelier Editorial Dark with terracotta focus, obsidian-espresso surfaces, PostgreSQL/Codicon glyphs, italic comments and null markers, object tree, SQL editor, and results grid" width="96%" />
 <br />
-<sub><em>Atelier Editorial Dark (Feature 062): obsidian-espresso surfaces, terracotta keycaps, split pane headers, and crisp <code>[null]</code> distinction at 2x HiDPI.</em></sub>
+<sub><em>Atelier Editorial Dark (Feature 062): obsidian-espresso surfaces, terracotta keycaps, PostgreSQL/Codicon glyphs, italic comments &amp; <code>[null]</code>, whisper-quiet tree guides, and 2x Studio window chrome.</em></sub>
 
 </div>
 
@@ -80,13 +77,14 @@ Terminal tools do not need visual clutter to feel refined. Ignatius pairs **Appl
 - **Tactile Keycaps & Non-Dimmed Modal Badges**:
   - Header identity badges, footer shortcut rails (cleanly right-aligned when space permits), and empty-state starter keys lift onto `SurfaceOverlay` via `Theme::keycap(token)` cleanly over `SurfaceAlt` bars.
   - Secondary overlay capsules (`[WARMUP: 2]`, `[TABLES: 1]`, `[CELLS: 2]`) rest recessed on `SurfaceAlt` inside `SurfaceOverlay` modals via `Theme::recessed_pill(token)` without dim-modifier wash-out, guarded by width-aware `render_capsule_bar` wrapping so pills never clip on tight viewports.
-- **Clean Typography & Micro-Rules**: Split multi-span pane headers lead with focused accent markers and calm muted metadata, the Spotlight command palette paints a full-width `SurfaceAlt` search strip (`list_row_0_y` invariant intact), modal tab strips separate from content with hairline dividers, and Objects column details truncate cleanly with ellipses instead of breaking mid-word.
+- **Literary Typography & Micro-Rules**: Split multi-span pane headers lead with focused accent markers and calm muted metadata, SQL comments (`SyntaxComment`) and `[null]` markers set in literary italic (`TrueColor`/`Indexed256`), tree indentation guides recede smoothly into `Border` tone behind semantic icons, the Spotlight command palette paints a full-width `SurfaceAlt` search strip (`list_row_0_y` invariant intact), and modal tab strips separate from content with hairline dividers.
+- **PostgreSQL & Codicon Symbolism (`--glyphs nerd-font`)**: Opt-in Nerd Font iconography pairs the PostgreSQL elephant brand emblem with crisp single-cell Codicon and Material Design symbols across object trees, locks, diagnostics, and read/write postures alongside `CommitMono Nerd Font`, while `unicode` and `--ascii` keep every screen 100% self-explanatory without icon reliance.
 - **Adaptive & Accessible Everywhere**: Automatic `OSC 11` terminal background detection (`ui.theme = "auto"`), full `[theme]` custom extension support, `Basic16` (surface fills left transparent cleanly), `NO_COLOR` (zero ANSI color sequences), and `--ascii` parity. Every non-border token satisfies `>= 4.5:1` contrast across all four surface tiers (`>= 7.0:1` in `high-contrast`).
 
 | Preset | Character | Surface Sequence (`Base` -> `Pane` -> `Alt` -> `Overlay`) | Primary Accents |
 | --- | --- | --- | --- |
-| `atelier` | Editorial warm obsidian-espresso dark | `#121110` -> `#1A1816` -> `#23201D` -> `#2D2925` | Terracotta `#E8835C`, steel `#9BB5C9`, antique gold `#E6B85C` |
-| `paper` | Archival rag-paper editorial light | `#ECE6DA` -> `#F7F3EB` -> `#E4DDD0` -> `#DDD5C5` | Sienna `#9E3418`, Prussian slate `#244B73`, carbon ink `#1E1B18` |
+| `atelier` | Editorial warm obsidian-espresso dark | `#141210` -> `#1B1917` -> `#24211E` -> `#2E2A26` | Terracotta `#E6825C`, champagne `#D8BE9A`, antique gold `#E6BD6A`, eucalyptus `#8EC5BC` |
+| `paper` | Archival rag-paper editorial light | `#EAE3D5` -> `#F6F1E7` -> `#E4DCCD` -> `#DBD2C1` | Sienna `#9A3115`, Prussian slate `#25486B`, forest ink `#18593B` |
 | `material` | Google Material Design 3 Tonal Dark | `#111318` -> `#191C22` -> `#22262E` -> `#2B303A` | Material blue `#8AB4F8`, cyan `#78D9EC`, sage `#81C995` |
 | `field-industrial` | Dieter Rams / Teenage Engineering matte hardware | `#0E1117` -> `#151A23` -> `#1C2330` -> `#242D3D` | Safety orange `#FF6A00`, phosphor amber `#FBBF24`, sage `#10B981` |
 | `dark` | TokyoNight-inspired cool midnight studio | `#11131D` -> `#1B1E2E` -> `#22263A` -> `#292E42` | Cobalt `#7AA2F7`, teal `#73DACA`, amber `#E0AF68` |
