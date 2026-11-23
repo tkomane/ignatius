@@ -1001,8 +1001,9 @@ pub(crate) const fn heartbeat_head(frame: u64, width: usize) -> (usize, bool) {
 ///
 /// At truecolour the head is drawn in the information ink with a short tail
 /// fading into the track. At 256 colours the tail keeps its heavy weight in
-/// the track ink, with no blended colour. At 16 colours and without colour
-/// the head alone moves, bold, and ASCII draws an `=` head on a `-` track.
+/// the track ink, with no blended colour. At 16 colours the head alone moves,
+/// bold; without colour it is the heavy glyph alone, and ASCII draws an `=`
+/// head on a `-` track.
 /// While a cancellation is pending the comet keeps moving, because the
 /// statement may still be running, and takes the warning ink.
 fn heartbeat_line(frame: u64, cancelling: bool, presentation: &Presentation) -> Line<'static> {
@@ -1029,10 +1030,11 @@ fn heartbeat_line(frame: u64, cancelling: bool, presentation: &Presentation) -> 
     } else {
         HEARTBEAT_TAIL
     };
-    let head_style = if depth.paints_surfaces() {
-        theme.style(ink)
-    } else {
-        theme.style(ink).add_modifier(Modifier::BOLD)
+    // At 16 colours the head is bold as well as coloured; with no colour at
+    // all it is shape alone, the heavy glyph on the light track.
+    let head_style = match depth {
+        ColorDepth::Basic16 => theme.style(ink).add_modifier(Modifier::BOLD),
+        _ => theme.style(ink),
     };
     let (position, rightward) = heartbeat_head(frame, HEARTBEAT_TRACK);
     let spans = (0..HEARTBEAT_TRACK)

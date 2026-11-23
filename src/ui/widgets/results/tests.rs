@@ -1636,10 +1636,13 @@ fn the_heartbeat_keeps_its_shape_and_drops_colour_honestly_at_lower_depths() {
             .filter(|&i| cells[i].symbol() == "\u{2501}")
             .collect();
         assert_eq!(heads, vec![10], "{depth:?}: the head alone, no tail");
-        assert!(cells[10].modifier.contains(Modifier::BOLD), "{depth:?}");
-        if depth == ColorDepth::None {
+        if depth == ColorDepth::Basic16 {
+            assert!(cells[10].modifier.contains(Modifier::BOLD), "a bold head");
+        } else {
             assert!(
-                cells.iter().all(|cell| cell.fg == Color::Reset),
+                cells
+                    .iter()
+                    .all(|cell| cell.fg == Color::Reset && cell.modifier.is_empty()),
                 "shape only"
             );
         }
