@@ -137,6 +137,9 @@ wording, and its foreground fades from `Success` to its resting colour
    toward calm.
 4. Each new job identity restarts the settle, and a settle only ever tints the
    result of the job that started it.
+5. A `\watch` loop iteration and a generated cell update start no settle: the
+   first repeats unattended, and the second leaves the earlier result on
+   screen.
 
 ### User Story 5 - Heartbeat meter (Priority: P2)
 

@@ -304,11 +304,14 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             // cancellation, a lost connection or a limited result keeps its
             // static colours, because fading any of them toward calm would
             // soften news that is not calm. A generated cell update leaves the
-            // earlier result on screen, so it has nothing of its own to settle.
+            // earlier result on screen, so it has nothing of its own to settle,
+            // and a `\watch` loop repeats unattended, where a pulse on every
+            // iteration would be motion while nothing new is being asked.
             if model.allows_motion()
                 && execution.status == ExecutionStatus::Succeeded
                 && !execution.any_truncated()
                 && !running_cell_update
+                && model.watch.is_none()
             {
                 model.motion.begin_result_settle(execution.job);
             }

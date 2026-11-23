@@ -12369,3 +12369,32 @@ fn motion_holds_still_while_a_prompt_or_confirmation_is_open() {
         "nothing starts while the trust surface is open"
     );
 }
+
+#[test]
+fn motion_a_generated_cell_update_and_a_watch_loop_never_settle() {
+    let mut updating = moving();
+    updating.running_cell_update = true;
+    finish_statement(&mut updating, |job| {
+        execution(job, ExecutionStatus::Succeeded, &[])
+    });
+    assert!(
+        updating.motion().result_settle().is_none(),
+        "the result on screen is the earlier snapshot, not this statement's"
+    );
+
+    let mut watching = moving();
+    watching.watch = Some(crate::app::model::WatchState {
+        sql: "SELECT 1;".into(),
+        interval_secs: 2,
+        iteration: 3,
+    });
+    finish_statement(&mut watching, |job| {
+        execution(job, ExecutionStatus::Succeeded, &["x"])
+    });
+    assert!(watching.watch.is_some(), "the watch keeps running");
+    assert!(
+        watching.motion().result_settle().is_none(),
+        "an unattended loop does not pulse on every iteration"
+    );
+    assert!(!watching.is_in_motion());
+}
