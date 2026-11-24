@@ -16,6 +16,7 @@ Nothing else. There is no code generator, no database to install, and no account
 cargo xtask db up        # start the disposable database, wait for it, print the URI
 cargo xtask run          # open the client against it
 cargo xtask verify       # every gate, with a summary
+cargo xtask security     # local policy, hygiene and supply-chain security checks
 cargo xtask db down      # stop it and delete its data
 ```
 
@@ -34,6 +35,7 @@ in the workspace's committed lockfile and security checks.
 | `cargo xtask sql "SELECT 1"` | Runs one statement against it |
 | `cargo xtask test` | The whole suite. Says so if the database is absent and the integration tests will skip |
 | `cargo xtask verify` | Formatting, lints, unit tests, CLI contract, integration. Runs every gate even after one fails, then prints a summary and exits non-zero if any failed |
+| `cargo xtask security` | Runs policy and supply-chain contracts, repository hygiene checks, digest-pinned `actionlint`, `zizmor`, and `gitleaks` (or local tools/skips), and `cargo-deny` when installed, printing `pass` / `FAIL` / `skip` per gate |
 | `cargo xtask install [--dir PATH]` | Builds a release binary and copies it to `~/.local/bin`, telling you whether that is on your PATH |
 
 ## The disposable database
@@ -343,3 +345,31 @@ do.
 
 The rules that matter: `app` performs no I/O, `ui` opens no connections and
 writes no files, and only `postgres` knows which driver is in use.
+
+## Running local security and hygiene checks
+
+Run the local security gate before opening a pull request:
+
+```bash
+cargo --locked xtask security
+```
+
+It prints an explicit `pass` / `FAIL` / `skip` summary (never reporting a skip as
+a pass) and exits non-zero if any gate fails:
+
+- **Policy and supply-chain contracts**: `workflow_contract`, `release_contract`,
+  `runtime_privacy_contract`, and `documentation_matches_the_build`.
+- **Repository hygiene**: byte-identical `AGENTS.md` and `CLAUDE.md`, zero
+  inline `mod tests {` blocks in production `src/` files (unit tests live in
+  sidecar `tests.rs` files for CodeQL exclusion), and zero Unicode em/en dashes
+  in governed documentation.
+- **Container-pinned workflow and secret scanners**: parses the exact `@sha256:`
+  images for `actionlint`, `zizmor`, and `gitleaks` directly from
+  `.github/workflows/ci.yml` when `docker info` succeeds (with `--network none`
+  and read-only repo mount), falling back to matching executables on `PATH` or
+  reporting `skip`. In a linked git worktree where `.git` points outside the
+  container mount, `gitleaks` falls back to host `gitleaks` on `PATH` or skips
+  rather than reporting a zero-commit scan as a pass.
+- **Dependency advisories and licences**: runs `cargo-deny` and
+  `scripts/check-driver-registry-advisories.py` when `cargo-deny` is on `PATH`,
+  or reports `skip`.

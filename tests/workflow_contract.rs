@@ -1422,3 +1422,132 @@ fn workflow_toolchains_follow_the_two_project_authorities() {
         "the MSRV job must invoke Cargo with +{minimum} so rust-toolchain.toml cannot override it"
     );
 }
+
+#[test]
+fn production_src_keeps_unit_tests_in_sidecar_files() {
+    fn collect_production_files(directory: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        {
+            let path = entry
+                .unwrap_or_else(|error| panic!("read entry in {}: {error}", directory.display()))
+                .path();
+            if path.is_dir() {
+                if path.file_name().and_then(|name| name.to_str()) == Some("tests") {
+                    continue;
+                }
+                collect_production_files(&path, out);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+                && path.file_name().and_then(|name| name.to_str()) != Some("tests.rs")
+            {
+                out.push(path);
+            }
+        }
+    }
+
+    fn line_has_inline_mod_tests(line: &str) -> bool {
+        let code = line.split("//").next().unwrap_or("");
+        let bytes = code.as_bytes();
+        let mut offset = 0;
+
+        while let Some(found) = code[offset..].find("mod") {
+            let idx = offset + found;
+            let boundary_before =
+                idx == 0 || (!bytes[idx - 1].is_ascii_alphanumeric() && bytes[idx - 1] != b'_');
+            if boundary_before {
+                let after_mod = &code[idx + "mod".len()..];
+                let trimmed = after_mod.trim_start();
+                if trimmed.len() < after_mod.len()
+                    && let Some(after_tests) = trimmed.strip_prefix("tests")
+                    && after_tests.trim_start().starts_with('{')
+                {
+                    return true;
+                }
+            }
+            offset = idx + "mod".len();
+        }
+        false
+    }
+
+    let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    collect_production_files(&src_root, &mut files);
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "expected production Rust source files under {}",
+        src_root.display()
+    );
+
+    for path in files {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        for (index, line) in source.lines().enumerate() {
+            assert!(
+                !line_has_inline_mod_tests(line),
+                "{}:{} declares an inline `mod tests {{` block; move unit tests into a sidecar tests.rs so CodeQL excludes test code",
+                path.display(),
+                index + 1
+            );
+        }
+    }
+}
+
+#[test]
+fn agents_and_claude_instructions_stay_byte_identical() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let agents = fs::read(root.join("AGENTS.md")).expect("read AGENTS.md");
+    let claude = fs::read(root.join("CLAUDE.md")).expect("read CLAUDE.md");
+    assert!(!agents.is_empty(), "AGENTS.md must not be empty");
+    assert_eq!(
+        agents, claude,
+        "AGENTS.md and CLAUDE.md must remain byte-for-byte identical"
+    );
+}
+
+#[test]
+fn xtask_security_uses_ci_digests_not_hardcoded_duplicates() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let security =
+        fs::read_to_string(root.join("xtask/src/security.rs")).expect("read xtask/src/security.rs");
+    let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+
+    assert!(
+        security.contains(".github")
+            && security.contains("workflows")
+            && security.contains("ci.yml"),
+        "xtask/src/security.rs must read container pins from .github/workflows/ci.yml"
+    );
+    assert!(
+        !security.contains("@sha256:"),
+        "xtask/src/security.rs must parse digests from ci.yml instead of containing hardcoded `@sha256:` strings"
+    );
+
+    for repo in [
+        "docker.io/rhysd/actionlint",
+        "ghcr.io/zizmorcore/zizmor",
+        "ghcr.io/gitleaks/gitleaks",
+    ] {
+        let mut found_digest = false;
+        for line in ci
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+        {
+            for raw in line.split_whitespace() {
+                let token = raw.trim_matches(|c: char| matches!(c, '"' | '\'' | '\\'));
+                if !token.contains(repo) {
+                    continue;
+                }
+                if let Some((_, digest)) = token.split_once("@sha256:") {
+                    found_digest = true;
+                    assert!(
+                        !security.contains(digest),
+                        "xtask/src/security.rs duplicates digest {digest} for {repo} from ci.yml"
+                    );
+                }
+            }
+        }
+        assert!(found_digest, "expected pinned digest for {repo} in ci.yml");
+    }
+}

@@ -228,23 +228,63 @@ fresh processes and measured renderer time/RSS. Report observed values and
 small-sample limits; no fabricated absolute ceiling, 100-action p95 result or
 native terminal claim follows. Root owns independent review/full verification.
 
-## Quiet chrome (US8 / T042-T043) - 2026-10-26
+## Quiet chrome (US8 / T042-T043, reconciled Wave 68)
 
-- **Header layout (one row)**:
-  - Left side carries identity and posture: product name (`ignatius` or `ignatius:` when a connection target follows), sanitised connection target (`user@host:port/db`), and the safety posture badge capsule (`[PRODUCTION]`, `[STAGING]`, `[LOCAL]`, `[UNCLASSIFIED]`, `[READ ONLY]`) beside any active provider badge.
-  - Right side carries active session context: active transaction capsule (`[TX ACTIVE]` or `[TX FAILED]`), running spinner + live elapsed time while a query is executing, or the completed statement elapsed time when `last_elapsed >= 200 ms`, plus `[MUTED]` when motion is off.
-  - When the header row cannot fit both groups cleanly, the left-hand identity and safety posture take priority and the right-hand context group truncates or yields space first so `ignatius`, the target, and the safety words remain readable at 80x24 and 40x8.
+`docs/design/icons-and-motion.md` is authoritative for header layout, iconography,
+and motion behaviour; `src/ui/widgets/header.rs`, `src/ui/widgets/footer.rs`,
+and `src/ui/theme.rs` implement this contract:
+
+- **Header layout (one row on `SurfaceAlt`)**:
+  - Left side carries identity and safety posture: the elevated product keycap
+    `Ignatius:` (`Theme::keycap(Token::Header)`), sanitised connection target
+    (`user@host:port/db` split into `user` in `Token::Info`, `@host:port/` in
+    `Token::Muted`, and `db` in `Token::Header`), any failed connection stage
+    (`failed during ...`), any active credential provider badge (`[auth: ...]`),
+    safety posture capsules (`[PROD]`, `[STAGING]`, `[READ ONLY]`) or a quiet
+    bounded environment label (`[LOCAL]`, `[UNCLASSIFIED]`, `[DEV]`, `[TEST]`,
+    or custom name capped to 14 inner cells with an ellipsis), and any active
+    history/catalogue notice (`[history off]`, `[objects: ...]`,
+    `[not in history]`).
+  - Right side carries active session context separated by a `│` (`|` in
+    ASCII) divider when space permits: active transaction capsule (`[TX ACTIVE]`
+    or `[TX FAILED]`), any active `\watch` loop capsule (`[WATCH: <n>s #<k>]`
+    plus `(\watch stop)`), running spinner + live elapsed time while executing
+    or completed statement elapsed time when `last_elapsed >= 200 ms` (in the
+    default threshold mode), and `[MUTED]` when reduced motion is enabled.
+  - **Narrow-row yield order**: safety capsules (`[PROD]`, `[STAGING]`,
+    `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) **never yield** and remain
+    visible and unclipped at every width down to 40 columns. When the header
+    cannot fit everything, items give way in fixed order:
+    1. History/catalogue notices and `[MUTED]` (rank 1),
+    2. Completed elapsed time (rank 2),
+    3. Provider badge `[auth: ...]` (rank 3),
+    4. Live elapsed clock + spinner (rank 4),
+    5. Failed connection stage (rank 5),
+    6. Target shortens to its database name alone, then truncates with a
+       visible ellipsis (or drops if fewer than 6 cells remain),
+    7. The `Ignatius:` product keycap badge drops,
+    8. Quiet environment labels (`[LOCAL]`, `[UNCLASSIFIED]`, `[DEV]`, or
+       custom) shorten inside their brackets (preserving at least 4 inner cells,
+       or dropping only if even that cannot fit),
+    9. Active `\watch` loop capsule and stop hint yield last among yielding
+       parts (rank 9), because a running loop is a side effect in progress.
+  - **Compact header (below 80x24)**: `render_compact_header` leads with the
+    safety capsules (`[PROD]`/`[STAGING]`, `[READ ONLY]`,
+    `[TX ACTIVE]`/`[TX FAILED]`), followed by the quiet environment label
+    (whole or shortened inside brackets), database/connection label, connection
+    state, and focused pane label (`[Objects]`, `[Editor]`, `[Results]`),
+    never clipping safety markers mid-word.
 - **Routine suppression**:
   - `tx: idle` is routine and MUST NOT appear in the header.
-  - `tls: verified`, `tls: verification skipped`, and `tls: plaintext` are routine in the steady-state header and MUST NOT appear there (non-verified TLS remains visible in the connection picker and write-confirmation overlays, and `Session Summary` continues to report full transport facts on demand).
-  - Completed statement elapsed time (`last_elapsed`) is rendered in the header ONLY when `last_elapsed >= 200 ms` (`Duration::from_millis(200)`). Live `running_for` elapsed time while a query is executing remains visible at all durations so the connecting and running wait indicators stay truthful.
+  - `tls: verified`, `tls: verification skipped`, and `tls: plaintext` are routine in the steady-state header and MUST NOT appear there (non-verified TLS remains visible in the connection picker and write-confirmation overlays, and `Connection and auth details` / `Session Summary` continues to report full transport facts on demand).
+  - Completed statement elapsed time (`last_elapsed`) is rendered in the header ONLY when `last_elapsed >= 200 ms` (`Duration::from_millis(200)`) in the default threshold mode, formatted with `elapsed_label`. Live `running_for` elapsed time while connecting or executing remains visible at all durations so wait indicators stay truthful.
 - **Filled badge capsules**:
-  - At `ColorDepth::TrueColor` and `ColorDepth::Indexed256` with colour enabled, non-routine posture and transaction capsules (`[PRODUCTION]`, `[STAGING]`, `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) render as filled capsules (semantic token colour as background, `Surface` as foreground text, `BOLD`) whenever the token's foreground/background pair clears the active theme's contrast threshold (`4.5:1` on `Dark`/`Light`, `7.0:1` on `HighContrast`). If a custom theme's token against `Surface` does not clear that threshold, fall back to the existing foreground-on-`Surface` `BOLD` badge style so custom-theme contrast admission is never violated.
-  - Routine environment badges (`[LOCAL]`, `[UNCLASSIFIED]`) remain quiet muted badges on `Surface` so they do not compete with `[PRODUCTION]`, `[READ ONLY]`, or `[TX FAILED]` while still preserving their words in layout and safety tests.
-  - At `ColorDepth::Basic16` and `ColorDepth::None` (or with colour off), badges use the existing foreground/modifier rules with no painted background fill, and keep their brackets (`[PRODUCTION]`, `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) so words and brackets carry the meaning without colour.
-- **Footer layout (one row)**:
-  - Left side carries the current status / notice / diagnostic message; when idle, shows `Ready` in muted style.
-  - Right side carries context-filtered key hints from the single keymap authority, capped at **6** hints in `Density::Comfortable` and **4** hints in `Density::Compact` (`Presentation::footer_hint_cap()`), dropping lower-priority hints from the right when narrow so no key/label pair is ever half-rendered.
+  - At `ColorDepth::TrueColor` and `ColorDepth::Indexed256` with colour enabled, non-routine posture, transaction, and watch capsules (`[PROD]`, `[STAGING]`, `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`, `[WATCH: ...]`) render via `Theme::capsule` as filled capsules (semantic token colour as background, `Surface` as foreground text, `BOLD`) whenever the token's foreground/background pair clears the active theme's contrast threshold (`4.5:1` on standard themes, `7.0:1` on `HighContrast`). If a custom theme's token against `Surface` does not clear that threshold, fall back to the existing foreground-on-`Surface` `BOLD` badge style so custom-theme contrast admission is never violated.
+  - Routine environment labels (`[LOCAL]`, `[UNCLASSIFIED]`) remain quiet muted bracketed labels (`Token::Muted` on `SurfaceAlt`) and non-production classifications (`[DEV]`, `[TEST]`, custom) use `Token::EnvironmentNonProduction` on `SurfaceAlt` without a filled background so they do not compete with `[PROD]`, `[READ ONLY]`, or `[TX FAILED]` while preserving their words in layout and safety tests.
+  - At `ColorDepth::Basic16` and `ColorDepth::None` (or with colour off), `Theme::capsule` uses `Modifier::REVERSED` with no painted background fill, and keeps the brackets (`[PROD]`, `[STAGING]`, `[READ ONLY]`, `[TX ACTIVE]`, `[TX FAILED]`) so words and brackets carry the meaning without colour.
+- **Footer layout (one row on `SurfaceAlt`)**:
+  - Left side carries the current status (`Ready`, `Running`, `Cancellation requested`, `Query cancelled by server`), transaction state, and transient notice / search path; when idle, shows `Ready` in muted style.
+  - Right side carries context-filtered keycap hints from the single keymap authority, capped at **6** hints in `Density::Comfortable` and **4** hints in `Density::Compact` (`Presentation::footer_hint_cap()`), dropping lower-priority hints from the right when narrow (keeping `Esc` longest when an overlay is open) so no key/label pair is ever half-rendered.
 
 ## Doctor reporting
 

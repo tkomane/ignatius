@@ -11,6 +11,7 @@
 //! cargo xtask sql "SQL"    Run one statement against it
 //! cargo xtask test         Everything, including the integration tests
 //! cargo xtask verify       Every gate, collecting failures, with a summary
+//! cargo xtask security     Local policy, hygiene and supply-chain checks
 //! cargo xtask install      Build a release binary and put it on PATH
 //! cargo xtask install-hooks  Run the gates before every push
 //! ```
@@ -20,6 +21,7 @@
 //! access.
 
 mod release;
+mod security;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,6 +43,7 @@ fn main() -> ExitCode {
         ["sql", statement, rest @ ..] => run_sql(statement, rest),
         ["test"] => test(),
         ["verify"] => verify(),
+        ["security"] => security::run(),
         ["release", "check", path] => release::check(Path::new(path)),
         ["release", "validate", path] => release::validate(Path::new(path)),
         ["release", "generate", rest @ ..] => release::generate(rest),
@@ -78,6 +81,7 @@ fn print_help() {
   cargo xtask sql \"SQL\"    Run one statement against it
   cargo xtask test         Everything, including the integration tests
   cargo xtask verify       Every gate, collecting failures, with a summary
+  cargo xtask security     Local policy, hygiene and supply-chain checks
   cargo xtask release check PATH
                            Check a non-publishing release catalogue
   cargo xtask release validate PATH
@@ -686,21 +690,4 @@ fn flush() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::has_meaningful_stdout;
-
-    #[test]
-    fn empty_compose_output_is_not_a_running_database() {
-        assert!(!has_meaningful_stdout(true, b"\n"));
-    }
-
-    #[test]
-    fn a_compose_container_id_is_running_database_evidence() {
-        assert!(has_meaningful_stdout(true, b"container-id\n"));
-    }
-
-    #[test]
-    fn a_failed_compose_query_is_not_running_database_evidence() {
-        assert!(!has_meaningful_stdout(false, b"container-id\n"));
-    }
-}
+mod tests;
