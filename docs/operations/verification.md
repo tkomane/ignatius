@@ -34,9 +34,16 @@ list:
 - `self-repository` in `ci.yml` and `release.yml`, because the required
   actionlint 1.7.12 gate does not yet parse GitHub's `$/` syntax.
 
-The security audit is not a required check in the `main` ruleset on
-23 November 2026. Until the owner adds it, a failure is visible on the pull
-request but does not block a merge.
+The security audit (`GitHub Actions security audit`) is not yet a required
+check in the `main` ruleset (`main protection`, ID `22835887`). Likewise, the
+three CodeQL `Analyze (...)` checks and `PostgreSQL 15`/`16`/`17` run in CI on
+pull requests and pushes without `continue-on-error`, but are not yet enforced
+by the `main` ruleset (which currently requires 13 CI contexts including
+`PostgreSQL 14`, `PostgreSQL 18`, `PostgreSQL 18 Unix socket`, `GitHub Actions
+semantics`, `Dependency advisories and licences`, and `Repository secret scan`).
+Until an owner adds the remaining checks to the ruleset, failures on those
+jobs are visible on the pull request but do not block a merge at GitHub branch
+protection level.
 
 Text contracts in `tests/workflow_contract.rs` also require, across every
 workflow and local action:
@@ -1984,6 +1991,33 @@ The workspace gate uses `--no-fail-fast` so a failing test binary does not hide
 later integration binaries. If that gate fails, fixture availability is labelled
 as information; it is not reported as a database/socket test pass.
 
+## Local security gate
+
+```bash
+cargo --locked xtask security
+```
+
+Runs the local security, policy, and hygiene bundle and prints a `pass` /
+`FAIL` / `skip` summary (exiting non-zero if any gate fails; a skip is never
+reported as a pass):
+
+1. Policy and supply-chain contracts: `cargo test --locked --test
+   workflow_contract --test release_contract --test runtime_privacy_contract
+   --test documentation_matches_the_build`.
+2. Pure-Rust repository hygiene: `AGENTS.md == CLAUDE.md` byte-for-byte, zero
+   inline `mod tests {` blocks in production `src/` files, and zero Unicode
+   em/en dashes in `README.md`, `docs/status.md`, `docs/product/roadmap.md`,
+   `docs/operations/verification.md`, and `.specify/memory/constitution.md`.
+3. `actionlint`, `zizmor`, and `gitleaks` using the exact `@sha256:` image
+   digests parsed from `.github/workflows/ci.yml` when `docker info` succeeds
+   (`--network none`, read-only repo mount), falling back to local binaries on
+   `PATH` or `skip`. In a linked git worktree where `.git` points outside the
+   repo mount, container `gitleaks` cannot read the external gitdir and
+   therefore falls back to host `gitleaks` on `PATH` or reports `skip`.
+4. `cargo-deny` workspace audit (`advisories licenses bans sources`) and
+   `scripts/check-driver-registry-advisories.py` when `cargo-deny` is on `PATH`,
+   or `skip`.
+
 ## Required gates before merging
 
 | Gate | Command | Blocking |
@@ -1993,16 +2027,17 @@ as information; it is not reported as a database/socket test pass.
 | API documentation | locked workspace `cargo doc`, warnings denied | Yes |
 | Complete auto-discovered test suite | locked workspace `cargo test --all-targets --all-features` | Yes |
 | Documentation examples | locked workspace `cargo test --doc --all-features` | Yes |
-| CLI, PostgreSQL, prompt and cloud-token integration | live plain and TLS services in CI | Yes |
+| CLI, PostgreSQL, prompt and cloud-token integration | live plain and TLS services in CI | Yes for PostgreSQL 14 and 18 in `main` ruleset (15-17 run in CI; owner ruleset addition pending) |
 | Unix socket integration | focused live socket fixture on Linux in CI | Yes |
 | Compilation on every primary OS | locked workspace build on Linux, macOS and Windows | Yes |
 | Minimum supported Rust | locked workspace check with Rust 1.90 | Yes |
 | Dependency advisories and licences | `cargo deny check` in CI | Yes |
 | Secret scan | gitleaks in CI | Yes |
 | Release evidence scope | allowlist validation and scoped gitleaks scan in CI | Yes |
-| Code scanning | CodeQL advanced setup in CI, test sources excluded | Yes |
+| Code scanning | CodeQL advanced setup in CI, test sources excluded | No in `main` ruleset (runs on PRs/pushes/schedule; owner ruleset addition pending) |
 | Workflow semantics | digest-pinned actionlint in CI, no network | Yes |
-| Workflow security audit | digest-pinned zizmor in CI, offline, reviewed exceptions only | Yes, once the owner adds `GitHub Actions security audit` to the `main` ruleset |
+| Workflow security audit | digest-pinned zizmor in CI, offline, reviewed exceptions only | No in `main` ruleset (runs non-advisory in CI; owner ruleset addition of `GitHub Actions security audit` pending) |
+| Local policy, hygiene and security gate | `cargo --locked xtask security` | Local preflight (skips remain unverified) |
 | Documentation and release notes updated | Review | Yes, when behaviour changes |
 
 ## Complete interactive review admission - 2026-10-25
