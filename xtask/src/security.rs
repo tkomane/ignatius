@@ -558,15 +558,48 @@ fn run_gitleaks_checked(program: &str, args: &[&str], root: &Path) -> GateOutcom
     GateOutcome::Pass
 }
 
+/// Strips ANSI CSI escape sequences (`\x1b[` followed by parameter/intermediate
+/// bytes until a final byte in `0x40..=0x7e` / `'@'..='~'`) so log-output
+/// checks inspect plain text even when tools emit color codes without a TTY.
+pub(crate) fn strip_ansi(input: &str) -> String {
+    let mut plain = String::with_capacity(input.len());
+    let mut rest = input;
+
+    while let Some(esc_idx) = rest.find('\x1b') {
+        plain.push_str(&rest[..esc_idx]);
+        let after_esc = &rest[esc_idx + 1..];
+        if let Some(after_csi) = after_esc.strip_prefix('[') {
+            let bytes = after_csi.as_bytes();
+            let mut idx = 0;
+            while matches!(bytes.get(idx), Some(0x30..=0x3f)) {
+                idx += 1;
+            }
+            while matches!(bytes.get(idx), Some(0x20..=0x2f)) {
+                idx += 1;
+            }
+            if matches!(bytes.get(idx), Some(0x40..=0x7e)) {
+                rest = &after_csi[idx + 1..];
+                continue;
+            }
+        }
+        plain.push('\x1b');
+        rest = after_esc;
+    }
+
+    plain.push_str(rest);
+    plain
+}
+
 /// Rejects false-green `gitleaks git` runs where git could not open the repo
 /// and `gitleaks` still exited 0 after scanning zero commits.
 pub(crate) fn gitleaks_output_scanned_history(output: &str) -> bool {
-    if output.contains("fatal: not a git repository") {
+    let plain = strip_ansi(output);
+    if plain.contains("fatal: not a git repository") {
         return false;
     }
 
     let mut saw_positive = false;
-    for line in output.lines() {
+    for line in plain.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
         for window in words.windows(3) {
             let [count_token, unit_token, scanned_token] = [window[0], window[1], window[2]];

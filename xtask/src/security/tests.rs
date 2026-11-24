@@ -1,6 +1,6 @@
 use super::{
     PinnedSecurityImages, find_disallowed_dashes, find_inline_test_modules,
-    gitleaks_output_scanned_history, parse_pinned_security_images,
+    gitleaks_output_scanned_history, parse_pinned_security_images, strip_ansi,
 };
 use std::fs;
 use std::path::Path;
@@ -156,4 +156,45 @@ fn gitleaks_history_guard_catches_zero_commit_worktree_failures() {
     ));
     assert!(!gitleaks_output_scanned_history("INF 0 commits scanned.\n"));
     assert!(!gitleaks_output_scanned_history("INF no leaks found\n"));
+}
+
+#[test]
+fn strip_ansi_removes_csi_sequences_and_preserves_plain_text() {
+    assert_eq!(strip_ansi("plain text"), "plain text");
+    assert_eq!(
+        strip_ansi("\x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1m312 commits scanned.\x1b[0m"),
+        "12:18PM INF 312 commits scanned."
+    );
+    assert_eq!(
+        strip_ansi("\x1b[38;5;196m✓\x1b[0m \x1b[?25h\x1b[2 qcafé\x1b[m"),
+        "✓ café"
+    );
+    assert_eq!(strip_ansi("tail\x1b"), "tail\x1b");
+    assert_eq!(strip_ansi("tail\x1b[32"), "tail\x1b[32");
+    assert_eq!(
+        strip_ansi("\x1b[32\nINF 312 commits scanned."),
+        "\x1b[32\nINF 312 commits scanned."
+    );
+}
+
+#[test]
+fn gitleaks_history_guard_handles_zerolog_ansi_stderr() {
+    assert!(gitleaks_output_scanned_history(
+        "\x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1m312 commits scanned.\x1b[0m\n\
+         \x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1mno leaks found\x1b[0m\n"
+    ));
+    assert!(gitleaks_output_scanned_history(
+        "\x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1m1 commit scanned.\x1b[0m\n"
+    ));
+    assert!(!gitleaks_output_scanned_history(
+        "\x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1m0 commits scanned.\x1b[0m\n"
+    ));
+    assert!(!gitleaks_output_scanned_history(
+        "\x1b[90m12:18PM\x1b[0m \x1b[31mERR\x1b[0m \x1b[1m[git] fatal: not a git repository: /host/.git/worktrees/w\x1b[0m\n\
+         \x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1m0 commits scanned.\x1b[0m\n"
+    ));
+    assert!(!gitleaks_output_scanned_history(
+        "\x1b[90m12:18PM\x1b[0m \x1b[31mERR\x1b[0m \x1b[1m[git] fatal: not a git repository\x1b[0m\n\
+         \x1b[90m12:18PM\x1b[0m \x1b[32mINF\x1b[0m \x1b[1m12 commits scanned.\x1b[0m\n"
+    ));
 }
