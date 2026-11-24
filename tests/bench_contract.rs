@@ -241,5 +241,111 @@ fn bench_command_measures_ab_queries_enforces_rollback_and_checks_regression_gat
     assert_eq!(gate_json["failed_gate"], true);
     assert_eq!(gate_json["comparison"]["regression_detected"], true);
 
+    // 5. Production target with --allow-write permits rollback-safe DML and leaves rows untouched
+    let prod_allowed = binary(&root)
+        .args([
+            "bench",
+            &uri,
+            "--environment",
+            "production",
+            "--allow-write",
+            "-c",
+            "DELETE FROM public.orders",
+            "--warmup",
+            "0",
+            "--runs",
+            "1",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run prod allowed bench");
+    assert_eq!(code(&prod_allowed), 0, "stderr: {}", stderr(&prod_allowed));
+    let count_after_prod = binary(&root)
+        .args([
+            "query",
+            &uri,
+            "-c",
+            "SELECT count(*) AS n FROM public.orders",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("count after prod");
+    assert_eq!(stdout(&count_before), stdout(&count_after_prod));
+
+    // 6. Production target permits read-only benchmark queries without --allow-write
+    let prod_read = binary(&root)
+        .args([
+            "bench",
+            &uri,
+            "--environment",
+            "production",
+            "-c",
+            "SELECT 1",
+            "--warmup",
+            "0",
+            "--runs",
+            "1",
+        ])
+        .output()
+        .expect("run prod read bench");
+    assert_eq!(code(&prod_read), 0, "stderr: {}", stderr(&prod_read));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn bench_production_target_refuses_writes_before_credential_fetch_or_connection() {
+    let root = root();
+    std::fs::write(
+        root.join("config.toml"),
+        "[auth.providers.never_called]\n\
+         command = [\"ignatius-no-such-auth-tool\"]\n\
+         \n\
+         [profiles.prod_guard]\n\
+         host = \"127.0.0.1\"\n\
+         port = 1\n\
+         dbname = \"orders\"\n\
+         user = \"app\"\n\
+         environment = \"production\"\n\
+         auth = \"never_called\"\n",
+    )
+    .expect("write config.toml");
+
+    for extra in [&[][..], &["--no-rollback"][..]] {
+        let mut args = vec!["bench", "@prod_guard", "-c", "DELETE FROM public.orders"];
+        args.extend_from_slice(extra);
+        let refused = binary(&root)
+            .args(args)
+            .output()
+            .expect("run refused bench");
+        assert_eq!(
+            code(&refused),
+            2,
+            "must fail with Usage (exit 2) before auth/connect: {}",
+            stderr(&refused)
+        );
+        let message = stderr(&refused);
+        assert!(message.contains("classified as production"), "{message}");
+        assert!(message.contains("--allow-write"), "{message}");
+        assert!(message.contains("not a security boundary"), "{message}");
+    }
+
+    // Candidate write with read baseline is also refused before credential fetch or connect.
+    let cand_refused = binary(&root)
+        .args([
+            "bench",
+            "@prod_guard",
+            "-c",
+            "SELECT 1",
+            "--candidate",
+            "UPDATE public.orders SET total = total",
+        ])
+        .output()
+        .expect("run candidate refused bench");
+    assert_eq!(code(&cand_refused), 2, "{}", stderr(&cand_refused));
+    assert!(stderr(&cand_refused).contains("--allow-write"));
+
     let _ = std::fs::remove_dir_all(&root);
 }

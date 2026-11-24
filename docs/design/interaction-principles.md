@@ -59,7 +59,12 @@ respectively, always as complete active-key/action pairs.
 
 **Feedback is immediate and honest.** Pressing cancel changes the status
 immediately, because the request was made immediately. It does not claim the
-outcome, because the outcome is not known yet.
+outcome, because the outcome is not known yet. Benchmarks follow the same rule:
+`Ctrl+C` reports `Cancellation requested for the benchmark. The server may still
+be running.`, keeps the overlay open (`Esc` waits) until the run reports or the
+connection drops, allows retrying if cancel delivery fails, skips Query B, and
+reports `Benchmark cancelled. Nothing was committed.` (rollback mode) or
+`Benchmark cancelled.` (live mode) only once confirmed.
 
 **A result view never pretends to be a second query.** Sorting, hiding, sizing,
 and freezing operate only on retained rows and source columns already in the

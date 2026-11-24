@@ -847,6 +847,8 @@ pub enum Message {
         /// Measured benchmark statistics or error.
         result: Box<Result<crate::bench::BenchStats, Diagnostic>>,
     },
+    /// Delivering a cancellation request for the active benchmark run failed.
+    QueryBenchCancelFailed(String),
     /// Canonical schema snapshot captured from PostgreSQL catalog.
     SchemaSnapshotLoaded {
         /// Which request this answers, so a late answer is discarded.
@@ -1202,6 +1204,8 @@ pub enum Effect {
         /// Warmup, measured iteration, and rollback isolation configuration.
         config: crate::bench::BenchConfig,
     },
+    /// Request cancellation of the active benchmark run without blocking its gate.
+    CancelQueryBench,
     /// Capture a bounded canonical schema snapshot from PostgreSQL catalog.
     CaptureSchemaSnapshot {
         /// Identity used to reject a late response.

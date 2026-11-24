@@ -10083,6 +10083,7 @@ pub(crate) fn render_query_bench(
     let held = if state.loading {
         let settled = crate::app::model::QueryBenchState {
             loading: false,
+            cancelling: false,
             ..state.clone()
         };
         measure_modal_body(area, |fit, scratch| {
@@ -10199,16 +10200,29 @@ fn render_query_bench_frame(
     let selection_style = theme.style(Token::Selection);
 
     if state.loading {
-        let mut lines = vec![bounded_row(
-            vec![(
+        let (headline, headline_token) = if state.cancelling {
+            (
+                format!(
+                    "  Cancelling query benchmark ({} warmup, {} measured, rollback={})...",
+                    state.config.warmup_runs,
+                    state.config.measured_runs,
+                    if state.config.rollback { "on" } else { "off" }
+                ),
+                Token::Warning,
+            )
+        } else {
+            (
                 format!(
                     "  Running query benchmark ({} warmup, {} measured, rollback={})...",
                     state.config.warmup_runs,
                     state.config.measured_runs,
                     if state.config.rollback { "on" } else { "off" }
                 ),
-                theme.style(Token::Info),
-            )],
+                Token::Info,
+            )
+        };
+        let mut lines = vec![bounded_row(
+            vec![(headline, theme.style(headline_token))],
             body_width,
             unicode,
             None,
@@ -10251,9 +10265,13 @@ fn render_query_bench_frame(
     }
 
     let (status_text, status_token) = if let Some(msg) = &state.status_message {
-        let tok = if state.report.as_ref().is_some_and(|r| r.failed_gate) || msg.contains("failed")
+        let tok = if state.report.as_ref().is_some_and(|r| r.failed_gate)
+            || msg.contains("failed")
+            || msg.contains("Could not deliver")
         {
             Token::Danger
+        } else if state.cancelling || msg.contains("cancelled") || msg.contains("Cancellation") {
+            Token::Warning
         } else {
             Token::Info
         };
@@ -10296,10 +10314,9 @@ fn render_query_bench_frame(
     };
     render_overlay_status(&status_text, status_token, presentation, status_area, buf);
 
-    // While a run is in flight m, r and Esc wait, so the rail offers only
-    // what works; the status line says why.
+    // While a run is in flight m, r and Esc wait, while Ctrl+C cancels.
     let hints: &[(&str, &str)] = if state.loading {
-        &[("1-2", "Tabs"), ("Up/Down", "Select")]
+        &[("1-2", "Tabs"), ("Up/Down", "Select"), ("Ctrl+C", "Cancel")]
     } else {
         &[
             ("1-2", "Tabs"),

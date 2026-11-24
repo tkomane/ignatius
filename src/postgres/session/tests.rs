@@ -519,3 +519,26 @@ fn retained_data_ingestion_refusal_never_starts_owned_header_or_cell_pass() {
     assert_eq!(set.rows_seen, 1);
     assert!(set.rows.is_empty());
 }
+
+#[tokio::test]
+async fn cancel_delivery_times_out_with_an_honest_connection_diagnostic() {
+    let err = run_cancel_with_timeout(Duration::from_millis(20), std::future::pending())
+        .await
+        .expect_err("hung cancel connection must time out");
+    assert_eq!(err.kind, DiagnosticKind::Connection);
+    assert!(err.headline.contains("timed out"), "{}", err.headline);
+    assert!(
+        err.next_action
+            .as_deref()
+            .is_some_and(|next| next.contains("retry") && next.contains("pg_cancel_backend")),
+        "{:?}",
+        err.next_action
+    );
+}
+
+#[tokio::test]
+async fn cancel_delivery_succeeds_before_timeout() {
+    run_cancel_with_timeout(Duration::from_secs(1), async { Ok(()) })
+        .await
+        .expect("completed cancel returns Ok");
+}

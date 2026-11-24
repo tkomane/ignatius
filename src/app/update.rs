@@ -202,6 +202,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 && bench.loading
             {
                 bench.loading = false;
+                bench.cancelling = false;
                 bench.queued_candidate = None;
                 bench.status_message = Some(
                     "The connection was lost during the benchmark; its outcome is unknown."
@@ -1297,6 +1298,8 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             let mut next = Vec::new();
             if let Some(bench) = &mut model.query_bench {
                 bench.loading = false;
+                let was_cancelling = bench.cancelling;
+                bench.cancelling = false;
                 let queued = if target == crate::app::message::BenchTarget::Baseline {
                     bench.queued_candidate.take()
                 } else {
@@ -1307,11 +1310,18 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         match target {
                             crate::app::message::BenchTarget::Baseline => {
                                 bench.baseline = Some(stats);
-                                bench.status_message =
-                                    Some("Captured Baseline (A) benchmark".to_owned());
-                                // A has finished with the session, so B may
-                                // start now, if the session is still there.
-                                if queued.is_some() && !model.connection.is_ready() {
+                                // A has finished with the session. Skip B if
+                                // cancellation was requested or the connection
+                                // is no longer ready.
+                                if was_cancelling {
+                                    bench.status_message = Some(if queued.is_some() {
+                                        "Captured Baseline (A); benchmark cancelled before Query B."
+                                            .to_owned()
+                                    } else {
+                                        "Captured Baseline (A) before cancellation reached the server."
+                                            .to_owned()
+                                    });
+                                } else if queued.is_some() && !model.connection.is_ready() {
                                     bench.status_message = Some(
                                         "Captured Baseline (A). Query B was not run: the connection is not ready."
                                             .to_owned(),
@@ -1328,15 +1338,29 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                                         sql: bench.candidate_sql.clone(),
                                         config,
                                     });
+                                } else {
+                                    bench.status_message =
+                                        Some("Captured Baseline (A) benchmark".to_owned());
                                 }
                             }
                             crate::app::message::BenchTarget::Candidate => {
                                 bench.candidate = Some(stats);
-                                bench.status_message =
-                                    Some("Captured Candidate (B) benchmark".to_owned());
+                                bench.status_message = Some(if was_cancelling {
+                                    "Captured Candidate (B) before cancellation reached the server."
+                                        .to_owned()
+                                } else {
+                                    "Captured Candidate (B) benchmark".to_owned()
+                                });
                             }
                         }
                         bench.recompute_report();
+                    }
+                    Err(diag) if diag.kind == crate::diagnostics::DiagnosticKind::Cancelled => {
+                        bench.status_message = Some(if bench.config.rollback {
+                            "Benchmark cancelled. Nothing was committed.".to_owned()
+                        } else {
+                            "Benchmark cancelled.".to_owned()
+                        });
                     }
                     Err(diag) => {
                         bench.status_message = Some(if queued.is_some() {
@@ -1351,6 +1375,17 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 }
             }
             next
+        }
+        Message::QueryBenchCancelFailed(detail) => {
+            if let Some(bench) = &mut model.query_bench
+                && bench.loading
+                && bench.cancelling
+            {
+                bench.status_message = Some(format!(
+                    "Could not deliver benchmark cancellation: {detail}. The server may still be running; press Ctrl+C to retry."
+                ));
+            }
+            Vec::new()
         }
         Message::SchemaSnapshotLoaded { request, result } => {
             if model.schema_snapshot_request != request {
@@ -4494,6 +4529,7 @@ fn query_bench_dispatch_runs(model: &mut Model) -> Vec<Effect> {
     bench.candidate = None;
     bench.report = None;
     bench.loading = true;
+    bench.cancelling = false;
     bench.status_message = Some(format!(
         "Running benchmark ({} warmup, {} measured, rollback={})...",
         config.warmup_runs,
@@ -4618,9 +4654,21 @@ fn rollback_off_refusal(
 /// Handles input while the query latency benchmark overlay is open.
 fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
     match action {
-        // A run cannot be cancelled yet, so the overlay stays while one is in
-        // flight: closed, it would leave a run nobody can see, and anything
-        // started behind it would wait on the session unseen.
+        Action::Cancel if model.phase.is_busy() => return cancel_query(model),
+        Action::Cancel => {
+            if let Some(bench) = &mut model.query_bench
+                && bench.loading
+            {
+                bench.cancelling = true;
+                bench.status_message = Some(
+                    "Cancellation requested for the benchmark. The server may still be running."
+                        .to_owned(),
+                );
+                return vec![Effect::CancelQueryBench];
+            }
+        }
+        // The overlay stays open while a run is in flight so no benchmark can
+        // keep holding the session unseen; Esc explains that Ctrl+C cancels.
         Action::Dismiss | Action::QueryBench
             if model
                 .query_bench
@@ -4628,10 +4676,13 @@ fn query_bench_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 .is_some_and(|bench| bench.loading) =>
         {
             if let Some(bench) = &mut model.query_bench {
-                bench.status_message = Some(
-                    "A benchmark is running and cannot be cancelled yet. Esc closes this once the run reports. Quitting Ignatius stops later runs, but a statement already executing may still finish on the server."
-                        .to_owned(),
-                );
+                bench.status_message = Some(if bench.cancelling {
+                    "Cancellation requested for the benchmark. Esc closes this once the server stops or finishes."
+                        .to_owned()
+                } else {
+                    "A benchmark is running. Press Ctrl+C to cancel, or Esc once it finishes."
+                        .to_owned()
+                });
             }
         }
         Action::Dismiss | Action::QueryBench => {
@@ -8108,7 +8159,13 @@ fn connection_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
 /// and credentials do not enter this function: the runtime receives only the
 /// selected profile name and owns those values outside the model.
 fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
-    if model.phase.is_busy() || matches!(model.connection, ConnectionState::Connecting { .. }) {
+    if model.phase.is_busy()
+        || model
+            .query_bench
+            .as_ref()
+            .is_some_and(|bench| bench.loading)
+        || matches!(model.connection, ConnectionState::Connecting { .. })
+    {
         return Vec::new();
     }
     let summary = profile.as_deref().and_then(|name| {
@@ -8161,6 +8218,8 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.schema_diagram_notice = None;
     model.server_activity = None;
     model.security_audit = None;
+    model.query_bench = None;
+    model.query_bench_request = model.query_bench_request.wrapping_add(1);
     model.pending_dependencies = None;
     model.connection_details = false;
     model.result_filter.clear();

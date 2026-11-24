@@ -1551,25 +1551,7 @@ fn query_command(
     if target.environment.is_production() && !request.allow_write {
         let impact = crate::query::classify_all(&crate::query::split(&sql));
         if impact.needs_confirmation() {
-            return Err(Diagnostic::new(
-                DiagnosticKind::Usage,
-                format!(
-                    "this statement {} and the target is classified as production",
-                    impact.label()
-                ),
-                "checking a statement against the target's classification",
-            )
-            .likely_cause(
-                "the connection was given --environment production, which refuses anything \
-                 that is not a read",
-            )
-            .next_action(
-                "pass --allow-write if that is what you meant, or --read-only to have the \
-                 server refuse writes itself. This check reads leading keywords only and is \
-                 not a security boundary: database permissions are.",
-            )
-            .technical("Impact", impact.label())
-            .technical("Environment", target.environment.label()));
+            return Err(production_write_refusal(impact, &target.environment));
         }
     }
 
@@ -6525,6 +6507,72 @@ fn ensure_output_writable(output: Option<&Path>, force: bool) -> Result<(), Diag
     Ok(())
 }
 
+fn production_write_refusal(
+    impact: crate::query::Impact,
+    environment: &crate::connection::Environment,
+) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Usage,
+        format!(
+            "this statement {} and the target is classified as production",
+            impact.label()
+        ),
+        "checking a statement against the target's classification",
+    )
+    .likely_cause(
+        "the connection was given --environment production, which refuses anything \
+         that is not a read",
+    )
+    .next_action(
+        "pass --allow-write if that is what you meant, or --read-only to have the \
+         server refuse writes itself. This check reads leading keywords only and is \
+         not a security boundary: database permissions are.",
+    )
+    .technical("Impact", impact.label())
+    .technical("Environment", environment.label())
+}
+
+fn resolve_target_for_run(
+    target_arg: Option<&str>,
+    connection: &ConnectionOptions,
+    output: Option<&std::path::Path>,
+    force: bool,
+    paths: &Paths,
+) -> Result<(config::Loaded, crate::connection::ConnectionTarget), Diagnostic> {
+    ensure_output_writable(output, force)?;
+
+    let loaded = config::load(paths)?;
+    let (requested, conn_args) =
+        resolve_target_and_profile(target_arg, connection, &loaded.config)?;
+    let resolved = crate::connection::resolve(
+        requested,
+        &conn_args,
+        &EnvSnapshot::from_process(),
+        &loaded.config.connection,
+    )?;
+    Ok((loaded, resolved))
+}
+
+fn connect_and_run_resolved<T, F, Fut>(
+    resolved: crate::connection::ConnectionTarget,
+    config: config::Config,
+    task: F,
+) -> Result<T, Diagnostic>
+where
+    F: FnOnce(crate::postgres::session::Session, config::Config) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Diagnostic>>,
+{
+    let target = authenticate_target(resolved, &config)?;
+    let timeout = std::time::Duration::from_secs(config.connection.connect_timeout_seconds);
+
+    runtime()?.block_on(async {
+        let session = crate::postgres::session::connect_reported(&target, timeout)
+            .await
+            .value?;
+        task(session, config).await
+    })
+}
+
 fn connect_and_run_with_config<T, F, Fut>(
     target_arg: Option<&str>,
     connection: &ConnectionOptions,
@@ -6537,26 +6585,8 @@ where
     F: FnOnce(crate::postgres::session::Session, config::Config) -> Fut,
     Fut: std::future::Future<Output = Result<T, Diagnostic>>,
 {
-    ensure_output_writable(output, force)?;
-
-    let loaded = config::load(paths)?;
-    let (requested, conn_args) =
-        resolve_target_and_profile(target_arg, connection, &loaded.config)?;
-    let resolved = crate::connection::resolve(
-        requested,
-        &conn_args,
-        &EnvSnapshot::from_process(),
-        &loaded.config.connection,
-    )?;
-    let target = authenticate_target(resolved, &loaded.config)?;
-    let timeout = std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds);
-
-    runtime()?.block_on(async {
-        let session = crate::postgres::session::connect_reported(&target, timeout)
-            .await
-            .value?;
-        task(session, loaded.config).await
-    })
+    let (loaded, resolved) = resolve_target_for_run(target_arg, connection, output, force, paths)?;
+    connect_and_run_resolved(resolved, loaded.config, task)
 }
 
 fn write_report_output(
@@ -7536,6 +7566,13 @@ pub struct BenchArgs {
     /// Replace the output file if it already exists.
     #[arg(long)]
     pub force: bool,
+    /// Allow a statement that writes when the target is classified as
+    /// production.
+    ///
+    /// Without it, a production target refuses anything that is not a read
+    /// (in either rollback mode).
+    #[arg(long)]
+    pub allow_write: bool,
     #[command(flatten)]
     pub connection: ConnectionOptions,
 }
@@ -7594,6 +7631,26 @@ fn resolve_bench_inputs(args: &BenchArgs) -> Result<(String, Option<String>), Di
     Ok((baseline, candidate))
 }
 
+fn check_bench_production_write_guard(
+    environment: &crate::connection::Environment,
+    allow_write: bool,
+    baseline_sql: &str,
+    candidate_sql: Option<&str>,
+) -> Result<(), Diagnostic> {
+    if !environment.is_production() || allow_write {
+        return Ok(());
+    }
+    let baseline_impact = crate::query::classify_all(&crate::query::split(baseline_sql));
+    let candidate_impact = candidate_sql
+        .map(|sql| crate::query::classify_all(&crate::query::split(sql)))
+        .unwrap_or(crate::query::Impact::Read);
+    let impact = baseline_impact.max(candidate_impact);
+    if impact.needs_confirmation() {
+        return Err(production_write_refusal(impact, environment));
+    }
+    Ok(())
+}
+
 fn run_bench(
     args: &BenchArgs,
     paths: &Paths,
@@ -7604,28 +7661,35 @@ fn run_bench(
     let (base_sql, cand_sql) = resolve_bench_inputs(args)?;
     let config = crate::bench::BenchConfig::new(args.warmup, args.runs, !args.no_rollback);
 
-    let report = connect_and_run(
+    let (loaded, resolved) = resolve_target_for_run(
         args.target.as_deref(),
         &args.connection,
         args.output.as_deref(),
         args.force,
         paths,
-        |session| async move {
-            let baseline = session
-                .run_benchmark(&base_sql, &config, "Baseline (A)")
-                .await?;
-            let candidate = match cand_sql {
-                Some(ref sql) => Some(session.run_benchmark(sql, &config, "Candidate (B)").await?),
-                None => None,
-            };
-            drop(session);
-            Ok(crate::bench::compare_benchmarks(
-                baseline,
-                candidate,
-                threshold_pct,
-            ))
-        },
     )?;
+    check_bench_production_write_guard(
+        &resolved.environment,
+        args.allow_write,
+        &base_sql,
+        cand_sql.as_deref(),
+    )?;
+
+    let report = connect_and_run_resolved(resolved, loaded.config, |session, _cfg| async move {
+        let baseline = session
+            .run_benchmark(&base_sql, &config, "Baseline (A)")
+            .await?;
+        let candidate = match cand_sql {
+            Some(ref sql) => Some(session.run_benchmark(sql, &config, "Candidate (B)").await?),
+            None => None,
+        };
+        drop(session);
+        Ok(crate::bench::compare_benchmarks(
+            baseline,
+            candidate,
+            threshold_pct,
+        ))
+    })?;
 
     let rendered = match args.format {
         CliTelemetryFormat::Table => report.render_table(),

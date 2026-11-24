@@ -181,33 +181,60 @@ impl std::fmt::Debug for CancelHandle {
     }
 }
 
+const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn run_cancel_with_timeout<F>(timeout: Duration, delivery: F) -> Result<(), Diagnostic>
+where
+    F: std::future::Future<Output = Result<(), tokio_postgres::Error>>,
+{
+    match tokio::time::timeout(timeout, delivery).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(Diagnostic::new(
+            DiagnosticKind::Connection,
+            "the cancellation request could not be delivered",
+            "cancelling the running statement",
+        )
+        .likely_cause(err.to_string())
+        .next_action(
+            "the statement may still be running on the server; it can be stopped with \
+             pg_cancel_backend() by an administrator",
+        )),
+        Err(_) => Err(Diagnostic::new(
+            DiagnosticKind::Connection,
+            "the cancellation request timed out waiting for the server",
+            "cancelling the running statement",
+        )
+        .likely_cause(format!(
+            "the server did not confirm closing the cancellation connection within {} seconds",
+            timeout.as_secs()
+        ))
+        .next_action(
+            "the statement may still be running on the server; retry cancellation or stop it \
+             with pg_cancel_backend() by an administrator",
+        )),
+    }
+}
+
 impl CancelHandle {
     /// Sends a cancellation request for whatever the session is running.
     ///
-    /// Returning `Ok` means the request was delivered, not that the statement has
-    /// stopped. The interface says "Cancellation requested" until the server
-    /// confirms with SQLSTATE 57014.
+    /// Returning `Ok` means the server received the request and closed the
+    /// cancellation socket, not that the statement has stopped. The interface
+    /// says "Cancellation requested" until the server confirms with SQLSTATE
+    /// 57014.
     pub async fn cancel(&self) -> Result<(), Diagnostic> {
-        let result = match client_config(&self.tls)? {
-            None => self.token.cancel_query(tokio_postgres::NoTls).await,
-            Some(config) => {
-                self.token
-                    .cancel_query(tokio_postgres_rustls::MakeRustlsConnect::new(config))
-                    .await
+        let tls = client_config(&self.tls)?;
+        run_cancel_with_timeout(CANCEL_TIMEOUT, async {
+            match tls {
+                None => self.token.cancel_query(tokio_postgres::NoTls).await,
+                Some(config) => {
+                    self.token
+                        .cancel_query(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+                        .await
+                }
             }
-        };
-        result.map_err(|err| {
-            Diagnostic::new(
-                DiagnosticKind::Connection,
-                "the cancellation request could not be delivered",
-                "cancelling the running statement",
-            )
-            .likely_cause(err.to_string())
-            .next_action(
-                "the statement may still be running on the server; it can be stopped with \
-                 pg_cancel_backend() by an administrator",
-            )
         })
+        .await
     }
 }
 
@@ -445,10 +472,70 @@ impl Session {
         config: &crate::bench::BenchConfig,
         label: &str,
     ) -> Result<crate::bench::BenchStats, Diagnostic> {
-        let _gate = self.user_sql_gate.lock().await;
+        self.run_benchmark_inner(sql, config, label, None).await
+    }
+
+    /// Executes warmup and measured iterations of one SQL statement with
+    /// non-blocking cancellation support.
+    pub async fn run_benchmark_cancellable(
+        &self,
+        sql: &str,
+        config: &crate::bench::BenchConfig,
+        label: &str,
+        cancel: &crate::postgres::bench::BenchmarkCancelHandle,
+    ) -> Result<crate::bench::BenchStats, Diagnostic> {
+        self.run_benchmark_inner(sql, config, label, Some(cancel))
+            .await
+    }
+
+    async fn run_benchmark_inner(
+        &self,
+        sql: &str,
+        config: &crate::bench::BenchConfig,
+        label: &str,
+        cancel: Option<&crate::postgres::bench::BenchmarkCancelHandle>,
+    ) -> Result<crate::bench::BenchStats, Diagnostic> {
+        if cancel.is_some_and(crate::postgres::bench::BenchmarkCancelHandle::is_cancelled) {
+            return Err(crate::postgres::bench::cancelled_diagnostic());
+        }
+        let _gate = if let Some(cancel) = cancel {
+            let notified = cancel.notified();
+            tokio::pin!(notified);
+            if cancel.is_cancelled() {
+                return Err(crate::postgres::bench::cancelled_diagnostic());
+            }
+            tokio::select! {
+                biased;
+                () = &mut notified => {
+                    return Err(crate::postgres::bench::cancelled_diagnostic());
+                }
+                gate = self.user_sql_gate.lock() => gate,
+            }
+        } else {
+            self.user_sql_gate.lock().await
+        };
+        if cancel.is_some_and(crate::postgres::bench::BenchmarkCancelHandle::is_cancelled) {
+            return Err(crate::postgres::bench::cancelled_diagnostic());
+        }
         self.require_autocommit("the benchmark", "starting a query benchmark")
             .await?;
-        crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await
+        if cancel.is_some_and(crate::postgres::bench::BenchmarkCancelHandle::is_cancelled) {
+            return Err(crate::postgres::bench::cancelled_diagnostic());
+        }
+        match cancel {
+            Some(cancel) => {
+                crate::postgres::bench::run_benchmark_with_cancel(
+                    &self.client,
+                    sql,
+                    config,
+                    label,
+                    self.cancel_handle(),
+                    cancel,
+                )
+                .await
+            }
+            None => crate::postgres::bench::run_benchmark(&self.client, sql, config, label).await,
+        }
     }
 
     /// Captures a bounded canonical PostgreSQL schema snapshot for drift detection.

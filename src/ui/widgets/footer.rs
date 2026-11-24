@@ -113,21 +113,36 @@ pub(crate) fn render_footer(
     // While an overlay owns input the rail offers that overlay's keys, in its
     // words; workbench keys there would be swallowed and do nothing.
     let overlay_hints = crate::app::discovery::overlay_hint_actions(model);
+    let hint_separator = if presentation.glyphs.is_ascii() {
+        " | "
+    } else {
+        " \u{00b7} "
+    };
+    let hint_separator_width = display_width(hint_separator);
     // The way out of an overlay outranks the search path: on a rail too short
-    // for both, the path gives way so the key that closes the overlay shows.
-    let way_out_width = overlay_hints
-        .as_ref()
-        .and_then(|hints| {
-            hints.iter().find(|(action, _)| {
+    // for both, the path gives way so the key that closes (or cancels) shows.
+    let way_out_width = overlay_hints.as_ref().and_then(|hints| {
+        let is_running_bench = model
+            .query_bench
+            .as_ref()
+            .is_some_and(|bench| bench.loading);
+        let widths: Vec<usize> = hints
+            .iter()
+            .filter(|(action, _)| {
                 matches!(
                     action,
                     crate::app::Action::Dismiss | crate::app::Action::Quit
-                )
+                ) || (is_running_bench && *action == crate::app::Action::Cancel)
             })
+            .filter_map(|(action, label)| {
+                overlay_key(keymap, action)
+                    .map(|key| display_width(&key) + 2 + display_width(label))
+            })
+            .collect();
+        (!widths.is_empty()).then(|| {
+            widths.iter().sum::<usize>() + hint_separator_width * widths.len().saturating_sub(1)
         })
-        .and_then(|(action, label)| {
-            overlay_key(keymap, action).map(|key| display_width(&key) + 2 + display_width(label))
-        });
+    });
     if let Some(info) = model
         .connection
         .info()
@@ -276,12 +291,8 @@ pub(crate) fn render_footer(
     }
 
     let used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
-    let separator = if presentation.glyphs.is_ascii() {
-        " | "
-    } else {
-        " \u{00b7} "
-    };
-    let separator_width = display_width(separator);
+    let separator = hint_separator;
+    let separator_width = hint_separator_width;
     let keycap_style = theme.keycap(Token::Focus);
     let label_style = theme.on_stripe(Token::Text);
     // Each candidate resolves to its key and label, with a rank: the order in
@@ -306,7 +317,7 @@ pub(crate) fn render_footer(
                 .filter_map(|(action, label)| {
                     let rank = match action {
                         crate::app::Action::Dismiss | crate::app::Action::Quit => 0,
-                        crate::app::Action::Activate => 1,
+                        crate::app::Action::Activate | crate::app::Action::Cancel => 1,
                         _ => 2,
                     };
                     overlay_key(keymap, &action).map(|key| (key, label, rank))

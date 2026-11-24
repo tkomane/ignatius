@@ -342,13 +342,13 @@ pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>
             (Action::Dismiss, "Cancel"),
         ]);
     }
-    // A running benchmark cannot be closed yet; quitting is the way out.
+    // A running benchmark cannot be closed yet; cancelling and quitting stay available.
     if model
         .query_bench
         .as_ref()
         .is_some_and(|bench| bench.loading)
     {
-        return Some(vec![(Action::Quit, "Quit")]);
+        return Some(vec![(Action::Cancel, "Cancel"), (Action::Quit, "Quit")]);
     }
     let dashboard = model.inspector.is_some()
         || model.definition.is_some()
@@ -498,9 +498,19 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         Action::OpenConnectionPicker => {
             !model.connection_profiles.is_empty()
                 && !model.phase.is_busy()
+                && !model
+                    .query_bench
+                    .as_ref()
+                    .is_some_and(|bench| bench.loading)
                 && !matches!(model.connection, ConnectionState::Connecting { .. })
         }
-        Action::Cancel => model.phase.is_busy(),
+        Action::Cancel => {
+            model.phase.is_busy()
+                || model
+                    .query_bench
+                    .as_ref()
+                    .is_some_and(|bench| bench.loading)
+        }
         Action::ToggleHelp
         | Action::FocusNext
         | Action::ToggleSidebar
@@ -653,13 +663,19 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         Action::OpenConnectionPicker => {
             if model.connection_profiles.is_empty() {
                 "a named profile in config.toml".to_owned()
+            } else if model
+                .query_bench
+                .as_ref()
+                .is_some_and(|bench| bench.loading)
+            {
+                "the current benchmark to finish".to_owned()
             } else if model.phase.is_busy() {
                 "the current query or plan to finish".to_owned()
             } else {
                 "the connection attempt to finish".to_owned()
             }
         }
-        Action::Cancel => "a query must be running".to_owned(),
+        Action::Cancel => "a query or benchmark must be running".to_owned(),
         Action::ToggleErrorDetail => "an error must be visible".to_owned(),
         Action::Dismiss => "a help, filter, or error surface must be open".to_owned(),
         Action::StartFilter => match ctx.focus {

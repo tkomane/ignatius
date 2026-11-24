@@ -1886,6 +1886,7 @@ fn bench_snapshot_and_runbook_cli_helpers_validate_and_render() {
         format: CliTelemetryFormat::Table,
         output: None,
         force: false,
+        allow_write: false,
         connection: ConnectionOptions::default(),
     };
     assert_eq!(
@@ -2125,4 +2126,79 @@ fn bench_snapshot_and_runbook_cli_helpers_validate_and_render() {
             .as_deref()
             .is_some_and(|m| m.contains("[42P01]"))
     );
+}
+
+#[test]
+fn bench_production_write_guard_requires_allow_write_for_non_read_statements() {
+    use crate::connection::Environment;
+
+    let parsed = Cli::try_parse_from([
+        "ignatius",
+        "bench",
+        "--allow-write",
+        "-c",
+        "DELETE FROM orders",
+    ])
+    .expect("bench --allow-write parses");
+    match parsed.command {
+        Some(Command::Bench(args)) => assert!(args.allow_write),
+        other => panic!("expected Command::Bench, got {other:?}"),
+    }
+
+    // Production refuses non-read baseline or candidate unless --allow-write is passed.
+    let err = check_bench_production_write_guard(
+        &Environment::Production,
+        false,
+        "DELETE FROM orders",
+        None,
+    )
+    .expect_err("production DELETE must be refused");
+    assert_eq!(err.kind, DiagnosticKind::Usage);
+    assert!(err.headline.contains("classified as production"));
+    assert!(
+        err.next_action
+            .as_deref()
+            .is_some_and(|s| s.contains("--allow-write") && s.contains("not a security boundary"))
+    );
+
+    let cand_err = check_bench_production_write_guard(
+        &Environment::Production,
+        false,
+        "SELECT 1",
+        Some("UPDATE orders SET total = 1"),
+    )
+    .expect_err("production candidate write must be refused");
+    assert_eq!(cand_err.kind, DiagnosticKind::Usage);
+
+    let explain_err = check_bench_production_write_guard(
+        &Environment::Production,
+        false,
+        "EXPLAIN ANALYZE DELETE FROM orders",
+        None,
+    )
+    .expect_err("production EXPLAIN ANALYZE write must be refused");
+    assert_eq!(explain_err.kind, DiagnosticKind::Usage);
+
+    // Reads on production, explicit --allow-write, and non-production writes pass.
+    check_bench_production_write_guard(
+        &Environment::Production,
+        false,
+        "SELECT 1",
+        Some("SELECT 2"),
+    )
+    .expect("production reads are allowed");
+    check_bench_production_write_guard(
+        &Environment::Production,
+        true,
+        "DELETE FROM orders",
+        Some("UPDATE orders SET total = 1"),
+    )
+    .expect("--allow-write unlocks production benchmarks");
+    check_bench_production_write_guard(
+        &Environment::Development,
+        false,
+        "DELETE FROM orders",
+        None,
+    )
+    .expect("non-production writes need no --allow-write");
 }

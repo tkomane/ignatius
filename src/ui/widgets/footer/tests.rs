@@ -845,5 +845,8 @@ fn a_running_benchmark_keeps_quit_on_a_short_rail() {
         let text = footer_text(&model, width);
         assert!(text.contains("Quit"), "at {width}: {text:?}");
         assert!(!text.contains("Esc Close"), "at {width}: {text:?}");
+        if width >= 80 {
+            assert!(text.contains("Ctrl+C Cancel"), "at {width}: {text:?}");
+        }
     }
 }
