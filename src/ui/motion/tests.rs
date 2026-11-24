@@ -54,6 +54,12 @@ fn the_duration_table_is_indexed_by_kind_and_bounded() {
     let settle = TransitionKind::ResultSettle.duration();
     assert!(settle >= ms(450) && settle <= ms(600), "{settle:?}");
     assert_eq!(TransitionKind::ResultSettle.easing(), Easing::OutCubic);
+    assert_eq!(TransitionKind::FormatRipple.duration(), ms(360));
+    assert_eq!(TransitionKind::FormatRipple.easing(), Easing::OutCubic);
+    assert_eq!(TransitionKind::NoticeSettle.duration(), ms(480));
+    assert_eq!(TransitionKind::NoticeSettle.easing(), Easing::OutCubic);
+    assert_eq!(TransitionKind::BenchSettle.duration(), ms(480));
+    assert_eq!(TransitionKind::BenchSettle.easing(), Easing::OutCubic);
     assert_eq!(LONGEST, ms(800));
 }
 
@@ -107,6 +113,9 @@ fn a_fresh_motion_is_disabled_still_and_reports_nothing() {
     }
     assert!(motion.theme_curtain().is_none());
     assert!(motion.result_settle().is_none());
+    assert!(motion.format_ripple().is_none());
+    assert!(motion.notice_settle().is_none());
+    assert!(motion.bench_settle().is_none());
 }
 
 #[test]
@@ -116,17 +125,24 @@ fn each_kind_starts_at_the_current_clock_and_carries_its_detail() {
     let outgoing = Theme::new(ThemeChoice::Paper, true);
     motion.begin_theme_curtain(outgoing.clone());
     motion.begin_result_settle(JobId(7));
+    motion.begin_format_ripple();
+    motion.begin_notice_settle();
+    motion.begin_bench_settle();
     assert!(motion.is_active());
     for kind in TransitionKind::ALL {
         assert_eq!(motion.progress(kind), Some(0.0), "{kind:?}");
     }
     assert_eq!(motion.theme_curtain(), Some((&outgoing, 0.0)));
     assert_eq!(motion.result_settle(), Some((JobId(7), 0.0)));
+    assert_eq!(motion.format_ripple(), Some(0.0));
+    assert_eq!(motion.notice_settle(), Some(0.0));
+    assert_eq!(motion.bench_settle(), Some(0.0));
 
     motion.advance(ms(160));
     let curtain = motion.progress(TransitionKind::ThemeCurtain).unwrap();
     assert!(curtain > 0.5, "out-cubic is past half way at half time");
     assert!(motion.progress(TransitionKind::ResultSettle).unwrap() < curtain);
+    assert!(motion.format_ripple().unwrap() > motion.notice_settle().unwrap());
 }
 
 #[test]
@@ -134,13 +150,30 @@ fn advancing_drops_each_transition_once_it_settles() {
     let mut motion = Motion::default();
     motion.begin_theme_curtain(Theme::new(ThemeChoice::Dark, true));
     motion.begin_result_settle(JobId(1));
+    motion.begin_format_ripple();
+    motion.begin_notice_settle();
+    motion.begin_bench_settle();
 
     motion.advance(ms(319));
     assert!(motion.theme_curtain().is_some());
     motion.advance(ms(1));
     assert!(motion.theme_curtain().is_none(), "the curtain lasts 320 ms");
+    assert!(motion.format_ripple().is_some());
+    motion.advance(ms(40));
+    assert!(
+        motion.format_ripple().is_none(),
+        "format ripple lasts 360 ms"
+    );
+    assert!(motion.notice_settle().is_some());
+    assert!(motion.bench_settle().is_some());
+    motion.advance(ms(120));
+    assert!(
+        motion.notice_settle().is_none(),
+        "notice settle lasts 480 ms"
+    );
+    assert!(motion.bench_settle().is_none(), "bench settle lasts 480 ms");
     assert!(motion.is_active(), "the result settle is still running");
-    motion.advance(TransitionKind::ResultSettle.duration() - ms(320));
+    motion.advance(TransitionKind::ResultSettle.duration() - ms(480));
     assert!(motion.result_settle().is_none());
     assert!(!motion.is_active(), "everything settled, nothing wakes");
     assert_eq!(motion.clock(), TransitionKind::ResultSettle.duration());
@@ -151,6 +184,9 @@ fn settling_jumps_every_transition_to_its_final_frame() {
     let mut motion = Motion::default();
     motion.begin_theme_curtain(Theme::new(ThemeChoice::Dark, true));
     motion.begin_result_settle(JobId(3));
+    motion.begin_format_ripple();
+    motion.begin_notice_settle();
+    motion.begin_bench_settle();
     motion.settle();
     assert!(!motion.is_active());
     for kind in TransitionKind::ALL {

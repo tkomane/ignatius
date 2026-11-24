@@ -402,7 +402,7 @@ fn tab_item_width(label_width: usize, is_active: bool, is_secondary: bool) -> us
     if is_active {
         label_width + 3
     } else if is_secondary {
-        label_width + 9
+        label_width + 10
     } else {
         label_width + 1
     }
@@ -426,12 +426,13 @@ fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &
     // Field Industrial status capsule: [BUFFERS: n/16]
     spans.push(Span::styled(
         format!(
-            "[BUFFERS: {}/{}] ",
+            "[BUFFERS: {}/{}]",
             model.buffers.count(),
             crate::buffer::MAX_EDITOR_BUFFERS
         ),
-        theme.style(Token::Muted),
+        theme.pill(Token::Muted),
     ));
+    spans.push(Span::raw(" "));
 
     if split_active {
         spans.push(Span::styled(
@@ -503,19 +504,17 @@ fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &
         };
 
         if is_active {
-            spans.push(Span::styled("[", theme.style(Token::Focus)));
             spans.push(Span::styled(
-                label,
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                format!("[{label}]"),
+                theme.active_tab(Token::Focus),
             ));
-            spans.push(Span::styled("] ", theme.style(Token::Focus)));
+            spans.push(Span::raw(" "));
         } else if is_secondary {
-            spans.push(Span::styled("[SPLIT: ", theme.style(Token::Info)));
             spans.push(Span::styled(
-                label,
-                theme.style(Token::Info).add_modifier(Modifier::BOLD),
+                format!("[SPLIT: {label}]"),
+                theme.recessed_pill(Token::Info),
             ));
-            spans.push(Span::styled("] ", theme.style(Token::Info)));
+            spans.push(Span::raw(" "));
         } else {
             spans.push(Span::styled(format!("{label} "), theme.style(Token::Muted)));
         }
@@ -729,6 +728,17 @@ fn render_editor_buffer_pane(
         .saturating_sub(height.saturating_sub(1));
 
     let syntax = crate::query::highlight::tokens(text);
+    let delimiter_pair = if focused {
+        crate::query::highlight::matching_delimiter(text, editor.cursor())
+    } else {
+        None
+    };
+    let format_ripple = if is_active {
+        model.motion().format_ripple()
+    } else {
+        None
+    };
+    let visible_rows = height.min(lines.len().saturating_sub(offset)).max(1);
     let error_location = if is_active {
         model.error_location.as_ref()
     } else {
@@ -757,7 +767,8 @@ fn render_editor_buffer_pane(
         }
 
         let on_cursor_line = number == cursor_line;
-        let y = content_area.y + u16::try_from(number - offset - 1).unwrap_or(0);
+        let visible_row = number - offset - 1;
+        let y = content_area.y + u16::try_from(visible_row).unwrap_or(0);
         if focused && on_cursor_line {
             active_cursor_y = Some(y);
         }
@@ -780,6 +791,13 @@ fn render_editor_buffer_pane(
         } else {
             Token::Border
         };
+        let mut line_marker_style = theme.style(line_marker_token);
+        if !error_line && let Some(progress) = format_ripple {
+            let row_progress = format_ripple_row_progress(progress, visible_row, visible_rows);
+            if let Some(fg) = theme.mix(Token::Success, line_marker_token, row_progress) {
+                line_marker_style = line_marker_style.fg(fg);
+            }
+        }
         let line_number_style = if on_cursor_line {
             if focused {
                 theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD)
@@ -791,7 +809,7 @@ fn render_editor_buffer_pane(
         };
         let mut spans = vec![
             Span::styled(format!("{number:>gutter$} "), line_number_style),
-            Span::styled(line_marker, theme.style(line_marker_token)),
+            Span::styled(line_marker, line_marker_style),
         ];
 
         Line::from(std::mem::take(&mut spans))
@@ -813,10 +831,18 @@ fn render_editor_buffer_pane(
                 .is_some_and(|token| {
                     start + unit.source.start < token.end && token.start < start + unit.source.end
                 });
+            let is_matching_delimiter = delimiter_pair.is_some_and(|(a, b)| {
+                let abs = start + unit.source.start;
+                abs == a || abs == b
+            });
             let style = if is_cursor {
                 theme.style(Token::Selection)
             } else if in_error_token {
                 theme.style(Token::Danger)
+            } else if is_matching_delimiter {
+                theme
+                    .style(Token::Focus)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 theme.style(syntax_token(crate::query::highlight::kind_at(
                     &syntax,
@@ -873,6 +899,27 @@ fn render_editor_buffer_pane(
                 buf[(x, cy)].set_bg(stripe_bg);
             }
         }
+    }
+}
+
+/// Computes the per-row settle progress for `FormatRipple`, sweeping the wave
+/// from the top visible row downward while ensuring every row reaches `1.0`
+/// before the transition ends.
+fn format_ripple_row_progress(progress: f32, visible_row: usize, visible_rows: usize) -> f32 {
+    if progress >= 1.0 {
+        return 1.0;
+    }
+    let frac = if visible_rows <= 1 {
+        0.0
+    } else {
+        visible_row as f32 / (visible_rows - 1) as f32
+    };
+    let lead = 0.45 * frac;
+    let span = 0.55;
+    if progress < lead {
+        1.0
+    } else {
+        ((progress - lead) / span).clamp(0.0, 1.0)
     }
 }
 
@@ -1014,7 +1061,7 @@ pub(crate) fn render_editor(
                 "│"
             };
             for y in text_inner.y..text_inner.y.saturating_add(text_inner.height) {
-                buf.set_stringn(sep_x, y, sep_char, 1, theme.style(Token::Muted));
+                buf.set_stringn(sep_x, y, sep_char, 1, theme.style(Token::Border));
             }
 
             render_editor_buffer_pane(
@@ -1060,7 +1107,7 @@ pub(crate) fn render_editor(
                 "\u{2500}"
             };
             for x in text_inner.x..text_inner.x.saturating_add(text_inner.width) {
-                buf.set_stringn(x, sep_y, sep_char, 1, theme.style(Token::Muted));
+                buf.set_stringn(x, sep_y, sep_char, 1, theme.style(Token::Border));
             }
 
             render_editor_buffer_pane(

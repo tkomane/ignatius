@@ -850,3 +850,103 @@ fn a_running_benchmark_keeps_quit_on_a_short_rail() {
         }
     }
 }
+
+#[test]
+fn notice_settle_tints_only_applied_format_notice_and_returns_to_resting() {
+    use crate::ui::layout::buffer_to_string;
+    use crate::ui::theme::{Rgb, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    use std::time::Duration;
+
+    let mut model = connected_editor_model();
+    model.format_notice = Some(crate::app::model::FormatNotice::Applied {
+        before_lines: 1,
+        after_lines: 2,
+    });
+    let area = Rect::new(0, 0, 120, 1);
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let keymap = Keymap::new();
+
+    let mut resting = Buffer::empty(area);
+    render_footer(&model, &keymap, &pres, area, &mut resting);
+
+    model.motion.enable();
+    model.motion.begin_notice_settle();
+    let mut at_zero = Buffer::empty(area);
+    render_footer(&model, &keymap, &pres, area, &mut at_zero);
+
+    let msg_x = (0..area.width)
+        .find(|&x| resting[(x, 0)].symbol() == "F")
+        .expect("Formatted SQL notice start");
+    assert_eq!(
+        Some(at_zero[(msg_x, 0)].fg),
+        pres.theme.color(Token::Success)
+    );
+    assert_eq!(buffer_to_string(&at_zero), buffer_to_string(&resting));
+
+    let mid = Duration::from_millis(240);
+    model.motion.advance(mid);
+    let mut at_mid = Buffer::empty(area);
+    render_footer(&model, &keymap, &pres, area, &mut at_mid);
+    let progress = model
+        .motion()
+        .notice_settle()
+        .expect("active notice settle");
+    assert_eq!(
+        Some(at_mid[(msg_x, 0)].fg),
+        pres.theme.mix(Token::Success, Token::Info, progress)
+    );
+
+    model.motion.advance(Duration::from_millis(300));
+    let mut settled = Buffer::empty(area);
+    render_footer(&model, &keymap, &pres, area, &mut settled);
+    assert_eq!(settled, resting, "settled footer matches resting frame");
+
+    // Refused and AlreadyFormatted notices never tint toward Success.
+    for static_notice in [
+        crate::app::model::FormatNotice::AlreadyFormatted,
+        crate::app::model::FormatNotice::Refused {
+            message: "unclosed".to_owned(),
+        },
+    ] {
+        let mut static_model = connected_editor_model();
+        static_model.format_notice = Some(static_notice);
+        let mut static_resting = Buffer::empty(area);
+        render_footer(&static_model, &keymap, &pres, area, &mut static_resting);
+        static_model.motion.enable();
+        static_model.motion.begin_notice_settle();
+        let mut static_active = Buffer::empty(area);
+        render_footer(&static_model, &keymap, &pres, area, &mut static_active);
+        assert_eq!(static_active, static_resting);
+    }
+
+    // Low-contrast custom Success on SurfaceAlt keeps resting ink.
+    let faint = Rgb(0x30, 0x8c, 0x50);
+    let definition = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Success, faint);
+    let custom_theme = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+        .expect("custom theme passes 3:1 gate")
+        .selected_theme(true, crate::ui::theme::ColorDepth::TrueColor);
+    assert!(faint.contrast(custom_theme.rgb(Token::SurfaceAlt)) < 4.5);
+    let custom_pres = Presentation::new(custom_theme, Glyphs::new(GlyphTier::Unicode), false);
+    let mut custom_resting = Buffer::empty(area);
+    let mut custom_model = connected_editor_model();
+    custom_model.format_notice = Some(crate::app::model::FormatNotice::Applied {
+        before_lines: 1,
+        after_lines: 2,
+    });
+    render_footer(
+        &custom_model,
+        &keymap,
+        &custom_pres,
+        area,
+        &mut custom_resting,
+    );
+    custom_model.motion.enable();
+    custom_model.motion.begin_notice_settle();
+    let mut custom_zero = Buffer::empty(area);
+    render_footer(&custom_model, &keymap, &custom_pres, area, &mut custom_zero);
+    assert_eq!(custom_zero, custom_resting);
+}

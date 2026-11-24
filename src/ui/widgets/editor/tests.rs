@@ -970,3 +970,232 @@ fn a_narrow_completion_key_row_drops_whole_pairs() {
         }
     }
 }
+
+#[test]
+fn matching_delimiter_highlights_when_active_and_focused_only() {
+    let mut model = Model::new(10);
+    model.focus = crate::app::model::Focus::Editor;
+    let sql = "SELECT (1 + 2), '(3)'";
+    model.editor.set_text(sql);
+    let pres = presentation(ColorDepth::TrueColor);
+    let keymap = crate::ui::keymap::Keymap::new();
+    let area = Rect::new(0, 0, 60, 8);
+    let expected = pres
+        .theme
+        .style(Token::Focus)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+
+    // Cursor directly on '(' at offset 7: partner ')' at offset 13 gets Focus+Bold+Underlined,
+    // while active '(' keeps caret Selection style.
+    model.editor.set_cursor(7);
+    let mut on_open = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut on_open);
+    let line_y = (1..area.height - 1)
+        .find(|&y| {
+            (1..area.width - 1)
+                .map(|x| on_open[(x, y)].symbol())
+                .collect::<String>()
+                .contains("SELECT")
+        })
+        .expect("SQL row");
+    let open_x = (1..area.width - 1)
+        .find(|&x| on_open[(x, line_y)].symbol() == "(")
+        .expect("open paren");
+    let close_x = (open_x + 1..area.width - 1)
+        .find(|&x| on_open[(x, line_y)].symbol() == ")")
+        .expect("close paren");
+    assert_eq!(Some(on_open[(close_x, line_y)].fg), expected.fg);
+    assert!(
+        on_open[(close_x, line_y)]
+            .modifier
+            .contains(Modifier::BOLD | Modifier::UNDERLINED)
+    );
+    assert_ne!(
+        on_open[(open_x, line_y)].modifier & Modifier::UNDERLINED,
+        Modifier::UNDERLINED,
+        "caret Selection takes precedence on the cursor cell itself"
+    );
+
+    // Cursor directly after ')' at offset 14: both '(' and ')' get delimiter highlighting.
+    model.editor.set_cursor(14);
+    let mut after_close = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut after_close);
+    for x in [open_x, close_x] {
+        assert_eq!(Some(after_close[(x, line_y)].fg), expected.fg);
+        assert!(
+            after_close[(x, line_y)]
+                .modifier
+                .contains(Modifier::BOLD | Modifier::UNDERLINED)
+        );
+    }
+
+    // Delimiters inside SQL string literals never highlight.
+    model.editor.set_cursor(17);
+    let mut in_string = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut in_string);
+    assert!(
+        (1..area.width - 1).all(|x| !in_string[(x, line_y)]
+            .modifier
+            .contains(Modifier::UNDERLINED)),
+        "string literal brackets must not highlight"
+    );
+
+    // Unfocused editor never highlights matching delimiters.
+    model.editor.set_cursor(14);
+    model.focus = crate::app::model::Focus::Results;
+    let mut unfocused = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut unfocused);
+    assert!(
+        (1..area.width - 1).all(|x| !unfocused[(x, line_y)]
+            .modifier
+            .contains(Modifier::UNDERLINED)),
+        "unfocused editor must not highlight brackets"
+    );
+}
+
+#[test]
+fn format_ripple_waves_only_active_gutter_ink_and_respects_gates() {
+    use std::time::Duration;
+
+    let mut model = Model::new(10);
+    model.focus = crate::app::model::Focus::Editor;
+    model
+        .editor
+        .set_text("SELECT\n  a,\n  b,\n  c,\n  d,\n  e;");
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let keymap = crate::ui::keymap::Keymap::new();
+    let area = Rect::new(0, 0, 50, 10);
+
+    let mut resting = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut resting);
+
+    model.motion.enable();
+    model.motion.begin_format_ripple();
+    let mut at_zero = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut at_zero);
+
+    let gutter_x = (1..area.width - 1)
+        .find(|&x| resting[(x, 1)].symbol() == "\u{258e}")
+        .expect("statement bar gutter");
+    assert_eq!(
+        Some(at_zero[(gutter_x, 1)].fg),
+        pres.theme.color(Token::Success)
+    );
+    assert_eq!(
+        at_zero[(gutter_x, 5)].fg,
+        resting[(gutter_x, 5)].fg,
+        "wave starts at row 0 before reaching lower rows"
+    );
+
+    model.motion.advance(Duration::from_millis(120));
+    let mut at_mid = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut at_mid);
+    assert_ne!(
+        at_mid[(gutter_x, 3)].fg,
+        resting[(gutter_x, 3)].fg,
+        "mid-ripple wave reaches intermediate gutter rows"
+    );
+
+    for frame in [&at_zero, &at_mid] {
+        assert_eq!(buffer_to_string(frame), buffer_to_string(&resting));
+        for y in 0..area.height {
+            for x in 0..area.width {
+                assert_eq!(frame[(x, y)].bg, resting[(x, y)].bg);
+                if x != gutter_x {
+                    assert_eq!(frame[(x, y)].fg, resting[(x, y)].fg);
+                }
+            }
+        }
+    }
+
+    model.motion.advance(Duration::from_millis(300));
+    let mut settled = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut settled);
+    assert_eq!(settled, resting, "settled ripple matches resting frame");
+}
+
+#[test]
+fn tab_bar_badges_and_split_dividers_follow_token_hierarchy() {
+    let mut model = Model::new(10);
+    model.focus = crate::app::model::Focus::Editor;
+    model.buffers.active_editor_mut().set_text("SELECT 1;");
+    model
+        .buffers
+        .new_buffer(Some("query_two".to_owned()), Some("SELECT 2;".to_owned()));
+    model.buffers.cycle_split_mode();
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let keymap = crate::ui::keymap::Keymap::new();
+    let area = Rect::new(0, 0, 100, 14);
+
+    let mut vertical = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut vertical);
+    let check_style = |cell: &ratatui::buffer::Cell, expected: ratatui::style::Style| {
+        if let Some(fg) = expected.fg {
+            assert_eq!(cell.fg, fg);
+        }
+        if let Some(bg) = expected.bg {
+            assert_eq!(cell.bg, bg);
+        }
+        assert_eq!(cell.modifier, expected.add_modifier);
+    };
+
+    let v_text = buffer_to_string(&vertical);
+    let tab_y = v_text
+        .lines()
+        .position(|line| line.contains("BUFFERS:"))
+        .expect("tab bar row") as u16;
+    let buffers_x = (0..area.width)
+        .find(|&x| vertical[(x, tab_y)].symbol() == "B")
+        .expect("BUFFERS pill start");
+    check_style(&vertical[(buffers_x, tab_y)], pres.theme.pill(Token::Muted));
+    let secondary_x = v_text
+        .lines()
+        .nth(usize::from(tab_y))
+        .and_then(|line| {
+            line.find("buffer-1.sql")
+                .map(|byte_idx| line[..byte_idx].chars().count())
+        })
+        .expect("secondary buffer title column") as u16;
+    check_style(
+        &vertical[(secondary_x, tab_y)],
+        pres.theme.recessed_pill(Token::Info),
+    );
+    let active_x = v_text
+        .lines()
+        .nth(usize::from(tab_y))
+        .and_then(|line| {
+            line.find("query_two")
+                .map(|byte_idx| line[..byte_idx].chars().count())
+        })
+        .expect("active buffer title column") as u16;
+    check_style(
+        &vertical[(active_x, tab_y)],
+        pres.theme.active_tab(Token::Focus),
+    );
+
+    // Vertical split divider uses Token::Border, not Token::Muted.
+    let v_div_x = (2..area.width - 2)
+        .find(|&x| (tab_y + 2..area.height - 2).all(|y| vertical[(x, y)].symbol() == "\u{2502}"))
+        .expect("vertical split divider");
+    check_style(
+        &vertical[(v_div_x, tab_y + 3)],
+        pres.theme.style(Token::Border),
+    );
+
+    // Horizontal split divider also uses Token::Border.
+    model.buffers.cycle_split_mode();
+    let mut horizontal = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut horizontal);
+    let h_div_y = (tab_y + 2..area.height - 2)
+        .find(|&y| (2..area.width - 2).all(|x| horizontal[(x, y)].symbol() == "\u{2500}"))
+        .expect("horizontal split divider");
+    check_style(&horizontal[(10, h_div_y)], pres.theme.style(Token::Border));
+}

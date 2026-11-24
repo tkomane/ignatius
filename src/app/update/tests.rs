@@ -12500,6 +12500,307 @@ fn motion_an_ordinary_overlay_lets_the_curtain_finish() {
     );
 }
 
+#[test]
+fn motion_format_ripple_and_notice_settle_begin_only_when_formatting_changes_text() {
+    let mut model = moving();
+    model.editor.set_text("select   1;");
+    update(&mut model, Message::Action(Action::FormatBuffer));
+    assert!(matches!(
+        model.format_notice,
+        Some(crate::app::model::FormatNotice::Applied { .. })
+    ));
+    assert!(model.motion().format_ripple().is_some());
+    assert!(model.motion().notice_settle().is_some());
+    assert!(model.is_animating());
+
+    // Any key settles every active transition (rule 1).
+    update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert!(model.motion().format_ripple().is_none());
+    assert!(model.motion().notice_settle().is_none());
+    assert!(!model.is_animating());
+
+    // Formatting an already formatted buffer starts nothing.
+    update(&mut model, Message::Action(Action::FormatBuffer));
+    assert_eq!(
+        model.format_notice,
+        Some(crate::app::model::FormatNotice::AlreadyFormatted)
+    );
+    assert!(model.motion().format_ripple().is_none());
+    assert!(model.motion().notice_settle().is_none());
+
+    // Empty and refused buffers never trigger FormatRipple or NoticeSettle.
+    model.editor.set_text("");
+    update(&mut model, Message::Action(Action::FormatBuffer));
+    assert_eq!(
+        model.format_notice,
+        Some(crate::app::model::FormatNotice::Empty)
+    );
+    assert!(model.motion().format_ripple().is_none());
+    assert!(model.motion().notice_settle().is_none());
+
+    model.editor.set_text("'unclosed");
+    update(&mut model, Message::Action(Action::FormatBuffer));
+    assert!(matches!(
+        model.format_notice,
+        Some(crate::app::model::FormatNotice::Refused { .. })
+    ));
+    assert!(model.motion().format_ripple().is_none());
+    assert!(model.motion().notice_settle().is_none());
+}
+
+#[test]
+fn motion_notice_settle_tracks_positive_outcomes_not_errors_and_respects_gates() {
+    let mut model = moving();
+
+    // Export succeeded -> settles positively.
+    update(
+        &mut model,
+        Message::RowsExported(Box::new(Ok("out.csv".to_owned()))),
+    );
+    assert!(model.motion().notice_settle().is_some());
+
+    // Any key settles it, and a failed export does not restart it.
+    update(&mut model, Message::Action(Action::Move(Direction::Left)));
+    assert!(model.motion().notice_settle().is_none());
+    update(
+        &mut model,
+        Message::RowsExported(Box::new(Err(Diagnostic::new(
+            DiagnosticKind::Query,
+            "disk full",
+            "write export",
+        )))),
+    );
+    assert!(model.motion().notice_settle().is_none());
+
+    // Saved query -> starts NoticeSettle; save error -> still.
+    update(
+        &mut model,
+        Message::QuerySaved(Box::new(Ok(std::path::PathBuf::from("query.sql")))),
+    );
+    assert!(model.motion().notice_settle().is_some());
+    motion_frames(&mut model, Duration::from_millis(600));
+    assert!(model.motion().notice_settle().is_none());
+    update(
+        &mut model,
+        Message::QuerySaved(Box::new(Err(Diagnostic::new(
+            DiagnosticKind::Query,
+            "permission denied",
+            "save query",
+        )))),
+    );
+    assert!(model.motion().notice_settle().is_none());
+
+    // Pinning schema snapshot baseline starts NoticeSettle only when a snapshot exists.
+    model.schema_snapshot = Some(crate::app::model::SchemaSnapshotState {
+        schema_filter: None,
+        current: None,
+        baseline: None,
+        diff: None,
+        active_tab: 0,
+        selected_idx: 0,
+        loading: false,
+        status_message: None,
+    });
+    update(&mut model, Message::Action(Action::Insert('b')));
+    assert!(model.motion().notice_settle().is_none());
+
+    if let Some(snap) = model.schema_snapshot.as_mut() {
+        snap.current = Some(crate::snapshot::SchemaSnapshot::default());
+    }
+    update(&mut model, Message::Action(Action::Insert('b')));
+    assert!(model.motion().notice_settle().is_some());
+    assert!(
+        model
+            .schema_snapshot
+            .as_ref()
+            .and_then(|s| s.baseline.as_ref())
+            .is_some()
+    );
+
+    // Reduced motion, Basic16, None, and ASCII never start FormatRipple or NoticeSettle.
+    for still_pres in [
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+            true,
+        ),
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+            false,
+        ),
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true)
+                .with_depth(crate::ui::theme::ColorDepth::Basic16),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+            false,
+        ),
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, false),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+            false,
+        ),
+    ] {
+        let mut still = connected();
+        still.presentation = still_pres;
+        still.motion.enable();
+        still.editor.set_text("select   1;");
+        update(&mut still, Message::Action(Action::FormatBuffer));
+        assert!(still.motion().format_ripple().is_none());
+        assert!(still.motion().notice_settle().is_none());
+        assert!(!still.is_animating());
+    }
+}
+
+#[test]
+fn motion_bench_settle_fires_only_for_clean_non_regression_completion() {
+    use crate::app::message::BenchTarget;
+    use crate::bench::{BenchConfig, BenchSample, compute_bench_stats};
+
+    let config = BenchConfig::default();
+    let fast_a = compute_bench_stats(
+        "Baseline (A)",
+        "SELECT 1",
+        &config,
+        &[
+            BenchSample {
+                iteration: 1,
+                duration_ms: 10.0,
+                rows_returned: 1,
+            },
+            BenchSample {
+                iteration: 2,
+                duration_ms: 10.0,
+                rows_returned: 1,
+            },
+        ],
+    );
+    let faster_b = compute_bench_stats(
+        "Candidate (B)",
+        "SELECT 1",
+        &config,
+        &[
+            BenchSample {
+                iteration: 1,
+                duration_ms: 2.0,
+                rows_returned: 1,
+            },
+            BenchSample {
+                iteration: 2,
+                duration_ms: 2.0,
+                rows_returned: 1,
+            },
+        ],
+    );
+    let slower_b = compute_bench_stats(
+        "Candidate (B)",
+        "SELECT 1",
+        &config,
+        &[
+            BenchSample {
+                iteration: 1,
+                duration_ms: 60.0,
+                rows_returned: 1,
+            },
+            BenchSample {
+                iteration: 2,
+                duration_ms: 60.0,
+                rows_returned: 1,
+            },
+        ],
+    );
+
+    // 1. Single-query run finishing cleanly starts BenchSettle.
+    let mut single = moving();
+    single.editor.set_text("SELECT 1;");
+    update(&mut single, Message::Action(Action::QueryBench));
+    let req = single.query_bench_request;
+    update(
+        &mut single,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: BenchTarget::Baseline,
+            result: Box::new(Ok(fast_a.clone())),
+        },
+    );
+    assert!(single.motion().bench_settle().is_some());
+
+    // 2. A/B run stays still after A (B still loading) and starts BenchSettle when B is Faster.
+    let mut ab = moving();
+    ab.editor.set_text("SELECT 1; SELECT 1;");
+    update(&mut ab, Message::Action(Action::QueryBench));
+    let req = ab.query_bench_request;
+    update(
+        &mut ab,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: BenchTarget::Baseline,
+            result: Box::new(Ok(fast_a.clone())),
+        },
+    );
+    assert!(ab.motion().bench_settle().is_none());
+    update(
+        &mut ab,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: BenchTarget::Candidate,
+            result: Box::new(Ok(faster_b)),
+        },
+    );
+    assert!(ab.motion().bench_settle().is_some());
+
+    // 3. A/B run with Slower verdict never triggers BenchSettle.
+    let mut regressed = moving();
+    regressed.editor.set_text("SELECT 1; SELECT 1;");
+    update(&mut regressed, Message::Action(Action::QueryBench));
+    let req = regressed.query_bench_request;
+    update(
+        &mut regressed,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: BenchTarget::Baseline,
+            result: Box::new(Ok(fast_a)),
+        },
+    );
+    update(
+        &mut regressed,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: BenchTarget::Candidate,
+            result: Box::new(Ok(slower_b)),
+        },
+    );
+    assert_eq!(
+        regressed
+            .query_bench
+            .as_ref()
+            .and_then(|b| b.report.as_ref())
+            .and_then(|r| r.comparison.as_ref())
+            .map(|c| c.verdict),
+        Some(crate::bench::BenchVerdict::Slower)
+    );
+    assert!(regressed.motion().bench_settle().is_none());
+
+    // 4. Failed benchmark run never triggers BenchSettle.
+    let mut errored = moving();
+    errored.editor.set_text("SELECT 1;");
+    update(&mut errored, Message::Action(Action::QueryBench));
+    let req = errored.query_bench_request;
+    update(
+        &mut errored,
+        Message::QueryBenchLoaded {
+            request: req,
+            target: BenchTarget::Baseline,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                "syntax error",
+                "benchmark",
+            ))),
+        },
+    );
+    assert!(errored.motion().bench_settle().is_none());
+}
+
 fn bench_model(environment: Environment, read_only: bool, sql: &str) -> Model {
     let mut model = connected();
     let mut info = session();
