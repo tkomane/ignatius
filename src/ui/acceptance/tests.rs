@@ -1578,15 +1578,21 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
     };
 
     model.editor.set_text(SHOWCASE_SQL);
-    model.editor.set_cursor(62);
+    // Rest right after the closing parenthesis in `IN ('paid', 'pending')`
+    // so SQL-aware delimiter matching highlights both parentheses visibly.
+    let delim_cursor = SHOWCASE_SQL.find(')').map_or(62, |idx| idx + 1);
+    model.editor.set_cursor(delim_cursor);
 
     model.last_execution = Some(showcase_execution(JobId(1), Duration::from_millis(240)));
     model.last_elapsed = Some(Duration::from_millis(240));
     model.result_grid.reset_view();
     // A local sort on the amount, largest first, rather than repeating the
-    // server's ORDER BY id. The selected column is the one being sorted.
+    // server's ORDER BY id. The selected column is widened by one step so the
+    // inline sort chevron (`▾`) renders next to `amount_cents`.
     model.result_grid.toggle_sort(3);
     model.result_grid.toggle_sort(3);
+    let auto_amount = crate::app::grid::automatic_column_width(&showcase_result_set(), 3);
+    let _ = model.result_grid.adjust_width(3, auto_amount, 2);
     model.selected_column = 3;
 
     model
@@ -1643,6 +1649,28 @@ fn check_showcase_scene(
     }
 }
 
+fn enable_showcase_tabs(model: &mut Model) {
+    model.buffers.buffers[0].title = "orders.sql".into();
+    model.sync_active_buffer_from_editor();
+    model.buffers.buffers.push(crate::buffer::EditorBuffer::new(
+        2,
+        "revenue.sql",
+        Some(
+            "SELECT region, sum(amount_cents) AS total_cents\n\
+             FROM reporting.order_totals\n\
+             GROUP BY region\n\
+             ORDER BY total_cents DESC;\n"
+                .into(),
+        ),
+    ));
+    model.buffers.buffers.push(crate::buffer::EditorBuffer::new(
+        3,
+        "null_audit.sql",
+        Some("SELECT label, value FROM public.rendering_cases WHERE value IS NULL;\n".into()),
+    ));
+    model.buffers.next_id = 4;
+}
+
 fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
     let field = showcase_development_model(ThemeChoice::FieldIndustrial);
     check_showcase_scene(
@@ -1664,23 +1692,39 @@ fn showcase_theme_scenes(writer: &mut Option<impl Write>) {
         "The workbench in the material theme before the first query",
         &["[DEV]", "No query has run yet.", "SQL is ready to run."],
     );
-    let atelier = showcase_base_model(ThemeChoice::Atelier);
+    let mut atelier = showcase_base_model(ThemeChoice::Atelier);
+    enable_showcase_tabs(&mut atelier);
     check_showcase_scene(
         writer.as_mut(),
         &atelier,
         "workbench-atelier",
         "atelier",
         "The workbench in the atelier theme, a warm dark editorial palette",
-        &["[PROD]", "Ada Lovelace", "[null]"],
+        &[
+            "[PROD]",
+            "Ada Lovelace",
+            "[null]",
+            "amount_cents \u{25be}",
+            "orders.sql",
+            "revenue.sql",
+        ],
     );
-    let paper = showcase_development_model(ThemeChoice::Paper);
+    let mut paper = showcase_development_model(ThemeChoice::Paper);
+    enable_showcase_tabs(&mut paper);
     check_showcase_scene(
         writer.as_mut(),
         &paper,
         "workbench-paper",
         "paper",
         "The workbench in the paper theme, a warm light editorial palette",
-        &["[DEV]", "Ada Lovelace", "[null]"],
+        &[
+            "[DEV]",
+            "Ada Lovelace",
+            "[null]",
+            "amount_cents \u{25be}",
+            "orders.sql",
+            "revenue.sql",
+        ],
     );
 }
 
@@ -2016,7 +2060,7 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
 
     // 3. "palette-preview"
     let mut model = showcase_base_model(ThemeChoice::Dark);
-    let entries = vec![
+    let mut entries = vec![
         PaletteEntry {
             label: "revenue_by_region".into(),
             detail: [
@@ -2057,6 +2101,147 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             command: PaletteCommand::Open("null_audit_report".into()),
         },
     ];
+    for (name, sql) in [
+        (
+            "top_customers_ltv",
+            "SELECT customer, sum(amount_cents) AS lifetime_cents FROM public.orders GROUP BY 1 ORDER BY 2 DESC;",
+        ),
+        (
+            "pending_order_aging",
+            "SELECT id, customer, amount_cents FROM public.orders WHERE status = 'pending' ORDER BY id;",
+        ),
+        (
+            "daily_settlement_rollup",
+            "SELECT status, count(*), sum(amount_cents) FROM public.orders GROUP BY status;",
+        ),
+        (
+            "table_bloat_estimate",
+            "SELECT schemaname, relname, n_dead_tup FROM pg_stat_user_tables ORDER BY n_dead_tup DESC;",
+        ),
+        (
+            "cache_hit_by_table",
+            "SELECT relname, heap_blks_hit, heap_blks_read FROM pg_statio_user_tables ORDER BY heap_blks_read DESC;",
+        ),
+        (
+            "long_running_locks",
+            "SELECT pid, state, wait_event_type, query FROM pg_stat_activity WHERE state <> 'idle';",
+        ),
+        (
+            "blocking_pid_chains",
+            "SELECT pid, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid)) > 0;",
+        ),
+        (
+            "unused_indexes_30d",
+            "SELECT indexrelname, idx_scan, pg_relation_size(indexrelid) FROM pg_stat_user_indexes WHERE idx_scan = 0;",
+        ),
+        (
+            "sequence_headroom",
+            "SELECT schemaname, sequencename, last_value FROM pg_sequences ORDER BY last_value DESC NULLS LAST;",
+        ),
+        (
+            "replication_slot_lag",
+            "SELECT slot_name, active, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS lag_bytes FROM pg_replication_slots;",
+        ),
+        (
+            "wal_generation_rate",
+            "SELECT wal_records, wal_fpi, wal_bytes FROM pg_stat_wal;",
+        ),
+        (
+            "rls_policy_audit",
+            "SELECT schemaname, tablename, policyname, cmd FROM pg_policies ORDER BY tablename;",
+        ),
+        (
+            "role_membership_tree",
+            "SELECT r.rolname AS role, m.rolname AS member FROM pg_auth_members am JOIN pg_roles r ON r.oid = am.roleid JOIN pg_roles m ON m.oid = am.member;",
+        ),
+        (
+            "stale_analyze_tables",
+            "SELECT relname, last_autoanalyze, n_mod_since_analyze FROM pg_stat_user_tables ORDER BY n_mod_since_analyze DESC;",
+        ),
+        (
+            "vacuum_progress_live",
+            "SELECT pid, phase, heap_blks_scanned, heap_blks_total FROM pg_stat_progress_vacuum;",
+        ),
+        (
+            "toast_table_sizes",
+            "SELECT relname, pg_total_relation_size(reltoastrelid) AS toast_bytes FROM pg_class WHERE reltoastrelid <> 0;",
+        ),
+        (
+            "unindexed_fk_check",
+            "SELECT conrelid::regclass, conname FROM pg_constraint WHERE contype = 'f';",
+        ),
+        (
+            "idle_in_transaction",
+            "SELECT pid, usename, now() - xact_start AS age FROM pg_stat_activity WHERE state = 'idle in transaction';",
+        ),
+        (
+            "partition_row_skew",
+            "SELECT inhparent::regclass, inhrelid::regclass FROM pg_inherits ORDER BY 1, 2;",
+        ),
+        (
+            "extension_inventory",
+            "SELECT extname, extversion FROM pg_extension ORDER BY extname;",
+        ),
+        (
+            "hba_auth_rules",
+            "SELECT line_number, type, database, auth_method FROM pg_hba_file_rules;",
+        ),
+        (
+            "modified_settings",
+            "SELECT name, setting, unit, source FROM pg_settings WHERE source <> 'default' ORDER BY name;",
+        ),
+        (
+            "checkpoint_pressure",
+            "SELECT num_timed, num_requested, buffers_written FROM pg_stat_checkpointer;",
+        ),
+        (
+            "type_coverage_sample",
+            "SELECT as_int, as_json, as_ts FROM public.type_coverage;",
+        ),
+        (
+            "order_totals_view",
+            "SELECT region, orders, total_cents FROM reporting.order_totals ORDER BY total_cents DESC;",
+        ),
+        (
+            "recent_orders_top",
+            "SELECT id, customer, amount_cents FROM public.recent_orders ORDER BY id DESC LIMIT 25;",
+        ),
+        (
+            "customer_region_lookup",
+            "SELECT id, name, region, public.customer_region(name) FROM public.customers;",
+        ),
+        (
+            "high_value_orders",
+            "SELECT id, customer, amount_cents FROM public.orders WHERE amount_cents >= 50000;",
+        ),
+        (
+            "missing_notes_audit",
+            "SELECT id, customer, status FROM public.orders WHERE notes IS NULL;",
+        ),
+        (
+            "empty_notes_audit",
+            "SELECT id, customer, status FROM public.orders WHERE notes = '';",
+        ),
+        (
+            "constraint_validation",
+            "SELECT conname, convalidated FROM pg_constraint WHERE NOT convalidated;",
+        ),
+        (
+            "dead_tuple_ratio",
+            "SELECT relname, n_live_tup, n_dead_tup FROM pg_stat_user_tables WHERE n_live_tup + n_dead_tup > 0;",
+        ),
+        (
+            "bgwriter_activity",
+            "SELECT buffers_clean, maxwritten_clean, buffers_alloc FROM pg_stat_bgwriter;",
+        ),
+    ] {
+        entries.push(PaletteEntry {
+            label: name.into(),
+            detail: sql.into(),
+            group: "saved",
+            command: PaletteCommand::Open(name.into()),
+        });
+    }
     model.palette = Some(Palette::over_saved_queries(entries));
     let buf = render_showcase(&model);
     let text = buffer_to_string(&buf);
@@ -2072,6 +2257,10 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
         text.contains("SQL:") || text.contains("Preview"),
         "palette contains preview pane"
     );
+    assert!(
+        text.contains('\u{2503}'),
+        "palette renders scroll thumb when list overflows viewport:\n{text}"
+    );
     if let Some(ref mut w) = writer {
         capture_showcase_scene(
             w,
@@ -2084,8 +2273,9 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     }
 
     // 4. "plan-explorer": the editor holds the statement the plan is for,
-    // and the plan is self-consistent: a nested loop probing an index once
-    // per outer row, where every parent's measured time covers its children.
+    // and the plan shows exclusive self-time bottleneck detection landing on
+    // a non-root child node (`Sort`) alongside an unclipped `[estimate mismatch]`
+    // badge and proportional 5-cell micro-bars on every row.
     let mut model = showcase_base_model(ThemeChoice::Dark);
     model.editor.set_text(
         [
@@ -2102,53 +2292,83 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     let plan_json = r#"[
   {
     "Plan": {
-      "Node Type": "Nested Loop",
+      "Node Type": "Merge Join",
       "Join Type": "Inner",
-      "Startup Cost": 0.28,
-      "Total Cost": 47.9,
-      "Plan Rows": 10,
-      "Actual Startup Time": 0.05,
-      "Actual Total Time": 11.8,
+      "Merge Cond": "(o.customer = c.name)",
+      "Startup Cost": 42.1,
+      "Total Cost": 68.4,
+      "Plan Rows": 420,
+      "Plan Width": 64,
+      "Actual Startup Time": 9.8,
+      "Actual Total Time": 12.4,
       "Actual Rows": 420,
       "Actual Loops": 1,
       "Plans": [
         {
-          "Node Type": "Seq Scan",
-          "Relation Name": "orders",
-          "Alias": "o",
-          "Startup Cost": 0.0,
-          "Total Cost": 25.5,
-          "Plan Rows": 10,
-          "Actual Startup Time": 0.01,
-          "Actual Total Time": 2.9,
+          "Node Type": "Sort",
+          "Sort Key": ["o.customer"],
+          "Startup Cost": 28.4,
+          "Total Cost": 29.45,
+          "Plan Rows": 420,
+          "Plan Width": 48,
+          "Actual Startup Time": 6.1,
+          "Actual Total Time": 8.2,
           "Actual Rows": 420,
           "Actual Loops": 1,
-          "Filter": "(status = 'paid'::text)",
-          "Rows Removed by Filter": 180
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              "Alias": "o",
+              "Startup Cost": 0.0,
+              "Total Cost": 25.5,
+              "Plan Rows": 10,
+              "Plan Width": 48,
+              "Actual Startup Time": 0.01,
+              "Actual Total Time": 1.4,
+              "Actual Rows": 420,
+              "Actual Loops": 1,
+              "Filter": "(status = 'paid'::text)",
+              "Rows Removed by Filter": 180
+            }
+          ]
         },
         {
-          "Node Type": "Index Scan",
-          "Relation Name": "customers",
-          "Alias": "c",
-          "Index Name": "customers_name_key",
-          "Index Cond": "(name = o.customer)",
-          "Startup Cost": 0.28,
-          "Total Cost": 2.2,
-          "Plan Rows": 1,
-          "Actual Startup Time": 0.015,
-          "Actual Total Time": 0.018,
-          "Actual Rows": 1,
-          "Actual Loops": 420
+          "Node Type": "Sort",
+          "Sort Key": ["c.name"],
+          "Startup Cost": 13.7,
+          "Total Cost": 13.9,
+          "Plan Rows": 40,
+          "Plan Width": 32,
+          "Actual Startup Time": 2.6,
+          "Actual Total Time": 3.1,
+          "Actual Rows": 40,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "customers",
+              "Alias": "c",
+              "Startup Cost": 0.0,
+              "Total Cost": 12.4,
+              "Plan Rows": 40,
+              "Plan Width": 32,
+              "Actual Startup Time": 0.01,
+              "Actual Total Time": 2.3,
+              "Actual Rows": 40,
+              "Actual Loops": 1
+            }
+          ]
         }
       ]
     },
     "Planning Time": 0.38,
-    "Execution Time": 12.3
+    "Execution Time": 12.9
   }
 ]"#;
     let doc = PlanDocument::parse(plan_json, true).expect("valid plan");
     model.plan.ready(doc);
-    model.plan.selected_path = vec![0];
+    model.plan.selected_path = vec![0, 0];
     let buf = render_showcase(&model);
     let text = buffer_to_string(&buf);
     assert!(
@@ -2156,12 +2376,24 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
         "plan explorer contains EXPLAIN ANALYZE"
     );
     assert!(
-        text.contains("Attention:"),
-        "plan explorer contains Attention header"
+        text.contains("Attention: Sort (measured time)"),
+        "plan explorer identifies non-root exclusive-time bottleneck:\n{text}"
     );
     assert!(
-        text.contains("[estimate mismatch]") || text.contains("Estimate mismatch"),
-        "plan explorer contains estimate mismatch marker"
+        text.contains("[attention: measured time]"),
+        "plan explorer keeps attention badge unclipped:\n{text}"
+    );
+    assert!(
+        text.contains("[estimate mismatch]"),
+        "plan explorer contains unclipped estimate mismatch badge:\n{text}"
+    );
+    assert!(
+        text.contains("self time 1.40 ms"),
+        "plan detail reports exclusive self time:\n{text}"
+    );
+    assert!(
+        text.contains('\u{2501}'),
+        "plan explorer draws proportional micro-bars:\n{text}"
     );
     if let Some(ref mut w) = writer {
         capture_showcase_scene(
@@ -2170,7 +2402,7 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
             SHOWCASE_AREA,
             "plan-explorer",
             "Query plan",
-            "An EXPLAIN ANALYZE plan tree with an attention marker on a row estimate mismatch",
+            "An EXPLAIN ANALYZE plan tree with exclusive self-time micro-bars and mismatch markers",
         );
     }
 
@@ -2886,9 +3118,89 @@ fn motion_theme_curtain() -> MotionSequence {
     sequence
 }
 
+/// The bounded startup boot reveal sweeping the wordmark across while connecting.
+fn motion_boot_reveal() -> MotionSequence {
+    use crate::app::model::ConnectingStep;
+    use crate::ui::widgets::banner::{
+        BANNER_TOTAL_TICKS, BannerState, UNICODE_WORDMARK_LINES, unicode_wordmark_tagline,
+    };
+
+    let mut sequence = MotionSequence::new(
+        "boot-reveal",
+        "atelier",
+        "Connecting",
+        "The wordmark sweeps left to right while connecting and settles on the identity line",
+    );
+    let mut model = Model::new(100);
+    model.size = (SHOWCASE_AREA.width, SHOWCASE_AREA.height);
+    model.sidebar_visible = false;
+    model.focus = Focus::Results;
+    model.splits.zoomed = true;
+    model.keymap_snapshot = Keymap::new().snapshot();
+    model.presentation = Presentation::new(
+        Theme::new(ThemeChoice::Atelier, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Nerd),
+        false,
+    );
+    model.motion.enable();
+    let target = "ignatius_test@127.0.0.1:55432/ignatius_demo";
+
+    for tick in 0..BANNER_TOTAL_TICKS {
+        let step = match tick {
+            0..=2 => ConnectingStep::ResolvingProfile,
+            3..=5 => ConnectingStep::TlsHandshake,
+            6..=9 => ConnectingStep::ServerHandshake,
+            _ => ConnectingStep::LoadingCatalogue,
+        };
+        update(
+            &mut model,
+            Message::ConnectingStep {
+                step,
+                target: target.into(),
+            },
+        );
+        assert_eq!(model.banner, BannerState::Revealing { tick });
+        let buf = sequence.push(&model, 90);
+        let text = buffer_to_string(&buf);
+        assert!(
+            text.contains(step.label()),
+            "boot-reveal tick {tick} missing step label:\n{text}"
+        );
+        assert!(
+            !text.contains(crate::branding::IDENTITY_LINE),
+            "boot-reveal tick {tick} hides tagline until Final"
+        );
+        update(&mut model, Message::Tick { running_for: None });
+    }
+
+    assert_eq!(model.banner, BannerState::Final);
+    let final_buf = sequence.push(&model, 2_000);
+    sequence.mark_poster();
+    let final_text = buffer_to_string(&final_buf);
+    assert!(
+        final_text.contains(UNICODE_WORDMARK_LINES[0]),
+        "boot-reveal final frame renders wordmark:\n{final_text}"
+    );
+    assert!(
+        final_text.contains(&unicode_wordmark_tagline()),
+        "boot-reveal final frame renders identity tagline:\n{final_text}"
+    );
+    assert!(
+        final_text.contains("loading catalogue"),
+        "boot-reveal final frame renders connecting step:\n{final_text}"
+    );
+
+    let mut connected = showcase_base_model(ThemeChoice::Atelier);
+    enable_showcase_tabs(&mut connected);
+    sequence.push(&connected, 1_500);
+
+    sequence
+}
+
 #[test]
 fn motion_showcase_sequences_are_real_buffers_at_fixed_motion_times() {
     let sequences = [
+        motion_boot_reveal(),
         motion_run_and_settle(),
         motion_cancel_honestly(),
         motion_theme_curtain(),

@@ -1,8 +1,86 @@
 # Status
 
-**Updated: 2026-11-23.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-24.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 69 - Tactile craft, cancellable benchmarks, DevSecOps gate and showcase - 24 November 2026
+
+Feature 064 (`064-tactile-craft-motion-and-devsecops`, milestone M18) closed the
+open Wave 68 benchmark cancellation, security reproducibility, contrast test,
+doc drift, and plan-bottleneck gaps across PRs #138-#142 plus the Wave 2
+showcase and editorial README refresh:
+
+- **PR #138 & #140, reproducible `cargo xtask security` gate and hygiene
+  contracts.** Added `cargo xtask security` (`xtask/src/security.rs`,
+  `xtask/src/security/tests.rs`, `xtask/src/tests.rs`), parsing pinned
+  `actionlint`, `zizmor`, and `gitleaks` `@sha256:` image digests directly from
+  `.github/workflows/ci.yml` with zero duplicated hashes and stripping ANSI CSI
+  sequences (`strip_ansi`) before token-boundary checks on `gitleaks` output.
+  Hardened `tests/workflow_contract.rs` to enforce sidecar `tests.rs` placement,
+  byte-identical `AGENTS.md` and `CLAUDE.md`, and single-source digests.
+  Reconciled `specs/025-gui-grade-experience/contracts/presentation.md`
+  (`## Quiet chrome` header yield order) and documented `cargo xtask security`
+  plus truthful `main` ruleset (`22835887`) status in
+  `docs/operations/local-development.md` and `docs/operations/verification.md`.
+- **PR #139, cancellable gate-safe benchmarks and production CLI write gating.**
+  Drained server EOF with `Interrupted` handling in
+  `vendor/tokio-postgres/src/cancel_query_raw.rs` and bounded
+  `CancelHandle::cancel` to 5 seconds in `src/postgres/session.rs`. Added
+  `BenchmarkCancelHandle` (`src/postgres/bench.rs`), installing `CancelHandle`
+  only while holding `user_sql_gate` inside `execute_timed_statement`, clearing
+  before `ROLLBACK`, dropping the mutex before `.await`, always running `ROLLBACK`
+  when `rollback = true` on `57014` or any error, and skipping Query B on
+  cancel. Wired retryable `Ctrl+C` (`QueryBenchState::cancelling`), truthful
+  status text, and `--allow-write` production gating on `ignatius bench`
+  (`src/cli/mod.rs`), verified by live PostgreSQL tests in
+  `tests/bench_session_contract.rs` and `tests/bench_contract.rs`.
+- **PR #141, truthful motion extensions, SQL bracket highlighting and 4.5:1
+  contrast pins.** Added `FormatRipple` (`360 ms`), `NoticeSettle` (`480 ms`),
+  and `BenchSettle` (`480 ms`) in `src/ui/motion.rs` and `src/app/update.rs`;
+  added SQL-aware `matching_delimiter` (`src/query/highlight.rs`) skipping
+  strings/comments/quoted identifiers; added statement gutter ripples, tab
+  pills, and `Token::Border` split dividers (`editor.rs`), hairline `┃`/`│`
+  scrollbars, width-safe inline sort chevrons (`▴`/`▾`), and inset running
+  surfaces with `keycap(Focus)` cancel hints (`results.rs`), plus footer
+  `NoticeSettle` tinting. Closed the Wave 68 contrast test gap in
+  `src/ui/theme/tests.rs` by enforcing `>= 4.5:1` (`>= 7.0:1` high-contrast)
+  across all four surfaces for every non-border token in all seven built-in
+  themes, removed unused `tls_appearance` and `Glyphs::meter`, and synced
+  `docs/design/theme-tokens.md` and `docs/design/icons-and-motion.md`.
+- **PR #142, exclusive plan bottleneck micro-bars, palette cards and studio
+  modals.** Added `PlanNode::exclusive_time_ms`, `exclusive_cost`, and
+  `share_of_root` (`src/query/plan.rs`) and switched `attention_score` to
+  exclusive self time/cost so attention marks the true bottleneck node; added
+  5-cell proportional micro-bars (`━━━──`) while preserving unclipped badges,
+  `self time`/`self cost` in `render_plan_detail`, and `heartbeat_line` loading
+  states. Upgraded command palette match highlighting (`Token::Focus`),
+  `SurfaceAlt` SQL preview cards, and divider scroll thumbs (`┃`). Unified
+  modal table headers (`modal_table_header_row`), colored benchmark deltas,
+  `BenchSettle` wiring (`src/ui/layout.rs`), `render_chords` recessed keycaps,
+  `render_structured_inspector` indent guides and `Path` strip, and
+  `render_sending_review` bottom-rail key highlights.
+- **Wave 2 showcase, hero banners and editorial README (PR 5).** Refined
+  showcase fixtures in `src/ui/acceptance/tests.rs` (inline `amount_cents ▾`
+  sort chevron, SQL bracket match on `('paid', 'pending')`, multi-tab pills on
+  `workbench-atelier` and `workbench-paper`, non-root `Sort` exclusive-time
+  bottleneck and micro-bars on `plan-explorer`, 36-entry `palette-preview` with
+  scroll thumb and SQL card) and added `motion_boot_reveal()` rendering real
+  `render_banner` frames. Re-rendered and visually inspected all 14 showcase
+  stills and all 4 animated APNGs + `-still.png` posters (`boot-reveal`,
+  `run-and-settle`, `cancel-honestly`, `theme-curtain`), elevated
+  `docs/assets/banner-dark.svg` and `banner-light.svg` with the studio
+  specification matrix, rewrote `README.md`, and added Feature 064 spec, plan,
+  tasks, changelog, and roadmap records.
+- **Evidence boundaries and open gates.** Local verification runs on macOS
+  arm64 against disposable PostgreSQL 18.7 plain (`127.0.0.1:55432`) and
+  verified-TLS (`localhost:55433`) fixtures, with Unix socket tests skipped
+  when `IGNATIUS_TEST_PG_SOCKET_URI` is unset, `cargo-deny` skipped if absent
+  from `PATH`, and `gitleaks` Docker container skips noted in linked worktrees
+  whose `.git` directory lives outside `/repo`. Hosted CI covers Linux, macOS,
+  Windows, MSRV `1.90.0`, and PostgreSQL 14-18. Open Wave 64 human Warp,
+  VoiceOver/NVDA, Windows 11, Linux desktop, live cloud-provider, and ADR-0008
+  owner release signing/provenance/ruleset gates remain unchanged and open.
 
 ## Wave 68 - Living surfaces, supply-chain audit and a quieter README - 23 and 24 November 2026
 
