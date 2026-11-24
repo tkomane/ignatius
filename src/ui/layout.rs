@@ -318,7 +318,10 @@ fn render_overlays(
         render_result_analytics(analytics, presentation, area, buf);
     }
     if let Some(bench) = &model.query_bench {
-        render_query_bench_with_motion(bench, model.frame, None, presentation, area, buf);
+        let settle = (!model.reduced_motion && !presentation.reduced_motion)
+            .then(|| model.motion().bench_settle())
+            .flatten();
+        render_query_bench_with_motion(bench, model.frame, settle, presentation, area, buf);
     }
     if let Some(snapshot) = &model.schema_snapshot {
         render_schema_snapshot(snapshot, presentation, area, buf);

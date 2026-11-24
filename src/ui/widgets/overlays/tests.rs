@@ -2056,6 +2056,7 @@ fn unified_modal_chrome_styles_titles_tables_chords_bench_deltas_and_review_rail
         active_tab: 0,
         selected_idx: 0,
         loading: false,
+        cancelling: false,
         status_message: None,
         queued_candidate: None,
     };
@@ -2084,6 +2085,7 @@ fn unified_modal_chrome_styles_titles_tables_chords_bench_deltas_and_review_rail
         active_tab: 0,
         selected_idx: 0,
         loading: false,
+        cancelling: false,
         status_message: None,
         queued_candidate: None,
     };
@@ -2096,6 +2098,15 @@ fn unified_modal_chrome_styles_titles_tables_chords_bench_deltas_and_review_rail
     let mut lbuf = Buffer::empty(modal_area);
     render_query_bench_with_motion(&slow_state, 4, None, &pres, modal_area, &mut lbuf);
     assert!(buffer_to_string(&lbuf).contains("Running query benchmark"));
+
+    slow_state.cancelling = true;
+    let mut cbuf = Buffer::empty(modal_area);
+    render_query_bench_with_motion(&slow_state, 4, None, &pres, modal_area, &mut cbuf);
+    assert!(buffer_to_string(&cbuf).contains("Cancelling query benchmark"));
+    assert_eq!(
+        cell_at(&cbuf, "Cancelling query benchmark").fg,
+        pres.theme.color(Token::Warning).unwrap()
+    );
 
     // 3. Review modal rail highlights key tokens in Focus + BOLD on SurfaceAlt while preserving words.
     let mut review_model = Model::new(100);
@@ -2166,4 +2177,153 @@ fn unified_modal_chrome_styles_titles_tables_chords_bench_deltas_and_review_rail
     assert_eq!(esc_cell.bg, stripe_bg);
     assert_eq!(esc_cell.fg, focus_fg);
     assert!(esc_cell.modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn plan_rows_reserve_attention_and_mismatch_badges_and_show_minimum_fill_for_nonzero_share() {
+    let json = r#"[
+      {
+        "Plan": {
+          "Node Type": "Nested Loop",
+          "Startup Cost": 0.28,
+          "Total Cost": 47.9,
+          "Plan Rows": 10,
+          "Actual Startup Time": 0.05,
+          "Actual Total Time": 11.8,
+          "Actual Rows": 420,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              "Startup Cost": 0.0,
+              "Total Cost": 25.5,
+              "Plan Rows": 10,
+              "Actual Startup Time": 0.01,
+              "Actual Total Time": 2.9,
+              "Actual Rows": 420,
+              "Actual Loops": 1
+            },
+            {
+              "Node Type": "Index Scan",
+              "Relation Name": "customers",
+              "Index Name": "customers_name_key",
+              "Startup Cost": 0.28,
+              "Total Cost": 2.2,
+              "Plan Rows": 1,
+              "Actual Startup Time": 0.015,
+              "Actual Total Time": 0.018,
+              "Actual Rows": 1,
+              "Actual Loops": 420
+            },
+            {
+              "Node Type": "Result",
+              "Startup Cost": 0.0,
+              "Total Cost": 0.01,
+              "Plan Rows": 1,
+              "Actual Startup Time": 0.0,
+              "Actual Total Time": 0.0,
+              "Actual Rows": 1,
+              "Actual Loops": 1
+            }
+          ]
+        }
+      }
+    ]"#;
+    let document = PlanDocument::parse(json, true).expect("valid analyzed plan");
+    let mut view = PlanView::default();
+    view.ready(document.clone());
+    view.selected_path = vec![0];
+
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 88, 6);
+    let mut buf = Buffer::empty(area);
+    render_plan_tree(&document, &view, &pres, area, &mut buf);
+    let rendered = buffer_to_string(&buf);
+    let lines: Vec<&str> = rendered.lines().collect();
+
+    // Row 0 (Nested Loop, 11.4% self time) fits micro-bar (>=1 filled cell) and mismatch badge.
+    assert!(
+        lines[0].contains("\u{2501}\u{2500}\u{2500}\u{2500}\u{2500}"),
+        "{rendered}"
+    );
+    assert!(lines[0].contains("[estimate mismatch]"), "{rendered}");
+
+    // Row 1 (Seq Scan orders) keeps mismatch badge unclipped.
+    assert!(lines[1].contains("[estimate mismatch]"), "{rendered}");
+
+    // Row 2 (Index Scan customers via customers_name_key) reserves [attention: measured time]
+    // instead of clipping the badge off at 88 columns.
+    assert!(
+        lines[2].contains("[attention: measured time]"),
+        "attention badge must not be clipped at 88 columns:\n{rendered}"
+    );
+
+    // Row 3 (Result, 0.0 ms = 0.0 share) renders all-empty track without artificial fill.
+    assert!(
+        lines[3].contains("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"),
+        "zero-share node keeps empty micro-bar track:\n{rendered}"
+    );
+    assert!(!lines[3].contains('\u{2501}'), "{rendered}");
+}
+
+#[test]
+fn layout_wires_bench_settle_progress_into_benchmark_overlay_footer() {
+    use crate::app::model::{Model, QueryBenchState};
+    use crate::bench::{BenchConfig, BenchSample, compare_benchmarks, compute_bench_stats};
+
+    let cfg = BenchConfig::new(1, 2, true);
+    let base = compute_bench_stats(
+        "A",
+        "SELECT 1",
+        &cfg,
+        &[BenchSample {
+            iteration: 1,
+            duration_ms: 4.0,
+            rows_returned: 1,
+        }],
+    );
+    let report = compare_benchmarks(base.clone(), None, None);
+
+    let mut settled_model = Model::new(100);
+    settled_model.presentation = presentation(ColorDepth::TrueColor);
+    settled_model.query_bench = Some(QueryBenchState {
+        config: cfg,
+        baseline_sql: "SELECT 1".to_owned(),
+        candidate_sql: String::new(),
+        baseline: Some(base),
+        candidate: None,
+        report: Some(report),
+        active_tab: 0,
+        selected_idx: 0,
+        loading: false,
+        cancelling: false,
+        status_message: None,
+        queued_candidate: None,
+    });
+
+    let mut animated_model = settled_model.clone();
+    animated_model.motion.begin_bench_settle();
+
+    let keymap = crate::ui::keymap::Keymap::new();
+    let area = Rect::new(0, 0, 120, 32);
+    let mut sbuf = Buffer::empty(area);
+    crate::ui::layout::render(&settled_model, &keymap, area, &mut sbuf);
+    let mut abuf = Buffer::empty(area);
+    crate::ui::layout::render(&animated_model, &keymap, area, &mut abuf);
+
+    let resting_fg = cell_at(&sbuf, "Single-query benchmark:").fg;
+    let active_fg = cell_at(&abuf, "Single-query benchmark:").fg;
+    assert_ne!(
+        active_fg, resting_fg,
+        "BenchSettle progress must tint the settled benchmark status line"
+    );
+    assert_eq!(
+        active_fg,
+        animated_model
+            .presentation
+            .theme
+            .color(Token::Success)
+            .unwrap()
+    );
 }

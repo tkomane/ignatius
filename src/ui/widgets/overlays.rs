@@ -903,47 +903,95 @@ fn plan_node_segments(
     } else {
         Token::Muted
     };
-    let mut segments = vec![
-        (marker.to_owned(), theme.style(Token::Focus)),
-        (guides, theme.style(Token::Border)),
-        (chevron, theme.style(Token::Muted)),
-        (
-            safe_plan_text(&node_subject(node)),
-            theme.style(subject_token),
-        ),
-        (" | ".to_owned(), theme.style(Token::Border)),
-    ];
-    if row_width >= 72
-        && !glyphs.is_ascii()
-        && let Some(share) = node.share_of_root(&document.root, document.analyzed)
-    {
-        let filled = (share * 5.0).round().clamp(0.0, 5.0) as usize;
-        let bar_token = if attention || share >= 0.5 {
-            Token::Warning
-        } else {
-            Token::Info
-        };
-        if filled > 0 {
-            segments.push(("\u{2501}".repeat(filled), theme.style(bar_token)));
-        }
-        if filled < 5 {
-            segments.push(("\u{2500}".repeat(5 - filled), theme.style(Token::Border)));
-        }
-        segments.push((" ".to_owned(), theme.style(Token::Muted)));
-    }
-    segments.push((
-        plan_row_metrics(node, document.analyzed, !glyphs.is_ascii()),
-        theme.style(metrics_token),
-    ));
+    let unicode = !glyphs.is_ascii();
+    let subject = safe_plan_text(&node_subject(node));
+    let metrics = plan_row_metrics(node, document.analyzed, unicode);
+
+    let mut badge_segments = Vec::new();
     if attention {
-        segments.push((
+        badge_segments.push((
             format!(" [attention: {}]", document.attention_basis().label()),
             flag_style,
         ));
     }
     if node.estimate_mismatch() {
-        segments.push((" [estimate mismatch]".to_owned(), flag_style));
+        badge_segments.push((" [estimate mismatch]".to_owned(), flag_style));
     }
+    let badges_w: usize = badge_segments
+        .iter()
+        .map(|(text, _)| display_width(text))
+        .sum();
+
+    let bar_segments = if row_width >= 72
+        && unicode
+        && let Some(share) = node.share_of_root(&document.root, document.analyzed)
+    {
+        let mut filled = (share * 5.0).round().clamp(0.0, 5.0) as usize;
+        if share > 0.0 && filled == 0 {
+            filled = 1;
+        }
+        let bar_token = if attention || share >= 0.5 {
+            Token::Warning
+        } else {
+            Token::Info
+        };
+        let mut bar = Vec::new();
+        if filled > 0 {
+            bar.push(("\u{2501}".repeat(filled), theme.style(bar_token)));
+        }
+        if filled < 5 {
+            bar.push(("\u{2500}".repeat(5 - filled), theme.style(Token::Border)));
+        }
+        bar.push((" ".to_owned(), theme.style(Token::Muted)));
+        Some(bar)
+    } else {
+        None
+    };
+
+    let prefix_w = display_width(marker) + display_width(&guides) + display_width(&chevron);
+    let subject_w = display_width(&subject);
+    let sep = " | ";
+    let sep_w = display_width(sep);
+    let metrics_w = display_width(&metrics);
+    let bar_w: usize = bar_segments
+        .as_ref()
+        .map_or(0, |bar| bar.iter().map(|(s, _)| display_width(s)).sum());
+
+    let fits_with_bar = prefix_w + subject_w + sep_w + bar_w + metrics_w + badges_w <= row_width;
+    let fits_without_bar = prefix_w + subject_w + sep_w + metrics_w + badges_w <= row_width;
+
+    let (rendered_subject, include_bar, rendered_metrics) = if fits_with_bar {
+        (subject, bar_segments.is_some(), metrics)
+    } else if fits_without_bar || badges_w == 0 || row_width < prefix_w + sep_w + badges_w + 16 {
+        (subject, false, metrics)
+    } else {
+        let content_budget = row_width - prefix_w - sep_w - badges_w;
+        let min_metrics = metrics_w.min(16);
+        let subject_cap = subject_w.min(
+            content_budget
+                .saturating_sub(min_metrics)
+                .max(content_budget.min(20)),
+        );
+        let metrics_cap = content_budget.saturating_sub(subject_cap);
+        (
+            truncate_to_width(&subject, subject_cap, unicode),
+            false,
+            truncate_to_width(&metrics, metrics_cap, unicode),
+        )
+    };
+
+    let mut segments = vec![
+        (marker.to_owned(), theme.style(Token::Focus)),
+        (guides, theme.style(Token::Border)),
+        (chevron, theme.style(Token::Muted)),
+        (rendered_subject, theme.style(subject_token)),
+        (sep.to_owned(), theme.style(Token::Border)),
+    ];
+    if include_bar && let Some(bar) = bar_segments {
+        segments.extend(bar);
+    }
+    segments.push((rendered_metrics, theme.style(metrics_token)));
+    segments.extend(badge_segments);
     segments
 }
 
