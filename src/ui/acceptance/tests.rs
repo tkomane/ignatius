@@ -1694,9 +1694,10 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
          SELECT id FROM public.orders WHERE 10000 <= amount_cents;",
     );
     model.editor.set_cursor(0);
-    let effects = update(&mut model, Message::Action(Action::QueryBench));
-    assert_eq!(effects.len(), 2);
-    for effect in effects {
+    let mut queued = update(&mut model, Message::Action(Action::QueryBench));
+    assert_eq!(queued.len(), 1, "A runs first; B waits for A to report");
+    let mut reported = 0;
+    while let Some(effect) = queued.pop() {
         let Effect::RunQueryBench {
             request,
             target,
@@ -1726,7 +1727,7 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
             })
             .collect::<Vec<_>>();
         let stats = compute_bench_stats(name, &sql, &config, &samples);
-        update(
+        queued = update(
             &mut model,
             Message::QueryBenchLoaded {
                 request,
@@ -1734,7 +1735,9 @@ fn showcase_bench_scene(writer: Option<&mut impl Write>) {
                 result: Box::new(Ok(stats)),
             },
         );
+        reported += 1;
     }
+    assert_eq!(reported, 2, "A and B both ran, one after the other");
     check_showcase_scene(
         writer,
         &model,

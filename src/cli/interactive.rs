@@ -3560,11 +3560,25 @@ fn spawn_run_query_bench(
     request_generation: u64,
 ) {
     tokio::spawn(async move {
+        // The overlay waits for this report and cannot be closed until it
+        // arrives, so every run reports exactly once: when it finds no
+        // session, when the connection changed under it, and through the
+        // guard's drop if the task unwinds.
+        let mut report = BenchReport {
+            tx: Some(tx),
+            request: spec.request,
+            target: spec.target,
+        };
         let opened = {
             let held = slot.read().await;
             held.clone()
         };
         let Some(session) = opened else {
+            report.send(Err(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "the benchmark did not run, because no session is open",
+                "running a query benchmark",
+            )));
             return;
         };
         let prefix = match spec.target {
@@ -3575,17 +3589,44 @@ fn spawn_run_query_bench(
         let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
         let result = session.run_benchmark(&spec.sql, &spec.config, &label).await;
         if !connection_generation_is_current(&generation, request_generation) {
+            report.send(Err(Diagnostic::new(
+                DiagnosticKind::Connection,
+                "the connection changed while the benchmark ran, so its outcome is unknown",
+                "running a query benchmark",
+            )));
             return;
         }
-        let _ = tx.send(connection_message(
-            request_generation,
-            Message::QueryBenchLoaded {
-                request: spec.request,
-                target: spec.target,
-                result: Box::new(result),
-            },
-        ));
+        report.send(result);
     });
+}
+
+/// Sends a benchmark run's report once, or a failure when dropped unsent.
+struct BenchReport {
+    tx: Option<mpsc::UnboundedSender<Message>>,
+    request: u64,
+    target: crate::app::message::BenchTarget,
+}
+
+impl BenchReport {
+    fn send(&mut self, result: Result<crate::bench::BenchStats, Diagnostic>) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(Message::QueryBenchLoaded {
+                request: self.request,
+                target: self.target,
+                result: Box::new(result),
+            });
+        }
+    }
+}
+
+impl Drop for BenchReport {
+    fn drop(&mut self) {
+        self.send(Err(Diagnostic::new(
+            DiagnosticKind::Internal,
+            "the benchmark task ended without a result",
+            "running a query benchmark",
+        )));
+    }
 }
 
 fn spawn_capture_schema_snapshot(

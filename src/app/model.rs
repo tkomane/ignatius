@@ -2468,6 +2468,10 @@ pub struct QueryBenchState {
     pub loading: bool,
     /// Status or diagnostic message shown in footer.
     pub status_message: Option<String>,
+    /// Query B's run, waiting for Query A to report. A and B share the
+    /// session, so they run one after the other: run together, one run's
+    /// `ROLLBACK` could end the other's `BEGIN` and let its write commit.
+    pub queued_candidate: Option<crate::bench::BenchConfig>,
 }
 
 impl QueryBenchState {

@@ -828,3 +828,22 @@ fn an_idle_footer_does_not_wear_a_success_mark() {
     );
     assert!(text.contains("\u{25cb} Ready"), "{text}");
 }
+
+#[test]
+fn a_running_benchmark_keeps_quit_on_a_short_rail() {
+    let mut model = connected_editor_model();
+    model.connection =
+        crate::app::model::ConnectionState::Connected(Box::new(crate::postgres::SessionInfo {
+            search_path: "\"$user\", public, reporting, analytics".into(),
+            ..model.connection.info().expect("connected").clone()
+        }));
+    model.query_bench = Some(crate::app::model::QueryBenchState {
+        loading: true,
+        ..Default::default()
+    });
+    for width in 40u16..=160 {
+        let text = footer_text(&model, width);
+        assert!(text.contains("Quit"), "at {width}: {text:?}");
+        assert!(!text.contains("Esc Close"), "at {width}: {text:?}");
+    }
+}

@@ -8,6 +8,15 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Benchmarks and analysed plan comparisons no longer share the session
+  with other work. Benchmark Query A and Query B ran at the same time on one
+  session, and workbench statements, `\watch` or a plan diff's `EXPLAIN
+  ANALYZE` could land between a `BEGIN` and its `ROLLBACK`, so a "rolled back"
+  write could commit and a user's transaction could be ended. Both now hold
+  the session for each run and ask the server first, refusing to start inside
+  a transaction; benchmark B starts after A reports and is skipped if A fails;
+  and the benchmark overlay stays open while a run is in flight, since a run
+  cannot be cancelled yet.
 - Security: `EXPLAIN ANALYZE` is judged by the statement it executes, so
   `EXPLAIN ANALYZE DELETE ...` now needs the production confirmation and typed
   database name in the client and `--allow-write` in `ignatius query`. Options

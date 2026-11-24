@@ -29,4 +29,4 @@
 - [x] T013 Deterministic animated captures at fixed motion times in the showcase pipeline.
 - [x] T014 Refresh every still screenshot and the banner SVGs.
 - [x] T015 Rewrite `README.md` and reconcile `CHANGELOG.md`, `docs/status.md` and `docs/product/roadmap.md`.
-- [ ] T016 Full verification, hosted CI green, merge, and clean branches and worktrees.
+- [x] T016 Full verification, hosted CI green, merge, and clean branches and worktrees.

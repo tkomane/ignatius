@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/063-living-surfaces-core` (core), then per-wave branches
 **Created**: 2026-11-23
-**Status**: Delivered. Waves 1 and 2 merged on 2026-11-23 (#131, #133, #134); the Wave 3 showcase merged with #135 on 2026-11-24. The unguarded benchmark `m` re-run and the `EXPLAIN ANALYZE` classification gap found during review were fixed on 2026-11-24; deeper benchmark concurrency work continues in draft #132.
+**Status**: Delivered. Waves 1 and 2 merged on 2026-11-23 (#131, #133, #134); the Wave 3 showcase merged with #135 on 2026-11-24. The unguarded benchmark `m` re-run and the `EXPLAIN ANALYZE` classification gap found during review were fixed on 2026-11-24; benchmark session safety followed in #137, and cancelling a running benchmark stays open (see `docs/status.md`).
 **Milestone**: M17 - Living Surfaces
 
 ## Problem Statement
