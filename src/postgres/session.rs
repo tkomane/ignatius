@@ -409,13 +409,13 @@ impl Session {
                 format!("{what} did not start, because the connection is closed"),
                 task,
             )
-            .next_action("reconnect, then try again; nothing was sent")),
+            .next_action("reconnect, then try again; no benchmark or plan statement was sent")),
             TransactionState::Unknown => Err(Diagnostic::new(
                 DiagnosticKind::Query,
                 format!("{what} did not start, because the session's transaction state could not be read"),
                 task,
             )
-            .next_action("try again; nothing was sent")),
+            .next_action("try again; no benchmark or plan statement was sent")),
             state => Err(Diagnostic::new(
                 DiagnosticKind::Query,
                 format!("{what} did not start, because the session is not outside a transaction"),
@@ -426,7 +426,7 @@ impl Session {
                 state.label()
             ))
             .next_action(
-                "end the transaction in the workbench, then try again; nothing was sent",
+                "end the transaction in the workbench, then try again; no benchmark or plan statement was sent",
             )),
         }
     }

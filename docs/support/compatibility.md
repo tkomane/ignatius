@@ -364,11 +364,15 @@ for it rather than landing between its `BEGIN` and `ROLLBACK`, and it waits for
 them. Before its first `BEGIN` the session asks the server whether it is inside
 a transaction, and the benchmark refuses to start if it is, because its
 rollback would end that transaction. A running benchmark cannot be cancelled
-yet, so its overlay stays open until the run reports, and nothing can be left
-running unseen behind a closed overlay. Quitting Ignatius stops later runs, but
-a statement already executing may still finish on the server. An
-analysed plan comparison (`EXPLAIN ANALYZE` in plan diff) takes the session the
-same way and refuses to start inside a transaction for the same reason.
+yet, so its overlay stays open until the run reports (or the connection is
+lost), and no benchmark can be left running unseen behind a closed overlay.
+Quitting Ignatius stops later runs, but a statement already executing may still
+finish on the server. An analysed plan comparison (`EXPLAIN ANALYZE` in plan
+diff) takes the session the same way and refuses to start inside a transaction
+for the same reason; its overlay can still be closed mid-run, the comparison
+continues, and statements started afterwards wait for it. A workbench Cancel
+pressed while a statement waits behind it cancels whatever the server is
+running at that moment, which may be the comparison.
 
 `--read-only` is the real control: it asks the server to refuse writes for the
 session, and PostgreSQL enforces it.

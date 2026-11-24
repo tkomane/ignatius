@@ -118,9 +118,12 @@ pub(crate) fn render_footer(
     let way_out_width = overlay_hints
         .as_ref()
         .and_then(|hints| {
-            hints
-                .iter()
-                .find(|(action, _)| *action == crate::app::Action::Dismiss)
+            hints.iter().find(|(action, _)| {
+                matches!(
+                    action,
+                    crate::app::Action::Dismiss | crate::app::Action::Quit
+                )
+            })
         })
         .and_then(|(action, label)| {
             overlay_key(keymap, action).map(|key| display_width(&key) + 2 + display_width(label))
@@ -302,7 +305,7 @@ pub(crate) fn render_footer(
                 .take(presentation.footer_hint_cap())
                 .filter_map(|(action, label)| {
                     let rank = match action {
-                        crate::app::Action::Dismiss => 0,
+                        crate::app::Action::Dismiss | crate::app::Action::Quit => 0,
                         crate::app::Action::Activate => 1,
                         _ => 2,
                     };
