@@ -266,16 +266,7 @@ pub(crate) fn render_results(
     // success ink and fades to its resting ink. Only the word of the job that
     // started the settle is tinted, and only while it is that job's own
     // status rather than a refresh or a previous result.
-    let settle = model
-        .motion()
-        .result_settle()
-        .filter(|(job, _)| {
-            *job == execution.job
-                && execution.status == ExecutionStatus::Succeeded
-                && !model.running_refresh
-                && !previous_cancellation
-        })
-        .map(|(_, progress)| progress);
+    let settle = result_settle_progress(model);
     title_spans.push(Span::styled("  ", theme.style(Token::Muted)));
     title_spans.push(Span::styled(status, status_word_style(theme, settle)));
     title_spans.push(Span::styled(
@@ -449,6 +440,22 @@ fn settle_inks_are_legible(theme: &Theme) -> bool {
     [Token::Success, Token::Muted]
         .into_iter()
         .all(|token| theme.rgb(token).contrast(pane) >= 4.5)
+}
+
+fn result_settle_progress(model: &Model) -> Option<f32> {
+    let execution = model.last_execution.as_ref()?;
+    let previous_cancellation =
+        model.phase.is_busy() && execution.status == ExecutionStatus::Cancelled;
+    model
+        .motion()
+        .result_settle()
+        .filter(|(job, _)| {
+            *job == execution.job
+                && execution.status == ExecutionStatus::Succeeded
+                && !model.running_refresh
+                && !previous_cancellation
+        })
+        .map(|(_, progress)| progress)
 }
 
 /// One row down the screen, one column per line.
@@ -791,7 +798,8 @@ fn render_results_placeholder(
     // While a query is in flight this is where the activity indicator lives, so
     // the user is looking at the place the answer will appear.
     if model.phase.is_busy() {
-        Paragraph::new(running_lines(model, keymap, presentation)).render(inner, buf);
+        Paragraph::new(running_lines(model, keymap, presentation))
+            .render(inset_empty_area(inner), buf);
         return;
     }
 
@@ -973,18 +981,22 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
     }
 
     let cancellation = match model.phase {
-        QueryPhase::CancellationRequested { .. } => {
-            "The server has been asked to stop. It may still be running.".to_owned()
-        }
-        _ => format!(
-            "{} asks the server to cancel.",
-            action_key_label(keymap, &crate::app::Action::Cancel)
-        ),
+        QueryPhase::CancellationRequested { .. } => Line::from(Span::styled(
+            "The server has been asked to stop. It may still be running.",
+            theme.style(Token::Muted),
+        )),
+        _ => Line::from(vec![
+            Span::styled(
+                format!(
+                    " {} ",
+                    action_key_label(keymap, &crate::app::Action::Cancel)
+                ),
+                theme.keycap(Token::Focus),
+            ),
+            Span::styled("asks the server to cancel.", theme.style(Token::Muted)),
+        ]),
     };
-    lines.push(Line::from(Span::styled(
-        cancellation,
-        theme.style(Token::Muted),
-    )));
+    lines.push(cancellation);
 
     lines
 }
@@ -1024,7 +1036,11 @@ pub(crate) const fn heartbeat_head(frame: u64, width: usize) -> (usize, bool) {
 /// head on a `-` track.
 /// While a cancellation is pending the comet keeps moving, because the
 /// statement may still be running, and takes the warning ink.
-fn heartbeat_line(frame: u64, cancelling: bool, presentation: &Presentation) -> Line<'static> {
+pub(crate) fn heartbeat_line(
+    frame: u64,
+    cancelling: bool,
+    presentation: &Presentation,
+) -> Line<'static> {
     use crate::ui::theme::ColorDepth;
     let theme = &presentation.theme;
     let ascii = presentation.glyphs.is_ascii();
@@ -1308,11 +1324,25 @@ fn render_grid(
             .get(*index)
             .copied()
             .unwrap_or(grid::MIN_COLUMN_WIDTH);
-        let text = truncate_to_width(
-            &sanitize_for_display(name),
-            width,
-            !presentation.glyphs.is_ascii(),
-        );
+        let clean_name = sanitize_for_display(name);
+        let sort_suffix = model
+            .result_grid
+            .sort
+            .filter(|sort| sort.column == *index)
+            .map(
+                |sort| match (sort.direction, presentation.glyphs.is_ascii()) {
+                    (grid::SortDirection::Ascending, true) => " ^",
+                    (grid::SortDirection::Ascending, false) => " \u{25b4}",
+                    (grid::SortDirection::Descending, true) => " v",
+                    (grid::SortDirection::Descending, false) => " \u{25be}",
+                },
+            );
+        let text = match sort_suffix {
+            Some(suffix) if display_width(&clean_name) + display_width(suffix) <= width => {
+                format!("{clean_name}{suffix}")
+            }
+            _ => truncate_to_width(&clean_name, width, !presentation.glyphs.is_ascii()),
+        };
         // The selection fill follows the same gate as the selected row: it
         // is painted only while Results has focus. An unfocused pane still
         // marks the column Enter would act on, in the focus ink alone.
@@ -1394,10 +1424,14 @@ fn render_grid(
     } else if current_w > grid_width {
         grid_rule = grid_rule.chars().take(grid_width).collect();
     }
-    lines.push(Line::from(Span::styled(
-        grid_rule,
-        theme.style(Token::Border),
-    )));
+    let rule_style = match result_settle_progress(model)
+        .filter(|_| settle_inks_are_legible(theme))
+        .and_then(|progress| theme.mix(Token::Success, Token::Border, progress))
+    {
+        Some(ink) => theme.style(Token::Border).fg(ink),
+        None => theme.style(Token::Border),
+    };
+    lines.push(Line::from(Span::styled(grid_rule, rule_style)));
 
     for (offset_index, source) in rows.iter().skip(offset).take(visible_rows).enumerate() {
         let position = offset + offset_index;
@@ -1515,6 +1549,7 @@ fn render_grid(
             visible_rows,
             offset,
             presentation,
+            focused,
             Rect {
                 x: area.x + area.width.saturating_sub(1),
                 y: area.y + u16::try_from(header_rows).unwrap_or(u16::MAX),
@@ -1609,6 +1644,7 @@ fn render_scrollbar(
     visible: usize,
     offset: usize,
     presentation: &Presentation,
+    focused: bool,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -1623,15 +1659,16 @@ fn render_scrollbar(
     let (full, empty) = if presentation.glyphs.is_ascii() {
         ("#", "|")
     } else {
-        ("\u{2588}", "\u{2502}")
+        ("\u{2503}", "\u{2502}")
     };
+    let thumb_token = if focused { Token::Focus } else { Token::Muted };
 
     for row in 0..track {
         let inside = row >= position && row < position + thumb;
         let symbol = if inside { full } else { empty };
         let style = presentation
             .theme
-            .style(if inside { Token::Focus } else { Token::Border });
+            .style(if inside { thumb_token } else { Token::Border });
         buf.set_string(
             area.x,
             area.y + u16::try_from(row).unwrap_or(0),

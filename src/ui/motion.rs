@@ -108,11 +108,24 @@ pub enum TransitionKind {
     /// The status word of a complete, successful result fades from the
     /// success colour to its resting colour.
     ResultSettle,
+    /// A successful buffer format waves down the editor's statement-bar gutter.
+    FormatRipple,
+    /// A positive transient notice settles from the success colour to its
+    /// resting colour.
+    NoticeSettle,
+    /// A clean benchmark completion settles toward its resting state.
+    BenchSettle,
 }
 
 impl TransitionKind {
     /// Every kind, in [`TABLE`] order.
-    pub const ALL: [Self; 2] = [Self::ThemeCurtain, Self::ResultSettle];
+    pub const ALL: [Self; 5] = [
+        Self::ThemeCurtain,
+        Self::ResultSettle,
+        Self::FormatRipple,
+        Self::NoticeSettle,
+        Self::BenchSettle,
+    ];
 
     /// How long this kind lasts, from the one duration table.
     #[must_use]
@@ -140,7 +153,7 @@ pub struct Timing {
 
 /// The one duration table. Every transition's length and curve live here and
 /// nowhere else, indexed by [`TransitionKind`].
-pub const TABLE: [Timing; 2] = [
+pub const TABLE: [Timing; 5] = [
     Timing {
         kind: TransitionKind::ThemeCurtain,
         duration: Duration::from_millis(320),
@@ -149,6 +162,21 @@ pub const TABLE: [Timing; 2] = [
     Timing {
         kind: TransitionKind::ResultSettle,
         duration: Duration::from_millis(520),
+        easing: Easing::OutCubic,
+    },
+    Timing {
+        kind: TransitionKind::FormatRipple,
+        duration: Duration::from_millis(360),
+        easing: Easing::OutCubic,
+    },
+    Timing {
+        kind: TransitionKind::NoticeSettle,
+        duration: Duration::from_millis(480),
+        easing: Easing::OutCubic,
+    },
+    Timing {
+        kind: TransitionKind::BenchSettle,
+        duration: Duration::from_millis(480),
         easing: Easing::OutCubic,
     },
 ];
@@ -211,6 +239,9 @@ pub struct Motion {
     clock: Duration,
     curtain: Option<(Transition, Theme)>,
     result: Option<(Transition, JobId)>,
+    format_ripple: Option<Transition>,
+    notice: Option<Transition>,
+    bench: Option<Transition>,
 }
 
 impl Motion {
@@ -235,7 +266,11 @@ impl Motion {
     /// coming.
     #[must_use]
     pub const fn is_active(&self) -> bool {
-        self.curtain.is_some() || self.result.is_some()
+        self.curtain.is_some()
+            || self.result.is_some()
+            || self.format_ripple.is_some()
+            || self.notice.is_some()
+            || self.bench.is_some()
     }
 
     /// Eased progress of `kind`, or `None` when it is not active.
@@ -247,6 +282,9 @@ impl Motion {
         let transition = match kind {
             TransitionKind::ThemeCurtain => self.curtain.as_ref().map(|(t, _)| *t),
             TransitionKind::ResultSettle => self.result.as_ref().map(|(t, _)| *t),
+            TransitionKind::FormatRipple => self.format_ripple,
+            TransitionKind::NoticeSettle => self.notice,
+            TransitionKind::BenchSettle => self.bench,
         }?;
         (!transition.is_settled(self.clock)).then(|| transition.progress(self.clock))
     }
@@ -268,6 +306,24 @@ impl Motion {
         self.result.map(|(_, job)| (job, progress))
     }
 
+    /// Eased progress of an active format-gutter ripple.
+    #[must_use]
+    pub fn format_ripple(&self) -> Option<f32> {
+        self.progress(TransitionKind::FormatRipple)
+    }
+
+    /// Eased progress of an active positive transient notice settle.
+    #[must_use]
+    pub fn notice_settle(&self) -> Option<f32> {
+        self.progress(TransitionKind::NoticeSettle)
+    }
+
+    /// Eased progress of an active clean benchmark settle.
+    #[must_use]
+    pub fn bench_settle(&self) -> Option<f32> {
+        self.progress(TransitionKind::BenchSettle)
+    }
+
     /// Advances the motion clock and drops every transition that has settled.
     pub fn advance(&mut self, elapsed: Duration) {
         self.clock = self.clock.saturating_add(elapsed);
@@ -282,12 +338,24 @@ impl Motion {
         if self.result.as_ref().is_some_and(|(t, _)| t.is_settled(now)) {
             self.result = None;
         }
+        if self.format_ripple.is_some_and(|t| t.is_settled(now)) {
+            self.format_ripple = None;
+        }
+        if self.notice.is_some_and(|t| t.is_settled(now)) {
+            self.notice = None;
+        }
+        if self.bench.is_some_and(|t| t.is_settled(now)) {
+            self.bench = None;
+        }
     }
 
     /// Jumps every transition to its final frame.
     pub fn settle(&mut self) {
         self.curtain = None;
         self.result = None;
+        self.format_ripple = None;
+        self.notice = None;
+        self.bench = None;
     }
 
     /// Starts the theme curtain away from `outgoing`.
@@ -298,6 +366,21 @@ impl Motion {
     /// Starts the settle of `job`'s complete, successful result.
     pub fn begin_result_settle(&mut self, job: JobId) {
         self.result = Some((self.start(TransitionKind::ResultSettle), job));
+    }
+
+    /// Starts the format ripple down the active editor's statement-bar gutter.
+    pub const fn begin_format_ripple(&mut self) {
+        self.format_ripple = Some(self.start(TransitionKind::FormatRipple));
+    }
+
+    /// Starts the settle of a positive transient notice.
+    pub const fn begin_notice_settle(&mut self) {
+        self.notice = Some(self.start(TransitionKind::NoticeSettle));
+    }
+
+    /// Starts the settle of a clean benchmark completion.
+    pub const fn begin_bench_settle(&mut self) {
+        self.bench = Some(self.start(TransitionKind::BenchSettle));
     }
 
     const fn start(&self, kind: TransitionKind) -> Transition {

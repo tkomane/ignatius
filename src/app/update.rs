@@ -617,11 +617,16 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
         }
         Message::RowsExported(result) => {
             match *result {
-                Ok(message) => model.notices.push(crate::query::result::Notice {
-                    severity: "WROTE".to_owned(),
-                    message,
-                    code: None,
-                }),
+                Ok(message) => {
+                    model.notices.push(crate::query::result::Notice {
+                        severity: "WROTE".to_owned(),
+                        message,
+                        code: None,
+                    });
+                    if model.allows_motion() {
+                        model.motion.begin_notice_settle();
+                    }
+                }
                 Err(error) => model.error = Some(error),
             }
             Vec::new()
@@ -637,6 +642,9 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         message: path.display().to_string(),
                         code: None,
                     });
+                    if model.allows_motion() {
+                        model.motion.begin_notice_settle();
+                    }
                 }
                 Err(error) => model.error = Some(error),
             }
@@ -1296,6 +1304,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 return Vec::new();
             }
             let mut next = Vec::new();
+            let mut settle_bench = false;
             if let Some(bench) = &mut model.query_bench {
                 bench.loading = false;
                 let was_cancelling = bench.cancelling;
@@ -1305,6 +1314,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 } else {
                     None
                 };
+                let mut finished_cleanly = false;
                 match *result {
                     Ok(stats) => {
                         match target {
@@ -1341,6 +1351,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                                 } else {
                                     bench.status_message =
                                         Some("Captured Baseline (A) benchmark".to_owned());
+                                    finished_cleanly = true;
                                 }
                             }
                             crate::app::message::BenchTarget::Candidate => {
@@ -1351,9 +1362,17 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                                 } else {
                                     "Captured Candidate (B) benchmark".to_owned()
                                 });
+                                finished_cleanly = !was_cancelling;
                             }
                         }
                         bench.recompute_report();
+                        settle_bench = finished_cleanly
+                            && bench.report.as_ref().is_some_and(|report| {
+                                !report.failed_gate
+                                    && report.comparison.as_ref().is_none_or(|cmp| {
+                                        cmp.verdict != crate::bench::BenchVerdict::Slower
+                                    })
+                            });
                     }
                     Err(diag) if diag.kind == crate::diagnostics::DiagnosticKind::Cancelled => {
                         bench.status_message = Some(if bench.config.rollback {
@@ -1373,6 +1392,9 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         });
                     }
                 }
+            }
+            if settle_bench && model.allows_motion() {
+                model.motion.begin_bench_settle();
             }
             next
         }
@@ -1581,6 +1603,10 @@ fn format_buffer(model: &mut Model) {
         before_lines,
         after_lines,
     });
+    if model.allows_motion() {
+        model.motion.begin_format_ripple();
+        model.motion.begin_notice_settle();
+    }
 }
 
 /// Help owns reading/navigation, while explicit commands reveal their target
@@ -4801,6 +4827,7 @@ fn schema_snapshot_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
         }
         Action::Insert('b' | 'B') => {
+            let mut pinned = false;
             if let Some(snap) = &mut model.schema_snapshot {
                 if snap.current.is_some() {
                     snap.capture_as_baseline();
@@ -4808,10 +4835,14 @@ fn schema_snapshot_action(model: &mut Model, action: Action) -> Vec<Effect> {
                         "Pinned current snapshot as baseline; press [r] to check live drift."
                             .to_owned(),
                     );
+                    pinned = true;
                 } else {
                     snap.status_message =
                         Some("No captured snapshot available to pin as baseline.".to_owned());
                 }
+            }
+            if pinned && model.allows_motion() {
+                model.motion.begin_notice_settle();
             }
         }
         Action::Insert('r' | 'R') => {

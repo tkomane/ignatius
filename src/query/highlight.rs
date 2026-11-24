@@ -155,6 +155,108 @@ pub fn kind_at(tokens: &[Token], offset: usize) -> TokenKind {
     }
 }
 
+/// Finds the matching `(...)` or `[...]` delimiter pair when `cursor` is on
+/// or directly after a SQL delimiter outside strings, comments, and quoted
+/// identifiers.
+///
+/// Returns `(active, partner)` byte offsets into `source`.
+#[must_use]
+pub fn matching_delimiter(source: &str, cursor: usize) -> Option<(usize, usize)> {
+    if cursor > source.len() || !source.is_char_boundary(cursor) {
+        return None;
+    }
+    let bytes = source.as_bytes();
+    let toks = tokens(source);
+    let is_delim = |byte: u8| matches!(byte, b'(' | b')' | b'[' | b']');
+    let active = if cursor < bytes.len()
+        && is_delim(bytes[cursor])
+        && kind_at(&toks, cursor) == TokenKind::Plain
+    {
+        cursor
+    } else if cursor > 0
+        && is_delim(bytes[cursor - 1])
+        && kind_at(&toks, cursor - 1) == TokenKind::Plain
+    {
+        cursor - 1
+    } else {
+        return None;
+    };
+
+    match bytes[active] {
+        b'(' | b'[' => {
+            find_closing_delimiter(bytes, &toks, active).map(|partner| (active, partner))
+        }
+        b')' | b']' => {
+            find_opening_delimiter(bytes, &toks, active).map(|partner| (active, partner))
+        }
+        _ => None,
+    }
+}
+
+const fn matching_pair(open: u8, close: u8) -> bool {
+    matches!((open, close), (b'(', b')') | (b'[', b']'))
+}
+
+fn find_closing_delimiter(bytes: &[u8], toks: &[Token], active: usize) -> Option<usize> {
+    let mut stack = vec![bytes[active]];
+    let mut i = active + 1;
+    let mut tok_idx = toks.partition_point(|token| token.end <= i);
+    while i < bytes.len() {
+        while tok_idx < toks.len() && i >= toks[tok_idx].end {
+            tok_idx += 1;
+        }
+        if tok_idx < toks.len() && i >= toks[tok_idx].start {
+            i = toks[tok_idx].end;
+            continue;
+        }
+        match bytes[i] {
+            b'(' | b'[' => stack.push(bytes[i]),
+            b')' | b']' => {
+                let open = stack.pop()?;
+                if !matching_pair(open, bytes[i]) {
+                    return None;
+                }
+                if stack.is_empty() {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn find_opening_delimiter(bytes: &[u8], toks: &[Token], active: usize) -> Option<usize> {
+    let mut stack = vec![bytes[active]];
+    let mut i = active;
+    let mut tok_idx = toks.partition_point(|token| token.start < active);
+    while i > 0 {
+        while tok_idx > 0 && i <= toks[tok_idx - 1].start {
+            tok_idx -= 1;
+        }
+        if tok_idx > 0 && i <= toks[tok_idx - 1].end {
+            i = toks[tok_idx - 1].start;
+            continue;
+        }
+        i -= 1;
+        match bytes[i] {
+            b')' | b']' => stack.push(bytes[i]),
+            b'(' | b'[' => {
+                let close = stack.pop()?;
+                if !matching_pair(bytes[i], close) {
+                    return None;
+                }
+                if stack.is_empty() {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn push(tokens: &mut Vec<Token>, start: usize, end: usize, kind: TokenKind) {
     if end > start {
         tokens.push(Token { start, end, kind });

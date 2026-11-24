@@ -608,28 +608,6 @@ fn connecting_elapsed(model: &Model) -> Option<std::time::Duration> {
     }
 }
 
-/// The icon and token for a transport state.
-///
-/// Encryption with a verified identity, encryption without one, and no
-/// encryption at all are three different facts and are drawn three ways.
-#[allow(dead_code)]
-const fn tls_appearance(state: &crate::postgres::TlsState) -> (Icon, Token) {
-    use crate::connection::SslMode;
-    use crate::postgres::TlsState;
-    match state {
-        TlsState::Active { mode, .. } => {
-            if matches!(mode, SslMode::VerifyFull | SslMode::VerifyCa) {
-                (Icon::LockVerified, Token::Success)
-            } else {
-                (Icon::LockPlain, Token::Warning)
-            }
-        }
-        TlsState::Disabled | TlsState::NotNegotiated | TlsState::Unknown => {
-            (Icon::LockOpen, Token::Warning)
-        }
-    }
-}
-
 pub(crate) fn render_compact_header(
     model: &Model,
     presentation: &Presentation,

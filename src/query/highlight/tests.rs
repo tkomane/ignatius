@@ -170,3 +170,57 @@ fn colouring_never_alters_the_buffer() {
     rebuilt.push_str(&sql[cursor..]);
     assert_eq!(rebuilt, sql);
 }
+
+#[test]
+fn matching_delimiter_pairs_parentheses_and_brackets_at_or_after_cursor() {
+    let sql = "SELECT arr[coalesce(1, 2)]";
+    // '[' at 10, '(' at 19, ')' at 24, ']' at 25.
+    assert_eq!(matching_delimiter(sql, 10), Some((10, 25)));
+    assert_eq!(matching_delimiter(sql, 11), Some((10, 25)));
+    assert_eq!(matching_delimiter(sql, 25), Some((25, 10)));
+    assert_eq!(matching_delimiter(sql, 26), Some((25, 10)));
+    assert_eq!(matching_delimiter(sql, 19), Some((19, 24)));
+    assert_eq!(matching_delimiter(sql, 20), Some((19, 24)));
+    assert_eq!(matching_delimiter(sql, 24), Some((24, 19)));
+
+    // Cursor directly on a delimiter takes precedence over the character before it.
+    let adjacent = "SELECT (1)(2)";
+    assert_eq!(matching_delimiter(adjacent, 9), Some((9, 7)));
+    assert_eq!(matching_delimiter(adjacent, 10), Some((10, 12)));
+    assert_eq!(matching_delimiter(adjacent, 13), Some((12, 10)));
+
+    // Unrelated positions and out-of-bounds or mid-codepoint cursors yield None.
+    assert_eq!(matching_delimiter(sql, 0), None);
+    assert_eq!(matching_delimiter(sql, 9), None);
+    assert_eq!(matching_delimiter(sql, 999), None);
+    assert_eq!(matching_delimiter("('é')", 3), None);
+}
+
+#[test]
+fn matching_delimiter_skips_strings_comments_and_quoted_identifiers() {
+    // Delimiters inside literals, comments, and quoted identifiers are ignored.
+    let sql = "SELECT '(', -- )\n/* ] */ \"a(b\" , (1 + 2)";
+    let open = sql.rfind('(').unwrap();
+    let close = sql.rfind(')').unwrap();
+    assert_eq!(matching_delimiter(sql, open), Some((open, close)));
+    assert_eq!(matching_delimiter(sql, close), Some((close, open)));
+    assert_eq!(matching_delimiter(sql, close + 1), Some((close, open)));
+
+    // Cursor inside a string/comment/quoted identifier does not match delimiters.
+    assert_eq!(matching_delimiter(sql, sql.find("'('").unwrap() + 1), None);
+    assert_eq!(matching_delimiter(sql, sql.find("-- )").unwrap() + 3), None);
+    assert_eq!(
+        matching_delimiter(sql, sql.find("\"a(b\"").unwrap() + 2),
+        None
+    );
+
+    // Dollar-quoted strings and E-strings are skipped as literals.
+    let dollar = "DO $$ SELECT (1); $$";
+    assert_eq!(matching_delimiter(dollar, dollar.find('(').unwrap()), None);
+
+    // Mismatched or unclosed delimiters never guess a false partner.
+    assert_eq!(matching_delimiter("SELECT (a[1)", 7), None);
+    assert_eq!(matching_delimiter("SELECT (a[1)", 11), None);
+    assert_eq!(matching_delimiter("SELECT (a", 7), None);
+    assert_eq!(matching_delimiter("SELECT a)", 8), None);
+}

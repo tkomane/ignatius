@@ -237,24 +237,6 @@ impl Glyphs {
         }
     }
 
-    /// A progress bar of a fixed width, used for the elapsed-time indicator.
-    #[must_use]
-    pub fn meter(&self, filled: usize, width: usize) -> String {
-        let filled = filled.min(width);
-        match self.tier {
-            GlyphTier::Ascii => {
-                format!("{}{}", "#".repeat(filled), "-".repeat(width - filled))
-            }
-            GlyphTier::Unicode | GlyphTier::Nerd => {
-                format!(
-                    "{}{}",
-                    "\u{2588}".repeat(filled),
-                    "\u{2591}".repeat(width - filled)
-                )
-            }
-        }
-    }
-
     /// The marker showing whether a tree node is open.
     ///
     /// Unlike the other icons this is never empty, including in ASCII: a tree

@@ -29,7 +29,7 @@ flatter. With colour off, keywords keep a bold weight and comments a dim one and
 the rest is plain text: a buffer where every second word is emphasised is harder
 to read, not easier. Nothing about the meaning of the SQL depends on any of it.
 
-## The five built-in palettes
+## The seven built-in palettes
 
 - **Dark**, tuned for a dark terminal, low-saturation, no pure black background.
 - **Light**, designed for a light terminal by darkening and desaturating hues, not
@@ -45,20 +45,27 @@ to read, not easier. Nothing about the meaning of the SQL depends on any of it.
   (`#E3E8F0` / `#F1F5FB`), Material blue focus and selection (`#8AB4F8`), cyan
   informational accents (`#78D9EC`), sage success (`#81C995`), soft amber warnings
   (`#FDD663`), and coral alerts (`#F28B82`).
+- **Atelier**, warm obsidian-espresso editorial dark surfaces with terracotta
+  focus, champagne selection, and eucalyptus accents.
+- **Paper**, warm archival rag-paper light surfaces with sienna focus,
+  Prussian selection, and forest accents.
 
 ## Contrast is tested, not asserted
 
 Tests compute WCAG relative luminance from the palette values and fail the build
-if a token falls below its threshold: 4.5:1 for primary text on its surface, 3:1
-for every semantic token, 7:1 for every token in the high-contrast theme. The
-formula is checked against the known value of black on white, 21:1.
+if a token falls below its threshold: 4.5:1 across all four surface tiers for
+every non-border token in the seven built-in palettes (7:1 for every token in
+the high-contrast theme). The formula is checked against the known value of
+black on white, 21:1.
 
 A token that resolves to its own background colour also fails, because that is an
 invisible element.
 
 Custom definitions use the complete matrix over all four surfaces: text, muted,
-header, NULL and the five syntax roles require 4.5:1; semantic roles require
-3:1. A normal border must differ from Surface. A high-contrast base requires
+header, NULL and the five syntax roles require 4.5:1; custom semantic overrides
+require at least 3:1 (transitions such as `ResultSettle` and `NoticeSettle`
+skip colour fades when `Success` or `Info` falls below 4.5:1 on the target
+surface). A normal border must differ from Surface. A high-contrast base requires
 7:1 for every non-background role, including border and selection. Surface ink
 on Selection and the actual production capsule fill requires 4.5:1, or 7:1 for
 a high-contrast base. These are resolved RGB checks; terminal quantization,
@@ -247,8 +254,9 @@ The interface supports a 4-tier colour depth model:
   (bold, dim, reversed) and text words. Selected when `NO_COLOR`, `TERM=dumb`,
   `--plain`, or `ui.color = "never"` is active.
 
-Contrast thresholds (4.5:1 for readable text, 3:1 for semantic and graphical
-elements, and 7:1 for the high-contrast theme) are mathematically verified in
+Contrast thresholds (4.5:1 across all non-border tokens in the seven built-in
+themes, 4.5:1 for readable text and 3:1 for semantic overrides in custom
+palettes, and 7:1 for the high-contrast theme) are mathematically verified in
 the test suite against WCAG relative luminance at `TrueColor`. At reduced depths
 (`Indexed256` and `Basic16`), quantized approximations maintain readability,
 while `None` conveys all meaning through text labels and styling modifiers.

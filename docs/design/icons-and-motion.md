@@ -88,8 +88,12 @@ to reversed text with unchanged words and brackets (`[PROD]`, `[READ ONLY]`,
 
 **Results.** Row numbers in a gutter, an elevated `SurfaceAlt` column header bar,
 alternating row backgrounds, a rule under the headers, a column rule between
-columns, and a scroll indicator when there are rows below the fold. The grid
-features a multi-span semantic toolbar with `Token::Border` pipe delimiters and
+columns, an inline sort chevron (` ▾` / ` ▴`, or ` v` / ` ^` in ASCII) inside a
+sorted column header when column width allows, and a hairline scroll indicator
+(`┃` thumb on `│` track, `#` on `|` in ASCII, `Token::Focus` when focused and
+`Token::Muted` when unfocused) when there are rows below the fold. Running queries
+render inside an inset area with the cancel key styled as `Theme::keycap(Token::Focus)`.
+The grid features a multi-span semantic toolbar with `Token::Border` pipe delimiters and
 `Token::Focus` selected column accents. When query errors occur, diagnostic labels
 are structured into multi-span coloured prefixes (`While:`, `Object context:`,
 `Catalogue:`, `Location:`, `Likely cause:`, `Next:`). Values that read as numbers
@@ -100,9 +104,14 @@ reports no type information.
 **Editor.** Line numbers and a block cursor drawn by the renderer, because the
 terminal's own cursor is hidden while the alternate screen is in use. When
 focused, the active row is highlighted with a full-width `SurfaceAlt`
-`CursorLine`, and the active line number is emphasised as `CursorLineNr`
-(`Token::Focus` bold when focused, `Token::Header` bold when unfocused). The
-editor also features a Blink.cmp-style completion popup with a full-width
+`CursorLine`, the active line number is emphasised as `CursorLineNr`
+(`Token::Focus` bold when focused, `Token::Header` bold when unfocused), and
+matching `(...)` / `[...]` SQL delimiters outside strings, comments, and quoted
+identifiers highlight in bold underlined `Token::Focus` (except under the active
+caret `Selection`). The buffer tab bar sets `[BUFFERS: n/16]` as a `Token::Muted`
+pill, the active tab with `Theme::active_tab(Token::Focus)`, secondary split tabs
+with `Theme::recessed_pill(Token::Info)`, and split dividers in `Token::Border`.
+The editor also features a Blink.cmp-style completion popup with a full-width
 selection bar and kind-based semantic colouring (keywords in `Token::SyntaxKeyword`,
 functions in `Token::SyntaxNumber`, tables and views in `Token::Info`, columns in
 `Token::Text`, and CTEs in `Token::Focus`). Before this, the editor had no visible
@@ -169,26 +178,42 @@ Three moving things answer "is this still working":
 - A heartbeat that travels back and forth while a statement runs.
 - The bounded US10 boot reveal wordmark on connecting frames.
 
-Two transitions decorate a change that has already happened:
+Five transitions decorate a change that has already happened, each `OutCubic` and
+bounded in `src/ui/motion.rs`:
 
-- **The theme curtain.** Switching theme sweeps the new palette across the
-  pane body from left to right in 320 ms, eased out. The edge is hard: every
+- **The theme curtain (`320 ms`).** Switching theme sweeps the new palette across
+  the pane body from left to right in 320 ms, eased out. The edge is hard: every
   cell is wholly in the old theme or the new one, because a blend between a
   dark and a light palette passes through colours where text has no contrast.
   The header and footer rails take the new theme in the first frame, and the
   words on screen are identical in every frame. At 16 colours and below the
   new theme appears at once.
-- **The result settle.** When a statement completes successfully and its
+- **The result settle (`520 ms`).** When a statement completes successfully and its
   result is complete, the Results status word starts in the success colour and
-  fades to its resting colour over about half a second. A failure, a
+  fades to its resting colour over about half a second, and the column-header
+  hairline rule (`─┼─`) fades from success to `Token::Border`. A failure, a
   cancellation, a lost connection or a limited result gets no transition and
   keeps its static colours, because fading any of them toward calm would soften
   news that is not calm. A `\watch` loop and a generated cell update do not
-  settle either. Only the word's ink moves, never a background, and the
-  resting word is muted ink without dimming, so the last frame of the fade
-  is exactly the resting frame and nothing changes when it ends. A custom
-  theme whose success colour reads below 4.5:1 on the pane gets no settle,
-  because a word is never painted in an ink it cannot be read in.
+  settle either. Only inks move, never a background, and the resting status word
+  is muted ink without dimming, so the last frame of the fade is exactly the
+  resting frame and nothing changes when it ends. A custom theme whose success
+  colour reads below 4.5:1 on the pane gets no settle, because a word is never
+  painted in an ink it cannot be read in.
+- **The format ripple (`360 ms`).** Only when formatting changes the buffer
+  (`FormatNotice::Applied`), a wave sweeps `Token::Success` into the resting
+  gutter token (`Token::Focus` or `Token::Border`) down visible rows of the
+  active editor's statement-bar gutter without touching SQL text or backgrounds.
+  `AlreadyFormatted`, `Empty` and `Refused` do not ripple.
+- **The notice settle (`480 ms`).** Positive transient notices
+  (`FormatNotice::Applied`, saved query written, export succeeded, baseline
+  pinned) start a settle and never trigger on warnings, errors or refusals. In
+  the footer rail, positive `FormatNotice::Applied` ink fades from
+  `Token::Success` to `Token::Info` when both clear 4.5:1 on `SurfaceAlt`.
+- **The benchmark settle (`480 ms`).** When `QueryBenchLoaded` finishes cleanly
+  with `!failed_gate` and a verdict other than `Slower`, a settle starts.
+  Failed runs, unmet gates, `Slower` regressions and intermediate baseline
+  completions stay static.
 
 Focus changes and overlays do not move. Focus already has its heavier border,
 its colour and the `[focused]` word in the same frame, and the palette and

@@ -1389,13 +1389,24 @@ fn a_settle_fades_only_the_status_word_ink_into_its_exact_resting_frame() {
             buffer_to_string(&resting),
             "{at:?}: the words are identical in every frame"
         );
+        let rule_y = (1..area.height)
+            .find(|&y| resting[(1, y)].symbol() == "\u{2500}")
+            .expect("column header hairline rule");
         for y in 0..area.height {
             for x in 0..area.width {
                 let (cell, rest) = (&frame[(x, y)], &resting[(x, y)]);
                 assert_eq!(cell.bg, rest.bg, "{at:?} ({x},{y}): never a background");
                 assert_eq!(cell.modifier, rest.modifier, "{at:?} ({x},{y}): no pop");
-                if y > 0 {
-                    assert_eq!(cell.fg, rest.fg, "{at:?} ({x},{y}): only the title moves");
+                if y > 0 && y != rule_y {
+                    assert_eq!(
+                        cell.fg, rest.fg,
+                        "{at:?} ({x},{y}): only the title and header rule move"
+                    );
+                } else if y == rule_y && (x == 0 || x + 1 == area.width) {
+                    assert_eq!(
+                        cell.fg, rest.fg,
+                        "{at:?} ({x},{y}): pane borders never move"
+                    );
                 }
             }
         }
@@ -1552,13 +1563,17 @@ fn running(frame: u64, cancelling: bool) -> Model {
 /// The heartbeat row's cells, found by its track glyph.
 fn heartbeat_cells(buf: &Buffer) -> Vec<ratatui::buffer::Cell> {
     let area = buf.area;
-    let y = (1..area.height)
-        .find(|&y| {
-            (1..=super::HEARTBEAT_TRACK as u16)
-                .all(|x| ["\u{2500}", "\u{2501}", "-", "="].contains(&buf[(x, y)].symbol()))
+    let (start_x, y) = (1..area.height)
+        .find_map(|y| {
+            (1..area.width.saturating_sub(super::HEARTBEAT_TRACK as u16))
+                .find(|&start_x| {
+                    (start_x..start_x + super::HEARTBEAT_TRACK as u16)
+                        .all(|x| ["\u{2500}", "\u{2501}", "-", "="].contains(&buf[(x, y)].symbol()))
+                })
+                .map(|start_x| (start_x, y))
         })
         .expect("a heartbeat row");
-    (1..=super::HEARTBEAT_TRACK as u16)
+    (start_x..start_x + super::HEARTBEAT_TRACK as u16)
         .map(|x| buf[(x, y)].clone())
         .collect()
 }
@@ -1721,8 +1736,12 @@ fn reduced_motion_keeps_the_words_and_draws_no_heartbeat() {
     let text = buffer_to_string(&first);
     assert!(text.contains("Running") && text.contains("1.5 s"), "{text}");
     let rows: Vec<&str> = text.lines().collect();
+    let running_row = rows
+        .iter()
+        .position(|line| line.contains("Running"))
+        .expect("running row");
     assert!(
-        rows[2].contains("asks the server to cancel"),
+        rows[running_row + 1].contains("asks the server to cancel"),
         "the words follow directly, with no heartbeat row: {text}"
     );
 }
@@ -1753,4 +1772,196 @@ fn a_custom_success_ink_too_faint_for_a_word_skips_the_settle() {
         Some(status_cell(&render(&settling(Duration::ZERO), &built_in, area)).fg),
         built_in.theme.color(Token::Success)
     );
+}
+
+#[test]
+fn a_settle_tints_the_column_header_hairline_rule_and_respects_faint_custom_themes() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let theme = &presentation.theme;
+    let area = Rect::new(0, 0, 80, 12);
+    let resting = render(&model_with(&["id"], &text_rows(2)), &presentation, area);
+    let rule_y = (1..area.height)
+        .find(|&y| resting[(1, y)].symbol() == "\u{2500}")
+        .expect("column header rule row");
+
+    let at_zero = render(&settling(Duration::ZERO), &presentation, area);
+    assert_eq!(Some(at_zero[(1, rule_y)].fg), theme.color(Token::Success));
+    assert_eq!(at_zero[(0, rule_y)].fg, resting[(0, rule_y)].fg);
+
+    let mid = Duration::from_millis(240);
+    let mid_model = settling(mid);
+    let at_mid = render(&mid_model, &presentation, area);
+    let (_, progress) = mid_model.motion().result_settle().expect("active settle");
+    assert_eq!(
+        Some(at_mid[(1, rule_y)].fg),
+        theme.mix(Token::Success, Token::Border, progress)
+    );
+
+    let settled = render(&settling(Duration::from_millis(720)), &presentation, area);
+    assert_eq!(settled[(1, rule_y)].fg, resting[(1, rule_y)].fg);
+
+    // A low-contrast custom theme keeps the rule still.
+    use crate::ui::theme::{Rgb, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let faint = Rgb(0x30, 0x8c, 0x50);
+    let definition = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Success, faint);
+    let custom_theme = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+        .expect("custom palette passes 3:1 gate")
+        .selected_theme(true, ColorDepth::TrueColor);
+    let custom_pres = Presentation::new(custom_theme, Glyphs::new(GlyphTier::Unicode), false);
+    let custom_resting = render(&model_with(&["id"], &text_rows(2)), &custom_pres, area);
+    let custom_zero = render(&settling(Duration::ZERO), &custom_pres, area);
+    assert_eq!(custom_zero[(1, rule_y)].fg, custom_resting[(1, rule_y)].fg);
+}
+
+#[test]
+fn scrollbar_uses_hairline_glyphs_and_focus_contrast() {
+    let rows: Vec<Vec<Cell>> = (0..40)
+        .map(|i| vec![Cell::Text(format!("row-{i}"))])
+        .collect();
+    let mut focused_model = model_with(&["id"], &rows);
+    focused_model.focus = Focus::Results;
+    let mut unfocused_model = model_with(&["id"], &rows);
+    unfocused_model.focus = Focus::Editor;
+
+    let area = Rect::new(0, 0, 50, 10);
+    let unicode = presentation_at(ColorDepth::TrueColor);
+    let buf_focused = render(&focused_model, &unicode, area);
+    let buf_unfocused = render(&unfocused_model, &unicode, area);
+
+    let scroll_x = (1..area.width - 1)
+        .find(|&x| {
+            (1..area.height - 1)
+                .any(|y| ["\u{2503}", "\u{2502}"].contains(&buf_focused[(x, y)].symbol()))
+        })
+        .expect("unicode scrollbar column");
+
+    let thumb_y = (1..area.height - 1)
+        .find(|&y| buf_focused[(scroll_x, y)].symbol() == "\u{2503}")
+        .expect("unicode thumb cell");
+    let track_y = (1..area.height - 1)
+        .find(|&y| buf_focused[(scroll_x, y)].symbol() == "\u{2502}")
+        .expect("unicode track cell");
+
+    assert_eq!(
+        Some(buf_focused[(scroll_x, thumb_y)].fg),
+        unicode.theme.color(Token::Focus)
+    );
+    assert_eq!(
+        Some(buf_focused[(scroll_x, track_y)].fg),
+        unicode.theme.color(Token::Border)
+    );
+    assert_eq!(
+        Some(buf_unfocused[(scroll_x, thumb_y)].fg),
+        unicode.theme.color(Token::Muted)
+    );
+    assert_eq!(
+        Some(buf_unfocused[(scroll_x, track_y)].fg),
+        unicode.theme.color(Token::Border)
+    );
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let buf_ascii = render(&focused_model, &ascii, area);
+    assert_eq!(buf_ascii[(scroll_x, thumb_y)].symbol(), "#");
+    assert_eq!(buf_ascii[(scroll_x, track_y)].symbol(), "|");
+}
+
+#[test]
+fn inline_sort_chevron_renders_within_column_width_and_preserves_geometry() {
+    let mut asc_model = model_with(
+        &["id", "very_long_column_name_here"],
+        &[vec![Cell::Text("1".into()), Cell::Text("ok".into())]],
+    );
+    asc_model.result_grid.sort = Some(grid::SortSpec {
+        column: 0,
+        direction: grid::SortDirection::Ascending,
+    });
+    let mut desc_model = asc_model.clone();
+    desc_model.result_grid.sort = Some(grid::SortSpec {
+        column: 0,
+        direction: grid::SortDirection::Descending,
+    });
+    let mut unsorted_model = asc_model.clone();
+    unsorted_model.result_grid.sort = None;
+
+    let area = Rect::new(0, 0, 80, 10);
+    let unicode = presentation_at(ColorDepth::TrueColor);
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+
+    let asc_text = buffer_to_string(&render(&asc_model, &unicode, area));
+    let desc_text = buffer_to_string(&render(&desc_model, &unicode, area));
+    assert!(asc_text.contains("id \u{25b4}"), "{asc_text}");
+    assert!(desc_text.contains("id \u{25be}"), "{desc_text}");
+
+    let asc_ascii = buffer_to_string(&render(&asc_model, &ascii, area));
+    let desc_ascii = buffer_to_string(&render(&desc_model, &ascii, area));
+    assert!(asc_ascii.contains("id ^"), "{asc_ascii}");
+    assert!(desc_ascii.contains("id v"), "{desc_ascii}");
+
+    // Column hit-testing geometry stays identical with or without sort.
+    for x in 0..area.width {
+        for y in 0..area.height {
+            assert_eq!(
+                crate::ui::widgets::results_region(&asc_model, area, x, y),
+                crate::ui::widgets::results_region(&unsorted_model, area, x, y)
+            );
+        }
+    }
+
+    // Narrow manual column width omits chevron without truncating the column name.
+    let mut tight_model = model_with(&["amount_cents"], &[vec![Cell::Text("100".into())]]);
+    tight_model.result_grid.widths.insert(0, 12);
+    tight_model.result_grid.sort = Some(grid::SortSpec {
+        column: 0,
+        direction: grid::SortDirection::Descending,
+    });
+    let tight_text = buffer_to_string(&render(&tight_model, &unicode, area));
+    assert!(tight_text.contains("amount_cents"), "{tight_text}");
+    assert!(!tight_text.contains('\u{25be}'), "{tight_text}");
+}
+
+#[test]
+fn running_surface_is_inset_and_uses_focus_keycap_for_cancel() {
+    let area = Rect::new(0, 0, 60, 12);
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let buf = render(&running(3, false), &presentation, area);
+    let text = buffer_to_string(&buf);
+    let rows: Vec<&str> = text.lines().collect();
+
+    // Vertical inset leaves row immediately below border blank.
+    assert!(
+        rows[1]
+            .trim_matches(['\u{2502}', '\u{2503}', ' '])
+            .is_empty(),
+        "{text}"
+    );
+    // Horizontal inset leaves x = 1 blank before the spinner (x = 2) and "Running" (x = 4).
+    let running_y = rows
+        .iter()
+        .position(|line| line.contains("Running"))
+        .expect("running row") as u16;
+    assert_eq!(buf[(1, running_y)].symbol(), " ");
+    assert_eq!(buf[(4, running_y)].symbol(), "R");
+
+    // Cancel keycap uses Token::Focus keycap styling while preserving wording.
+    assert!(text.contains("Ctrl+C asks the server to cancel."), "{text}");
+    let cancel_y = rows
+        .iter()
+        .position(|line| line.contains("Ctrl+C"))
+        .expect("cancel row") as u16;
+    let ctrl_x = (1..area.width - 1)
+        .find(|&x| buf[(x, cancel_y)].symbol() == "C")
+        .expect("Ctrl+C cell");
+    let expected_keycap = presentation.theme.keycap(Token::Focus);
+    let keycap_cell = &buf[(ctrl_x, cancel_y)];
+    assert_eq!(Some(keycap_cell.fg), expected_keycap.fg);
+    assert_eq!(Some(keycap_cell.bg), expected_keycap.bg);
+    assert_eq!(keycap_cell.modifier, expected_keycap.add_modifier);
 }

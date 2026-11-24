@@ -56,7 +56,6 @@ fn ascii_output_stays_within_ascii() {
     let mut text = String::new();
     text.push_str(glyphs.separator());
     text.push_str(glyphs.column_rule());
-    text.push_str(&glyphs.meter(3, 10));
     for frame in 0..8 {
         text.push_str(glyphs.spinner(frame));
     }
@@ -162,21 +161,6 @@ fn the_spinner_cycles_and_never_indexes_out_of_range() {
         assert!(seen.len() >= 4, "{tier:?} spinner barely moves");
         // A very large frame counter must not panic or wrap oddly.
         assert!(!glyphs.spinner(u64::MAX).is_empty());
-    }
-}
-
-#[test]
-fn the_meter_is_always_exactly_the_requested_width() {
-    for tier in [GlyphTier::Ascii, GlyphTier::Unicode, GlyphTier::Nerd] {
-        let glyphs = Glyphs::new(tier);
-        for filled in 0..=12 {
-            let meter = glyphs.meter(filled, 10);
-            assert_eq!(
-                meter.chars().count(),
-                10,
-                "{tier:?} meter with {filled} filled was the wrong width"
-            );
-        }
     }
 }
 

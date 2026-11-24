@@ -1,7 +1,6 @@
 use super::*;
 
 const READABLE: f64 = 4.5;
-const LARGE_OR_SECONDARY: f64 = 3.0;
 const HIGH_CONTRAST_MINIMUM: f64 = 7.0;
 
 fn themes() -> [Theme; 7] {
@@ -70,22 +69,20 @@ fn primary_text_is_readable_on_its_surface() {
 #[test]
 fn semantic_states_stay_legible_on_their_surface() {
     for theme in themes() {
+        let threshold = if theme.selection() == ThemeSelection::HighContrast {
+            HIGH_CONTRAST_MINIMUM
+        } else {
+            READABLE
+        };
         for surface in surfaces(&theme) {
-            for token in [
-                Token::Muted,
-                Token::Success,
-                Token::Warning,
-                Token::Danger,
-                Token::Info,
-                Token::EnvironmentProduction,
-                Token::TransactionFailed,
-                Token::NullValue,
-                Token::Header,
-            ] {
-                let ratio = theme.rgb(token).contrast(surface);
+            for token in Token::ALL {
+                if SURFACE_TOKENS.contains(token) || *token == Token::Border {
+                    continue;
+                }
+                let ratio = theme.rgb(*token).contrast(surface);
                 assert!(
-                    ratio >= LARGE_OR_SECONDARY,
-                    "{:?}/{token:?} contrast {ratio:.2} is below {LARGE_OR_SECONDARY}",
+                    ratio >= threshold,
+                    "{:?}/{token:?} contrast {ratio:.2} is below {threshold}",
                     theme.selection()
                 );
             }
@@ -112,7 +109,7 @@ fn text_stays_readable_on_a_striped_row() {
             Token::Success,
         ] {
             assert!(
-                theme.rgb(token).contrast(stripe) >= LARGE_OR_SECONDARY,
+                theme.rgb(token).contrast(stripe) >= READABLE,
                 "{:?}/{token:?} on a striped row is {:.2}",
                 theme.selection(),
                 theme.rgb(token).contrast(stripe)
@@ -137,7 +134,7 @@ fn a_capsule_is_legible_and_falls_back_to_reversed_text() {
             .rgb(Token::EnvironmentProduction)
             .contrast(theme.rgb(Token::Surface));
         assert!(
-            ratio >= LARGE_OR_SECONDARY,
+            ratio >= READABLE,
             "{:?}: capsule contrast {ratio:.2}",
             theme.selection()
         );
@@ -497,43 +494,17 @@ fn manual_light_comment_text_clears_four_surfaces() {
 
 #[test]
 fn manual_complete_builtin_matrix_clears_the_contract() {
-    let text = [
-        Token::Text,
-        Token::Muted,
-        Token::Header,
-        Token::NullValue,
-        Token::SyntaxKeyword,
-        Token::SyntaxLiteral,
-        Token::SyntaxNumber,
-        Token::SyntaxComment,
-        Token::SyntaxIdentifier,
-    ];
-    let semantic = [
-        Token::Focus,
-        Token::Success,
-        Token::Warning,
-        Token::Danger,
-        Token::Info,
-        Token::EnvironmentProduction,
-        Token::EnvironmentNonProduction,
-        Token::TransactionActive,
-        Token::TransactionFailed,
-    ];
     let mut failures = Vec::new();
     for theme in themes() {
+        let threshold = if theme.selection() == ThemeSelection::HighContrast {
+            HIGH_CONTRAST_MINIMUM
+        } else {
+            READABLE
+        };
         for token in Token::ALL {
-            if SURFACE_TOKENS.contains(token) {
+            if SURFACE_TOKENS.contains(token) || *token == Token::Border {
                 continue;
             }
-            let threshold = if theme.selection() == ThemeSelection::HighContrast {
-                7.0
-            } else if text.contains(token) {
-                4.5
-            } else if semantic.contains(token) {
-                3.0
-            } else {
-                continue;
-            };
             for background in SURFACE_TOKENS {
                 let ratio = theme.rgb(*token).contrast(theme.rgb(background));
                 if ratio < threshold {
@@ -546,11 +517,6 @@ fn manual_complete_builtin_matrix_clears_the_contract() {
         }
         assert_ne!(theme.rgb(Token::Border), theme.rgb(Token::Surface));
         for fill in [Token::Selection, Token::EnvironmentProduction] {
-            let threshold = if theme.selection() == ThemeSelection::HighContrast {
-                7.0
-            } else {
-                4.5
-            };
             let ratio = theme.rgb(Token::Surface).contrast(theme.rgb(fill));
             if ratio < threshold {
                 failures.push(format!(

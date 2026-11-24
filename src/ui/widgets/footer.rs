@@ -262,7 +262,15 @@ pub(crate) fn render_footer(
             truncate_to_width(compact, remaining, !presentation.glyphs.is_ascii())
         };
         if !message.is_empty() {
-            spans.push(Span::styled(format!(" {message}"), theme.on_stripe(token)));
+            let mut style = theme.on_stripe(token);
+            if matches!(notice, crate::app::model::FormatNotice::Applied { .. })
+                && let Some(progress) = model.motion().notice_settle()
+                && notice_inks_are_legible(theme)
+                && let Some(ink) = theme.mix(Token::Success, Token::Info, progress)
+            {
+                style = style.fg(ink);
+            }
+            spans.push(Span::styled(format!(" {message}"), style));
         }
         Paragraph::new(Line::from(spans))
             .style(theme.surface(Token::SurfaceAlt))
@@ -401,6 +409,13 @@ fn overlay_key(keymap: &Keymap, action: &crate::app::Action) -> Option<String> {
         };
     }
     keymap.contextual_hint(action).map(|(key, _)| key)
+}
+
+fn notice_inks_are_legible(theme: &crate::ui::theme::Theme) -> bool {
+    let stripe = theme.rgb(Token::SurfaceAlt);
+    [Token::Success, Token::Info]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(stripe) >= 4.5)
 }
 
 #[cfg(test)]
