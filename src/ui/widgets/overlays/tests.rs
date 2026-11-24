@@ -738,6 +738,7 @@ fn query_bench_overlay_renders_ab_verdict_gate_sparklines_and_themes() {
         active_tab: 0,
         selected_idx: 3,
         loading: false,
+        cancelling: false,
         status_message: None,
         queued_candidate: None,
     };
@@ -1634,10 +1635,27 @@ fn modal_shell_fits_its_content_with_status_and_keys_pinned_to_the_bottom() {
     render_query_bench(&state, &pres, area, &mut loading_buf);
     assert_eq!(row_of(&loading_buf, "Running query benchmark"), title + 4);
     assert_eq!(row_of(&loading_buf, "Up/Down Select"), rail);
-    // During a run Esc, m and r wait, so the rail does not offer them.
+    // During a run Esc, m and r wait, while Ctrl+C Cancel is advertised.
     let running = buffer_to_string(&loading_buf);
+    assert!(running.contains("Ctrl+C Cancel"), "{running}");
     assert!(!running.contains("Esc Close"), "{running}");
     assert!(!running.contains("r Re-run"), "{running}");
+
+    state.cancelling = true;
+    state.status_message = Some(
+        "Cancellation requested for the benchmark. The server may still be running.".to_owned(),
+    );
+    let mut cancelling_buf = Buffer::empty(area);
+    render_query_bench(&state, &pres, area, &mut cancelling_buf);
+    let cancelling_text = buffer_to_string(&cancelling_buf);
+    assert!(
+        cancelling_text.contains("Cancelling query benchmark"),
+        "{cancelling_text}"
+    );
+    assert!(
+        cancelling_text.contains("Cancellation requested for the benchmark"),
+        "{cancelling_text}"
+    );
 }
 
 #[test]

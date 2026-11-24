@@ -7,15 +7,136 @@
 //! every iteration in `BEGIN` and an unconditional `ROLLBACK` (on both `Ok`
 //! and `Err`) so DML statements never persist mutations.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use futures_util::StreamExt;
+use tokio::sync::Notify;
 use tokio_postgres::{Client, SimpleQueryMessage, Statement, types::ToSql};
 
 use crate::bench::{BenchConfig, BenchSample, BenchStats, compute_bench_stats};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::from_query_error;
+use crate::postgres::session::CancelHandle;
 use crate::query::statements;
+
+/// Thread-safe, non-blocking cancel controller for a running benchmark.
+///
+/// Cancellation sets an atomic flag checked before `BEGIN` and before each
+/// iteration, and dispatches [`CancelHandle::cancel`] only while the benchmark
+/// owns the session's SQL gate and is actively inside `execute_timed_statement`
+/// (never during `BEGIN`, `ROLLBACK`, or between iterations).
+#[derive(Clone, Default)]
+pub struct BenchmarkCancelHandle {
+    state: Arc<BenchCancelState>,
+}
+
+#[derive(Default)]
+struct BenchCancelState {
+    cancelled: AtomicBool,
+    cancelled_notify: Notify,
+    executing_cancel: std::sync::Mutex<Option<CancelHandle>>,
+}
+
+impl std::fmt::Debug for BenchmarkCancelHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BenchmarkCancelHandle")
+            .field("cancelled", &self.is_cancelled())
+            .finish_non_exhaustive()
+    }
+}
+
+impl BenchmarkCancelHandle {
+    /// Creates a fresh cancel handle for a benchmark run.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether cancellation has been requested for this benchmark run.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.state.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Whether two handles refer to the same underlying benchmark run state.
+    #[must_use]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
+    /// Subscribes to cancellation notifications for gate-wait racing.
+    pub(super) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
+        self.state.cancelled_notify.notified()
+    }
+
+    /// Requests cancellation without blocking on the session's SQL gate.
+    ///
+    /// Marks the benchmark cancelled for all upcoming iterations and, if a
+    /// timed user statement is currently executing, sends PostgreSQL's cancel
+    /// packet after releasing the internal lock.
+    pub async fn request_cancel(&self) -> Result<(), Diagnostic> {
+        let handle = {
+            let slot = self
+                .state
+                .executing_cancel
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.state.cancelled.store(true, Ordering::SeqCst);
+            self.state.cancelled_notify.notify_waiters();
+            slot.clone()
+        };
+        if let Some(handle) = handle {
+            handle.cancel().await?;
+        }
+        Ok(())
+    }
+
+    /// Installs the active [`CancelHandle`] only if cancellation has not already
+    /// been requested, returning a guard that clears it before `ROLLBACK` runs.
+    fn install_executing(
+        &self,
+        handle: CancelHandle,
+    ) -> Result<ExecutingCancelGuard<'_>, Diagnostic> {
+        let mut slot = self
+            .state
+            .executing_cancel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.state.cancelled.load(Ordering::SeqCst) {
+            return Err(cancelled_diagnostic());
+        }
+        *slot = Some(handle);
+        Ok(ExecutingCancelGuard { state: &self.state })
+    }
+}
+
+struct ExecutingCancelGuard<'a> {
+    state: &'a BenchCancelState,
+}
+
+impl Drop for ExecutingCancelGuard<'_> {
+    fn drop(&mut self) {
+        let mut slot = self
+            .state
+            .executing_cancel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = None;
+    }
+}
+
+/// Diagnostic returned when a benchmark stops because cancellation was
+/// requested locally before `BEGIN` or between iterations.
+pub(super) fn cancelled_diagnostic() -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Cancelled,
+        "the benchmark was cancelled",
+        "running a query benchmark",
+    )
+    .next_action("review any completed baseline or run the benchmark again")
+}
 
 /// Executes warmup and measured iterations of a single SQL statement against a
 /// live PostgreSQL connection and returns aggregated [`BenchStats`].
@@ -29,10 +150,43 @@ pub async fn run_benchmark(
     config: &BenchConfig,
     label: &str,
 ) -> Result<BenchStats, Diagnostic> {
+    run_benchmark_inner(client, sql, config, label, None).await
+}
+
+/// Executes a cancellable benchmark run with the provided cancel controller.
+pub(super) async fn run_benchmark_with_cancel(
+    client: &Client,
+    sql: &str,
+    config: &BenchConfig,
+    label: &str,
+    cancel_handle: CancelHandle,
+    controller: &BenchmarkCancelHandle,
+) -> Result<BenchStats, Diagnostic> {
+    run_benchmark_inner(
+        client,
+        sql,
+        config,
+        label,
+        Some((&cancel_handle, controller)),
+    )
+    .await
+}
+
+async fn run_benchmark_inner(
+    client: &Client,
+    sql: &str,
+    config: &BenchConfig,
+    label: &str,
+    cancel: Option<(&CancelHandle, &BenchmarkCancelHandle)>,
+) -> Result<BenchStats, Diagnostic> {
+    if cancel.is_some_and(|(_, controller)| controller.is_cancelled()) {
+        return Err(cancelled_diagnostic());
+    }
     let stmt_text = validate_single_statement(sql)?;
     let effective = config.clamped();
-    collect_samples(label, &stmt_text, &effective, || {
-        run_iteration(client, &stmt_text, effective.rollback)
+    let controller = cancel.map(|(_, controller)| controller);
+    collect_samples_cancellable(label, &stmt_text, &effective, controller, || {
+        run_iteration(client, &stmt_text, effective.rollback, cancel)
     })
     .await
 }
@@ -42,6 +196,20 @@ pub(super) async fn collect_samples<F, Fut>(
     label: &str,
     sql: &str,
     config: &BenchConfig,
+    iteration: F,
+) -> Result<BenchStats, Diagnostic>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(f64, u64), Diagnostic>>,
+{
+    collect_samples_cancellable(label, sql, config, None, iteration).await
+}
+
+async fn collect_samples_cancellable<F, Fut>(
+    label: &str,
+    sql: &str,
+    config: &BenchConfig,
+    cancel: Option<&BenchmarkCancelHandle>,
     mut iteration: F,
 ) -> Result<BenchStats, Diagnostic>
 where
@@ -49,11 +217,17 @@ where
     Fut: std::future::Future<Output = Result<(f64, u64), Diagnostic>>,
 {
     for _ in 0..config.warmup_runs {
+        if cancel.is_some_and(BenchmarkCancelHandle::is_cancelled) {
+            return Err(cancelled_diagnostic());
+        }
         let _ = iteration().await?;
     }
 
     let mut samples = Vec::with_capacity(config.measured_runs);
     for sample in 1..=config.measured_runs {
+        if cancel.is_some_and(BenchmarkCancelHandle::is_cancelled) {
+            return Err(cancelled_diagnostic());
+        }
         let (duration_ms, rows_returned) = iteration().await?;
         samples.push(BenchSample {
             iteration: sample,
@@ -113,14 +287,18 @@ async fn run_iteration(
     client: &Client,
     stmt_text: &str,
     rollback: bool,
+    cancel: Option<(&CancelHandle, &BenchmarkCancelHandle)>,
 ) -> Result<(f64, u64), Diagnostic> {
+    if cancel.is_some_and(|(_, controller)| controller.is_cancelled()) {
+        return Err(cancelled_diagnostic());
+    }
     if rollback {
         client
             .simple_query("BEGIN")
             .await
             .map_err(|err| from_query_error(&err, 1))?;
 
-        let exec_res = execute_timed_statement(client, stmt_text).await;
+        let exec_res = execute_with_cancel_guard(client, stmt_text, cancel).await;
         let rollback_res = client.simple_query("ROLLBACK").await;
 
         match exec_res {
@@ -140,8 +318,22 @@ async fn run_iteration(
             }
         }
     } else {
-        execute_timed_statement(client, stmt_text).await
+        execute_with_cancel_guard(client, stmt_text, cancel).await
     }
+}
+
+async fn execute_with_cancel_guard(
+    client: &Client,
+    stmt_text: &str,
+    cancel: Option<(&CancelHandle, &BenchmarkCancelHandle)>,
+) -> Result<(f64, u64), Diagnostic> {
+    let guard = match cancel {
+        Some((handle, controller)) => Some(controller.install_executing(handle.clone())?),
+        None => None,
+    };
+    let res = execute_timed_statement(client, stmt_text).await;
+    drop(guard);
+    res
 }
 
 async fn execute_timed_statement(
@@ -179,3 +371,6 @@ async fn execute_timed_statement(
     };
     Ok((duration_ms, rows_returned))
 }
+
+#[cfg(test)]
+mod tests;

@@ -815,6 +815,7 @@ async fn event_loop(
     let mut last_mouse_at = std::time::Instant::now();
     let mut recovery_error_reported = false;
     let mut watch_next_at: Option<(u64, u64, tokio::time::Instant)> = None;
+    let active_bench_cancel: ActiveBenchCancel = Arc::new(std::sync::Mutex::new(None));
 
     loop {
         for (index,pending) in pending_installs.iter_mut().enumerate() {
@@ -945,6 +946,9 @@ async fn event_loop(
                     );
                 }
                 Effect::ConnectProfile { profile } => {
+                    *active_bench_cancel
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                     retire_profile_notice_sources(&mut model,&session,&metadata,&mut install_rx,&mut pending_installs,&mut remembered_attempts,connection_generation.load(std::sync::atomic::Ordering::SeqCst)).await;
                     let generation =
                         connection_generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -1423,6 +1427,11 @@ async fn event_loop(
                     sql,
                     config,
                 } => {
+                    let cancel = crate::postgres::BenchmarkCancelHandle::new();
+                    *active_bench_cancel
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some((request, cancel.clone()));
                     spawn_run_query_bench(
                         tx.clone(),
                         Arc::clone(&session),
@@ -1432,9 +1441,25 @@ async fn event_loop(
                             sql,
                             config,
                         },
+                        cancel,
+                        Arc::clone(&active_bench_cancel),
                         Arc::clone(&connection_generation),
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
+                }
+                Effect::CancelQueryBench => {
+                    let active = active_bench_cancel
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
+                    if let Some((request, cancel)) = active {
+                        spawn_cancel_query_bench(
+                            tx.clone(),
+                            Arc::clone(&active_bench_cancel),
+                            request,
+                            cancel,
+                        );
+                    }
                 }
                 Effect::CaptureSchemaSnapshot { request, schema } => {
                     spawn_capture_schema_snapshot(
@@ -3545,6 +3570,9 @@ fn spawn_load_extended_explain(
     });
 }
 
+type ActiveBenchCancel =
+    Arc<std::sync::Mutex<Option<(u64, crate::postgres::BenchmarkCancelHandle)>>>;
+
 struct BenchRunSpec {
     request: u64,
     target: crate::app::message::BenchTarget,
@@ -3552,10 +3580,39 @@ struct BenchRunSpec {
     config: crate::bench::BenchConfig,
 }
 
+fn clear_active_bench_cancel(
+    slot: &ActiveBenchCancel,
+    cancel: &crate::postgres::BenchmarkCancelHandle,
+) {
+    let mut guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if guard
+        .as_ref()
+        .is_some_and(|(_, active)| active.ptr_eq(cancel))
+    {
+        *guard = None;
+    }
+}
+
+struct BenchCancelSlotGuard {
+    slot: ActiveBenchCancel,
+    cancel: crate::postgres::BenchmarkCancelHandle,
+}
+
+impl Drop for BenchCancelSlotGuard {
+    fn drop(&mut self) {
+        clear_active_bench_cancel(&self.slot, &self.cancel);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_run_query_bench(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     spec: BenchRunSpec,
+    cancel: crate::postgres::BenchmarkCancelHandle,
+    active_cancel: ActiveBenchCancel,
     generation: Arc<std::sync::atomic::AtomicU64>,
     request_generation: u64,
 ) {
@@ -3564,6 +3621,10 @@ fn spawn_run_query_bench(
         // arrives, so every run reports exactly once: when it finds no
         // session, when the connection changed under it, and through the
         // guard's drop if the task unwinds.
+        let cancel_guard = BenchCancelSlotGuard {
+            slot: active_cancel,
+            cancel: cancel.clone(),
+        };
         let mut report = BenchReport {
             tx: Some(tx),
             request: spec.request,
@@ -3574,6 +3635,7 @@ fn spawn_run_query_bench(
             held.clone()
         };
         let Some(session) = opened else {
+            drop(cancel_guard);
             report.send(Err(Diagnostic::new(
                 DiagnosticKind::Connection,
                 "the benchmark did not run, because no session is open",
@@ -3587,7 +3649,10 @@ fn spawn_run_query_bench(
         };
         let preview = crate::plandiff::bound_label(&spec.sql);
         let label = crate::plandiff::bound_label(&format!("{prefix}: {preview}"));
-        let result = session.run_benchmark(&spec.sql, &spec.config, &label).await;
+        let result = session
+            .run_benchmark_cancellable(&spec.sql, &spec.config, &label, &cancel)
+            .await;
+        drop(cancel_guard);
         if !connection_generation_is_current(&generation, request_generation) {
             report.send(Err(Diagnostic::new(
                 DiagnosticKind::Connection,
@@ -3597,6 +3662,28 @@ fn spawn_run_query_bench(
             return;
         }
         report.send(result);
+    });
+}
+
+fn spawn_cancel_query_bench(
+    tx: mpsc::UnboundedSender<Message>,
+    active_cancel: ActiveBenchCancel,
+    request: u64,
+    cancel: crate::postgres::BenchmarkCancelHandle,
+) {
+    tokio::spawn(async move {
+        if let Err(diagnostic) = cancel.request_cancel().await {
+            let still_active = active_cancel
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|(active_request, active_handle)| {
+                    *active_request == request && active_handle.ptr_eq(&cancel)
+                });
+            if still_active {
+                let _ = tx.send(Message::QueryBenchCancelFailed(diagnostic.headline));
+            }
+        }
     });
 }
 

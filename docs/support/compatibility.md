@@ -358,16 +358,23 @@ The query benchmark (`Ctrl+K '`) wraps each run in `BEGIN` and `ROLLBACK` by def
 rollback mode and never runs anything by itself. With rollback off every run
 commits, so a statement that is not a read is refused on a production
 connection and in a read-only session. Query A and Query B run one after the
-other and B is skipped if A fails. Each run holds the session for its whole
+other and B is skipped if A fails or is cancelled. Each run holds the session for its whole
 length, so workbench statements, `\watch` iterations and other benchmarks wait
 for it rather than landing between its `BEGIN` and `ROLLBACK`, and it waits for
 them. Before its first `BEGIN` the session asks the server whether it is inside
 a transaction, and the benchmark refuses to start if it is, because its
-rollback would end that transaction. A running benchmark cannot be cancelled
-yet, so its overlay stays open until the run reports (or the connection is
-lost), and no benchmark can be left running unseen behind a closed overlay.
-Quitting Ignatius stops later runs, but a statement already executing may still
-finish on the server. An analysed plan comparison (`EXPLAIN ANALYZE` in plan
+rollback would end that transaction. `Ctrl+C` requests cancellation of a running
+benchmark (`Cancellation requested for the benchmark. The server may still be
+running.`) using PostgreSQL's cancel connection (waiting for the server to close
+the cancel socket within a bounded timeout) only while the timed statement is
+executing, never during `BEGIN` or `ROLLBACK`, and stops further iterations via
+a per-iteration flag. In rollback mode, a cancelled or failing iteration always
+executes `ROLLBACK` before releasing the session so nothing commits. Failed
+cancel delivery keeps cancellation pending so `Ctrl+C` can be retried; the
+benchmark overlay stays open (`Esc` waits) until the run reports (or the
+connection is lost), so no benchmark can be left running unseen behind a closed
+overlay. Quitting Ignatius stops later runs, but a statement already executing
+may still finish on the server. An analysed plan comparison (`EXPLAIN ANALYZE` in plan
 diff) takes the session the same way and refuses to start inside a transaction
 for the same reason; its overlay can still be closed mid-run, the comparison
 continues, and statements started afterwards wait for it. A workbench Cancel
@@ -745,7 +752,9 @@ read/write safety contract:
 
 - **Read vs write guards.** `replication`, `cluster`, `browse` reads,
   `plan-diff` (`ROLLBACK`-wrapped `EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)`),
-  `bench` (default transaction rollback isolation unless `--no-rollback`),
+  `bench` (default transaction rollback isolation unless `--no-rollback`, and
+  refuses non-read statements against production targets in either rollback mode
+  before credential fetch or connection unless `--allow-write` is passed),
   `snapshot capture|check`, and `runbook` (`--dry-run` or live mode without
   `--allow-writes`) refuse or isolate unintended mutations on target databases.
 - **Deterministic exit gates.** Gate failures (`bench --fail-on-regression-pct`,

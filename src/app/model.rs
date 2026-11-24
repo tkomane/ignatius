@@ -2466,6 +2466,8 @@ pub struct QueryBenchState {
     pub selected_idx: usize,
     /// Whether an async benchmark run is currently in flight.
     pub loading: bool,
+    /// Whether cancellation has been requested for the current benchmark run.
+    pub cancelling: bool,
     /// Status or diagnostic message shown in footer.
     pub status_message: Option<String>,
     /// Query B's run, waiting for Query A to report. A and B share the

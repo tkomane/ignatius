@@ -11799,7 +11799,7 @@ fn query_bench_overlay_splits_ab_queries_toggles_rollback_and_computes_verdict()
         bench
             .status_message
             .as_deref()
-            .is_some_and(|status| status.contains("cannot be cancelled yet"))
+            .is_some_and(|status| status.contains("Press Ctrl+C to cancel"))
     );
 
     // Escape closes the overlay once the run has reported.
@@ -12869,13 +12869,246 @@ fn a_new_benchmark_run_clears_the_last_runs_numbers() {
 }
 
 #[test]
-fn a_running_benchmark_offers_quit_not_close_in_the_footer() {
+fn a_running_benchmark_offers_cancel_and_quit_not_close_in_the_footer() {
     let mut model = connected();
     model.editor.set_text("SELECT 1;");
     update(&mut model, Message::Action(Action::QueryBench));
     let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay hints");
-    assert_eq!(hints, vec![(Action::Quit, "Quit")]);
+    assert_eq!(
+        hints,
+        vec![(Action::Cancel, "Cancel"), (Action::Quit, "Quit")]
+    );
     finish_bench_runs(&mut model);
     let hints = crate::app::discovery::overlay_hint_actions(&model).expect("overlay hints");
     assert!(hints.iter().any(|(action, _)| *action == Action::Dismiss));
+}
+
+#[test]
+fn cancelling_a_running_benchmark_updates_status_truthfully_is_retryable_and_skips_query_b() {
+    let mut model = connected();
+    model.editor.set_text("DELETE FROM orders; SELECT 1;");
+    let effects = update(&mut model, Message::Action(Action::QueryBench));
+    assert_eq!(effects.len(), 1);
+    let request = model.query_bench_request;
+
+    // First Ctrl+C sets cancelling=true, sets truthful status, emits CancelQueryBench.
+    let cancel_effects = update(&mut model, Message::Action(Action::Cancel));
+    assert_eq!(cancel_effects, vec![Effect::CancelQueryBench]);
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(bench.loading);
+    assert!(bench.cancelling);
+    assert_eq!(
+        bench.status_message.as_deref(),
+        Some("Cancellation requested for the benchmark. The server may still be running.")
+    );
+
+    // Esc still waits while cancelling, keeping the overlay open.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.query_bench.is_some());
+
+    // Failed cancel delivery keeps cancelling=true and stays retryable.
+    let fail_effects = update(
+        &mut model,
+        Message::QueryBenchCancelFailed("the cancellation request timed out".to_owned()),
+    );
+    assert!(fail_effects.is_empty());
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(bench.loading);
+    assert!(bench.cancelling);
+    assert!(bench.status_message.as_deref().is_some_and(|s| {
+        s.contains("Could not deliver benchmark cancellation")
+            && s.contains("timed out")
+            && s.contains("press Ctrl+C to retry")
+    }));
+
+    // Pressing Ctrl+C again retries cleanly.
+    let retry_effects = update(&mut model, Message::Action(Action::Cancel));
+    assert_eq!(retry_effects, vec![Effect::CancelQueryBench]);
+    assert_eq!(
+        model
+            .query_bench
+            .as_ref()
+            .and_then(|b| b.status_message.as_deref()),
+        Some("Cancellation requested for the benchmark. The server may still be running.")
+    );
+
+    // Server confirms 57014 cancellation -> skips Query B, reports rollback safety.
+    let after_cancel = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Cancelled,
+                "canceling statement due to user request",
+                "benchmark",
+            )
+            .technical("SQLSTATE", "57014"))),
+        },
+    );
+    assert!(
+        after_cancel.is_empty(),
+        "Query B must not run after A was cancelled"
+    );
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(!bench.loading);
+    assert!(!bench.cancelling);
+    assert!(bench.queued_candidate.is_none());
+    assert_eq!(
+        bench.status_message.as_deref(),
+        Some("Benchmark cancelled. Nothing was committed.")
+    );
+
+    // Late cancel failure arriving after completion is ignored.
+    update(
+        &mut model,
+        Message::QueryBenchCancelFailed("late failure".to_owned()),
+    );
+    assert_eq!(
+        model
+            .query_bench
+            .as_ref()
+            .and_then(|b| b.status_message.as_deref()),
+        Some("Benchmark cancelled. Nothing was committed.")
+    );
+
+    // Cancel while idle does nothing.
+    assert!(update(&mut model, Message::Action(Action::Cancel)).is_empty());
+}
+
+#[test]
+fn cancelling_a_rollback_off_benchmark_reports_honestly_without_claiming_nothing_committed() {
+    let mut model = bench_model(Environment::Development, false, "SELECT 1; SELECT 2;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    finish_bench_runs(&mut model);
+    update(&mut model, Message::Action(Action::Insert('m')));
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    assert_eq!(effects.len(), 1);
+    let request = model.query_bench_request;
+
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Cancel)),
+        vec![Effect::CancelQueryBench]
+    );
+    let after_cancel = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Cancelled,
+                "canceling statement due to user request",
+                "benchmark",
+            ))),
+        },
+    );
+    assert!(after_cancel.is_empty());
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert_eq!(
+        bench.status_message.as_deref(),
+        Some("Benchmark cancelled.")
+    );
+}
+
+#[test]
+fn query_a_finishing_after_cancel_request_skips_query_b() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 1; SELECT 2;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    let request = model.query_bench_request;
+
+    assert_eq!(
+        update(&mut model, Message::Action(Action::Cancel)),
+        vec![Effect::CancelQueryBench]
+    );
+    let stats = crate::bench::compute_bench_stats(
+        "Baseline (A)",
+        "SELECT 1",
+        &crate::bench::BenchConfig::default(),
+        &[crate::bench::BenchSample {
+            iteration: 1,
+            duration_ms: 1.0,
+            rows_returned: 1,
+        }],
+    );
+    let after_a = update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Ok(stats)),
+        },
+    );
+    assert!(
+        after_a.is_empty(),
+        "Query B must not launch after cancel request"
+    );
+    let bench = model.query_bench.as_ref().expect("bench overlay open");
+    assert!(!bench.loading);
+    assert!(!bench.cancelling);
+    assert!(bench.baseline.is_some());
+    assert!(bench.candidate.is_none());
+    assert!(
+        bench
+            .status_message
+            .as_deref()
+            .is_some_and(|s| s.contains("cancelled before Query B"))
+    );
+}
+
+#[test]
+fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished() {
+    let mut model = connected();
+    model.connection_profiles = vec![crate::app::connection_picker::ConnectionProfileSummary {
+        name: "staging".to_owned(),
+        description: None,
+        location: "localhost:5432".to_owned(),
+        database: "orders".to_owned(),
+        user: "app".to_owned(),
+        transport: "prefer".to_owned(),
+        environment: "staging".to_owned(),
+        read_only: false,
+        auth: None,
+        provider_presentation: None,
+        validation: None,
+    }];
+    model.editor.set_text("SELECT 1;");
+    update(&mut model, Message::Action(Action::QueryBench));
+    let first_req = model.query_bench_request;
+
+    assert!(!crate::app::discovery::action_is_available(
+        &model,
+        &Action::OpenConnectionPicker
+    ));
+    assert!(begin_connection(&mut model, Some("staging".to_owned())).is_empty());
+
+    update(&mut model, Message::Action(Action::Cancel));
+    // Even after cancel is requested, switching waits until server/benchmark reports.
+    assert!(begin_connection(&mut model, Some("staging".to_owned())).is_empty());
+
+    update(
+        &mut model,
+        Message::QueryBenchLoaded {
+            request: first_req,
+            target: crate::app::message::BenchTarget::Baseline,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Cancelled,
+                "cancelled",
+                "benchmark",
+            ))),
+        },
+    );
+    assert!(crate::app::discovery::action_is_available(
+        &model,
+        &Action::OpenConnectionPicker
+    ));
+    let switch_effects = begin_connection(&mut model, Some("staging".to_owned()));
+    assert_eq!(
+        switch_effects,
+        vec![Effect::ConnectProfile {
+            profile: Some("staging".to_owned()),
+        }]
+    );
+    assert!(model.query_bench.is_none());
+    assert_ne!(model.query_bench_request, first_req);
 }

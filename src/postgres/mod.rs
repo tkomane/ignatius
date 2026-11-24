@@ -22,6 +22,7 @@ pub mod snapshot;
 mod structured;
 pub mod tls;
 
+pub use bench::BenchmarkCancelHandle;
 pub use metadata::{ColumnInfo, ObjectKind, ObjectSummary, SchemaSummary, quote_identifier};
 pub use session::{
     CancelHandle, Session, SessionInfo, StreamEvent, StreamStop, connect, connect_reported,

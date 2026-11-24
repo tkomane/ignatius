@@ -10,9 +10,11 @@
 use ignatius::bench::BenchConfig;
 use ignatius::config::Config;
 use ignatius::connection::{ConnectionArgs, EnvSnapshot, resolve};
-use ignatius::postgres::{Session, session};
+use ignatius::diagnostics::DiagnosticKind;
+use ignatius::postgres::{BenchmarkCancelHandle, Session, session};
 use ignatius::query::result::{ExecutionStatus, JobId, TransactionState};
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 async fn fixture() -> Option<Session> {
     let Ok(uri) = std::env::var("IGNATIUS_TEST_PG_URI") else {
@@ -173,4 +175,190 @@ async fn an_analysed_plan_comparison_refuses_to_end_an_open_transaction() {
         session.execute("ROLLBACK", 10, JobId(9133)).await.status,
         ExecutionStatus::Succeeded
     );
+}
+
+#[tokio::test]
+async fn cancelling_an_in_flight_dml_benchmark_rolls_back_and_leaves_autocommit() {
+    let Some(session) = fixture().await else {
+        return;
+    };
+    let setup = session
+        .execute(
+            "CREATE TEMP TABLE cancel_bench_probe (id int); \
+             INSERT INTO cancel_bench_probe (id) VALUES (1), (2);",
+            10,
+            JobId(9140),
+        )
+        .await;
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+
+    let session = std::sync::Arc::new(session);
+    let cancel = BenchmarkCancelHandle::new();
+    let bench_session = std::sync::Arc::clone(&session);
+    let bench_cancel = cancel.clone();
+    let started = Instant::now();
+    let bench = tokio::spawn(async move {
+        bench_session
+            .run_benchmark_cancellable(
+                "DELETE FROM cancel_bench_probe WHERE id = 1 OR (id = 2 AND pg_sleep(5) IS NOT NULL)",
+                &BenchConfig::new(0, 2, true),
+                "Baseline (A)",
+                &bench_cancel,
+            )
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    cancel
+        .request_cancel()
+        .await
+        .expect("cancel request delivered and server closed cancel socket");
+
+    let err = tokio::time::timeout(Duration::from_secs(4), bench)
+        .await
+        .expect("cancelled benchmark finishes promptly")
+        .expect("benchmark task joins")
+        .expect_err("cancelled benchmark returns Diagnostic");
+    assert_eq!(err.kind, DiagnosticKind::Cancelled, "{err:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "cancellation did not wait for 5s sleep: {:?}",
+        started.elapsed()
+    );
+
+    let after = session
+        .execute("SELECT count(*) FROM cancel_bench_probe", 10, JobId(9141))
+        .await;
+    assert_eq!(after.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        after.transaction,
+        TransactionState::Autocommit,
+        "cancelled rollback benchmark must leave the session in Autocommit"
+    );
+    let count = after.statements[0]
+        .result_set
+        .as_ref()
+        .expect("count result")
+        .rows[0][0]
+        .display();
+    assert_eq!(count, "2", "rolled-back DML must leave row count untouched");
+}
+
+#[tokio::test]
+async fn cancelling_a_benchmark_waiting_on_the_gate_does_not_block_or_cancel_workbench() {
+    let Some(session) = fixture().await else {
+        return;
+    };
+    let session = std::sync::Arc::new(session);
+    let wb_session = std::sync::Arc::clone(&session);
+    let workbench = tokio::spawn(async move {
+        wb_session
+            .execute("SELECT pg_sleep(0.4)", 10, JobId(9150))
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let cancel = BenchmarkCancelHandle::new();
+    let bench_session = std::sync::Arc::clone(&session);
+    let bench_cancel = cancel.clone();
+    let bench = tokio::spawn(async move {
+        bench_session
+            .run_benchmark_cancellable(
+                "SELECT 1",
+                &BenchConfig::new(0, 1, true),
+                "Baseline (A)",
+                &bench_cancel,
+            )
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let cancel_started = Instant::now();
+    cancel
+        .request_cancel()
+        .await
+        .expect("cancelling while waiting on gate does not fail");
+    assert!(
+        cancel_started.elapsed() < Duration::from_millis(150),
+        "request_cancel must never block on user_sql_gate"
+    );
+
+    let bench_err = tokio::time::timeout(Duration::from_secs(2), bench)
+        .await
+        .expect("bench stops promptly while gate is busy")
+        .expect("bench joins")
+        .expect_err("cancelled before BEGIN");
+    assert_eq!(bench_err.kind, DiagnosticKind::Cancelled);
+
+    let wb_res = workbench.await.expect("workbench task joins");
+    assert_eq!(
+        wb_res.status,
+        ExecutionStatus::Succeeded,
+        "benchmark cancel must never cancel an unrelated workbench statement"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_an_in_flight_tls_benchmark_drains_cancel_eof_and_recovers() {
+    let Ok(raw_uri) = std::env::var("IGNATIUS_TEST_PG_TLS_URI") else {
+        eprintln!("skipping: IGNATIUS_TEST_PG_TLS_URI is not set");
+        return;
+    };
+    if raw_uri.is_empty() {
+        eprintln!("skipping: IGNATIUS_TEST_PG_TLS_URI is empty");
+        return;
+    }
+    let ca = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docker/tls/generated/ca.crt");
+    let uri = if raw_uri.contains('?') {
+        raw_uri
+    } else {
+        format!("{raw_uri}?sslmode=verify-full&sslrootcert={}", ca.display())
+    };
+    let target = resolve(
+        Some(&uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &Config::default().connection,
+    )
+    .expect("TLS fixture resolves");
+    let session = tokio::time::timeout(
+        Duration::from_secs(5),
+        session::connect(&target, Duration::ZERO),
+    )
+    .await
+    .expect("TLS connect bounded")
+    .expect("TLS fixture connects");
+    assert!(session.info().tls.is_encrypted());
+
+    let session = std::sync::Arc::new(session);
+    let cancel = BenchmarkCancelHandle::new();
+    let bench_session = std::sync::Arc::clone(&session);
+    let bench_cancel = cancel.clone();
+    let bench = tokio::spawn(async move {
+        bench_session
+            .run_benchmark_cancellable(
+                "SELECT pg_sleep(5)",
+                &BenchConfig::new(0, 1, true),
+                "Baseline (A)",
+                &bench_cancel,
+            )
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    cancel
+        .request_cancel()
+        .await
+        .expect("TLS cancel packet delivered and EOF drained");
+
+    let err = tokio::time::timeout(Duration::from_secs(4), bench)
+        .await
+        .expect("TLS benchmark cancelled promptly")
+        .expect("bench joins")
+        .expect_err("cancelled TLS benchmark errors");
+    assert_eq!(err.kind, DiagnosticKind::Cancelled, "{err:?}");
+
+    let follow_up = session.execute("SELECT 1", 10, JobId(9160)).await;
+    assert_eq!(follow_up.status, ExecutionStatus::Succeeded);
+    assert_eq!(follow_up.transaction, TransactionState::Autocommit);
 }

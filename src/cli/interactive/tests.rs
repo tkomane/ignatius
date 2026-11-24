@@ -2208,3 +2208,58 @@ fn a_benchmark_report_is_sent_once_even_when_the_task_ends_without_one() {
         "a sent report is not repeated on drop"
     );
 }
+
+#[tokio::test]
+async fn active_bench_cancel_slot_isolates_runs_and_ignores_stale_cleanup() {
+    let slot: ActiveBenchCancel = Arc::new(std::sync::Mutex::new(None));
+    let cancel_a = crate::postgres::BenchmarkCancelHandle::new();
+    let cancel_b = crate::postgres::BenchmarkCancelHandle::new();
+
+    *slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((1, cancel_a.clone()));
+    let guard_a = BenchCancelSlotGuard {
+        slot: Arc::clone(&slot),
+        cancel: cancel_a.clone(),
+    };
+
+    // If run B replaced run A in the slot, dropping A's guard must not clear B.
+    *slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((1, cancel_b.clone()));
+    drop(guard_a);
+    let held = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert!(
+        held.as_ref()
+            .is_some_and(|(req, handle)| *req == 1 && handle.ptr_eq(&cancel_b))
+    );
+
+    // Dropping B's guard clears the active slot cleanly.
+    drop(BenchCancelSlotGuard {
+        slot: Arc::clone(&slot),
+        cancel: cancel_b.clone(),
+    });
+    assert!(
+        slot.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn spawn_cancel_query_bench_marks_active_handle_cancelled_without_blocking() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let slot: ActiveBenchCancel = Arc::new(std::sync::Mutex::new(None));
+    let cancel = crate::postgres::BenchmarkCancelHandle::new();
+    *slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((42, cancel.clone()));
+
+    spawn_cancel_query_bench(tx, Arc::clone(&slot), 42, cancel.clone());
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(cancel.is_cancelled());
+    assert!(rx.try_recv().is_err(), "successful cancel sends no error");
+}
