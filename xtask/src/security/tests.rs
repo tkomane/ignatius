@@ -142,8 +142,18 @@ fn gitleaks_history_guard_catches_zero_commit_worktree_failures() {
     assert!(gitleaks_output_scanned_history(
         "INF 412 commits scanned.\nINF no leaks found\n"
     ));
+    assert!(gitleaks_output_scanned_history(
+        "INF 10 commits scanned.\nINF no leaks found\n"
+    ));
+    assert!(gitleaks_output_scanned_history(
+        "INF 310 commits scanned.\nINF no leaks found\n"
+    ));
+    assert!(gitleaks_output_scanned_history(
+        "INF 1 commit scanned.\nINF no leaks found\n"
+    ));
     assert!(!gitleaks_output_scanned_history(
         "ERR [git] fatal: not a git repository: /host/.git/worktrees/w\nINF 0 commits scanned.\n"
     ));
     assert!(!gitleaks_output_scanned_history("INF 0 commits scanned.\n"));
+    assert!(!gitleaks_output_scanned_history("INF no leaks found\n"));
 }

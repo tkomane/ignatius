@@ -463,20 +463,29 @@ fn run_container_or_local_tool(
     GateOutcome::Skip(reason)
 }
 
-fn run_docker_readonly(root: &Path, image: &str, tool_args: &[&str]) -> Result<(), String> {
-    let volume = format!("{}:/repo:ro", root.display());
+fn docker_readonly_args<'a>(
+    volume: &'a str,
+    image: &'a str,
+    tool_args: &[&'a str],
+) -> Vec<&'a str> {
     let mut args = vec![
         "run",
         "--rm",
         "--network",
         "none",
         "--volume",
-        &volume,
+        volume,
         "--workdir",
         "/repo",
         image,
     ];
     args.extend_from_slice(tool_args);
+    args
+}
+
+fn run_docker_readonly(root: &Path, image: &str, tool_args: &[&str]) -> Result<(), String> {
+    let volume = format!("{}:/repo:ro", root.display());
+    let args = docker_readonly_args(&volume, image, tool_args);
     super::run("docker", &args, &[])
 }
 
@@ -486,18 +495,7 @@ fn run_gitleaks(docker_available: bool, root: &Path, pinned_image: &str) -> Gate
 
     if docker_available && has_git_dir {
         let volume = format!("{}:/repo:ro", root.display());
-        let mut args = vec![
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--volume",
-            &volume,
-            "--workdir",
-            "/repo",
-            pinned_image,
-        ];
-        args.extend_from_slice(&gitleaks_args);
+        let args = docker_readonly_args(&volume, pinned_image, &gitleaks_args);
         return run_gitleaks_checked("docker", &args, root);
     }
 
@@ -563,7 +561,28 @@ fn run_gitleaks_checked(program: &str, args: &[&str], root: &Path) -> GateOutcom
 /// Rejects false-green `gitleaks git` runs where git could not open the repo
 /// and `gitleaks` still exited 0 after scanning zero commits.
 pub(crate) fn gitleaks_output_scanned_history(output: &str) -> bool {
-    !output.contains("fatal: not a git repository") && !output.contains("0 commits scanned")
+    if output.contains("fatal: not a git repository") {
+        return false;
+    }
+
+    let mut saw_positive = false;
+    for line in output.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        for window in words.windows(3) {
+            let [count_token, unit_token, scanned_token] = [window[0], window[1], window[2]];
+            if matches!(unit_token, "commit" | "commits")
+                && scanned_token.trim_end_matches('.') == "scanned"
+                && let Ok(count) = count_token.parse::<u64>()
+            {
+                if count == 0 {
+                    return false;
+                }
+                saw_positive = true;
+            }
+        }
+    }
+
+    saw_positive
 }
 
 fn run_cargo_deny(root: &Path) -> GateOutcome {
