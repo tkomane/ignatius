@@ -98,8 +98,87 @@ fn analyzed_metrics_compare_rows_per_loop_and_mark_measured_time() {
     assert_eq!(root.estimate_ratio(), Some(1.0));
     assert!(root.children[0].estimate_mismatch());
     assert_eq!(document.execution_time_ms, Some(25.7));
-    assert_eq!(document.attention_path, Vec::<usize>::new());
+    // Root inclusive is 24.0 ms, child Seq Scan is 14.0 ms, so root self time is 10.0 ms
+    // and the bottleneck attention marker lands on child Seq Scan ([0]).
+    assert_eq!(root.exclusive_time_ms(), Some(10.0));
+    assert_eq!(root.children[0].exclusive_time_ms(), Some(14.0));
+    assert_eq!(document.attention_path, vec![0]);
     assert_eq!(document.attention_basis(), AttentionBasis::MeasuredTime);
+}
+
+#[test]
+fn exclusive_self_time_and_cost_identify_child_bottleneck_and_share_of_root() {
+    let analyzed_tree = r#"[
+      {
+        "Plan": {
+          "Node Type": "Nested Loop",
+          "Startup Cost": 0.42,
+          "Total Cost": 60.0,
+          "Plan Rows": 10,
+          "Actual Total Time": 20.0,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              "Startup Cost": 0.0,
+              "Total Cost": 45.0,
+              "Plan Rows": 100,
+              "Actual Total Time": 14.0,
+              "Actual Loops": 1
+            },
+            {
+              "Node Type": "Index Scan",
+              "Relation Name": "customers",
+              "Startup Cost": 0.28,
+              "Total Cost": 10.0,
+              "Plan Rows": 1,
+              "Actual Total Time": 0.25,
+              "Actual Loops": 12
+            }
+          ]
+        }
+      }
+    ]"#;
+    let doc = PlanDocument::parse(analyzed_tree, true).expect("valid analyzed plan");
+    assert_eq!(doc.attention_path, vec![0]);
+    // Root inclusive 20.0, children 14.0 + (0.25 * 12 = 3.0) = 17.0 -> root self = 3.0
+    assert!((doc.root.exclusive_time_ms().unwrap() - 3.0).abs() < 1e-9);
+    assert!((doc.root.children[0].exclusive_time_ms().unwrap() - 14.0).abs() < 1e-9);
+    assert!((doc.root.children[1].exclusive_time_ms().unwrap() - 3.0).abs() < 1e-9);
+    assert!((doc.root.share_of_root(&doc.root, true).unwrap() - 0.15).abs() < 1e-9);
+    assert!((doc.root.children[0].share_of_root(&doc.root, true).unwrap() - 0.70).abs() < 1e-9);
+    assert!((doc.root.children[1].share_of_root(&doc.root, true).unwrap() - 0.15).abs() < 1e-9);
+
+    let plain_doc = PlanDocument::parse(analyzed_tree, false).expect("valid plain plan");
+    assert_eq!(plain_doc.attention_path, vec![0]);
+    assert!((plain_doc.root.exclusive_cost().unwrap() - 5.0).abs() < 1e-9);
+    assert!((plain_doc.root.children[0].exclusive_cost().unwrap() - 45.0).abs() < 1e-9);
+    assert!(
+        (plain_doc.root.children[0]
+            .share_of_root(&plain_doc.root, false)
+            .unwrap()
+            - 0.75)
+            .abs()
+            < 1e-9
+    );
+
+    // Child exceeding parent total clamps self metrics to 0.0 and share to <= 1.0.
+    let plain = PlanDocument::parse(PLAIN, false).expect("valid plain");
+    assert_eq!(plain.root.exclusive_cost(), Some(0.0));
+    assert_eq!(
+        plain.root.children[0].share_of_root(&plain.root, false),
+        Some(1.0)
+    );
+
+    // Zero root total yields None rather than NaN.
+    let zero_root = PlanDocument::parse(
+        r#"[{"Plan":{"Node Type":"Result","Total Cost":0.0,"Actual Total Time":0.0,"Actual Loops":1}}]"#,
+        true,
+    )
+    .expect("zero plan");
+    assert_eq!(zero_root.root.share_of_root(&zero_root.root, true), None);
+    assert_eq!(zero_root.root.share_of_root(&zero_root.root, false), None);
 }
 
 #[test]

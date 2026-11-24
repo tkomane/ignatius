@@ -708,3 +708,272 @@ fn an_empty_palette_query_shows_a_muted_placeholder_that_typing_replaces() {
     assert!(line.contains("Type to filter"), "{line:?}");
     assert!(line.is_ascii(), "{line:?}");
 }
+
+#[test]
+fn palette_query_highlights_matched_substrings_and_subsequences_without_changing_text() {
+    let entries = vec![
+        PaletteEntry {
+            group: "Editor",
+            label: "Format first".into(),
+            detail: "First formatter".into(),
+            command: PaletteCommand::Run(Action::FormatBuffer),
+        },
+        PaletteEntry {
+            group: "Editor",
+            label: "Format second".into(),
+            detail: "Second formatter".into(),
+            command: PaletteCommand::Run(Action::FormatBuffer),
+        },
+        PaletteEntry {
+            group: "Session",
+            label: "Switch theme".into(),
+            detail: "Cycle theme".into(),
+            command: PaletteCommand::Run(Action::SwitchTheme),
+        },
+    ];
+    let p_true = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+
+    // Non-empty query highlights contiguous substring matches in unselected rows
+    // with Focus + BOLD + UNDERLINED, keeping plain text identical.
+    let mut sub_pal = Palette::new(entries.clone());
+    for ch in "for".chars() {
+        sub_pal.push(ch);
+    }
+    sub_pal.selected = 0;
+
+    let mut plain_pal = Palette::new(entries.clone());
+    plain_pal.selected = 0;
+
+    let mut sub_buf = Buffer::empty(AREA);
+    render_palette(&sub_pal, &p_true, AREA, &mut sub_buf);
+    let mut plain_buf = Buffer::empty(AREA);
+    render_palette(&plain_pal, &p_true, AREA, &mut plain_buf);
+
+    let sub_str = buffer_to_string(&sub_buf);
+    let plain_str = buffer_to_string(&plain_buf);
+    // Matched rows contain exact labels with zero extra characters inserted.
+    assert!(sub_str.contains("Format first"), "{sub_str}");
+    assert!(sub_str.contains("Format second"), "{sub_str}");
+    assert!(plain_str.contains("Format second"), "{plain_str}");
+
+    let focus_fg = p_true.theme.color(Token::Focus).unwrap();
+    let text_fg = p_true.theme.color(Token::Text).unwrap();
+    let (fx, fy) = cell(&sub_buf, "Format second");
+    for offset in 0..3 {
+        let c = &sub_buf[(fx + offset, fy)];
+        assert_eq!(c.fg, focus_fg, "matched char {offset} should use Focus fg");
+        assert!(c.modifier.contains(Modifier::BOLD | Modifier::UNDERLINED));
+    }
+    let unmatched_m = &sub_buf[(fx + 3, fy)];
+    assert_eq!(unmatched_m.fg, text_fg);
+    assert!(!unmatched_m.modifier.contains(Modifier::UNDERLINED));
+
+    // Selected row stays uniformly styled in Selection.
+    let (sx, sy) = cell(&sub_buf, "Format first");
+    let sel_fg = p_true.theme.style(Token::Selection).fg.unwrap();
+    assert_eq!(sub_buf[(sx, sy)].fg, sel_fg);
+    assert!(!sub_buf[(sx, sy)].modifier.contains(Modifier::UNDERLINED));
+
+    // Sparse subsequence match (`"fs"` against `"Format second"`).
+    // Select row 1 ("Format first") so row 0 ("Format second") is unselected.
+    let mut seq_pal = Palette::new(entries);
+    for ch in "fs".chars() {
+        seq_pal.push(ch);
+    }
+    seq_pal.selected = 1;
+    let mut seq_buf = Buffer::empty(AREA);
+    render_palette(&seq_pal, &p_true, AREA, &mut seq_buf);
+    let (qx, qy) = cell(&seq_buf, "Format second");
+    assert!(
+        seq_buf[(qx, qy)]
+            .modifier
+            .contains(Modifier::BOLD | Modifier::UNDERLINED),
+        "leading 'F' in subsequence must be highlighted"
+    );
+    assert_eq!(seq_buf[(qx + 7, qy)].symbol(), "s");
+    assert!(
+        seq_buf[(qx + 7, qy)]
+            .modifier
+            .contains(Modifier::BOLD | Modifier::UNDERLINED),
+        "'s' in 'second' must be highlighted for subsequence 'fs'"
+    );
+    assert!(
+        !seq_buf[(qx + 1, qy)]
+            .modifier
+            .contains(Modifier::UNDERLINED)
+    );
+
+    // At ColorDepth::None, plain text remains clean ASCII without color.
+    let p_none = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut none_buf = Buffer::empty(AREA);
+    render_palette(&sub_pal, &p_none, AREA, &mut none_buf);
+    let none_text = buffer_to_string(&none_buf);
+    assert!(none_text.is_ascii(), "{none_text}");
+    let (nx, ny) = cell(&none_buf, "Format second");
+    assert_eq!(none_buf[(nx, ny)].fg, Color::Reset);
+}
+
+#[test]
+fn palette_preview_paints_sql_block_and_single_line_sql_on_full_width_stripe() {
+    let long_sql = "SELECT id, email, status FROM orders WHERE created_at >= now() - interval '7 days' ORDER BY id DESC;";
+    let single_line_pal = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "recent_orders".into(),
+        detail: long_sql.into(),
+        group: "Saved",
+        command: PaletteCommand::Open("recent_orders".into()),
+    }]);
+    let block_pal = Palette::over_saved_queries(vec![PaletteEntry {
+        label: "users_query".into(),
+        detail: "SELECT id FROM users\nWHERE active = true;".into(),
+        group: "Saved",
+        command: PaletteCommand::Open("users_query".into()),
+    }]);
+
+    for pal in [&single_line_pal, &block_pal] {
+        let p_true = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+            Glyphs::new(GlyphTier::Unicode),
+            false,
+        );
+        let mut true_buf = Buffer::empty(AREA);
+        render_palette(pal, &p_true, AREA, &mut true_buf);
+
+        let stripe_bg = p_true.theme.surface(Token::SurfaceAlt).bg.unwrap();
+        let kw_fg = p_true.theme.color(Token::SyntaxKeyword).unwrap();
+        let box_area = super::palette_box(pal, &p_true, AREA);
+        let inner_w = box_area.width.saturating_sub(2);
+        let preview_w = inner_w * 60 / 100;
+        let list_w = inner_w.saturating_sub(preview_w);
+        let divider_x = box_area.x + 1 + list_w;
+        let preview_x = divider_x + 2;
+        let preview_end = box_area.right().saturating_sub(1);
+
+        let sel_pos = (box_area.y + 2..box_area.bottom() - 1)
+            .find_map(|y| {
+                let row: String = (preview_x..preview_end)
+                    .map(|x| true_buf[(x, y)].symbol())
+                    .collect();
+                row.find("SELECT")
+                    .map(|byte| (preview_x + row[..byte].chars().count() as u16, y))
+            })
+            .expect("SELECT in preview SQL card");
+        assert_eq!(true_buf[sel_pos].fg, kw_fg);
+        for x in preview_x..preview_end {
+            assert_eq!(
+                true_buf[(x, sel_pos.1)].bg,
+                stripe_bg,
+                "cell ({x}, {}) in SQL card should carry SurfaceAlt stripe background",
+                sel_pos.1
+            );
+        }
+
+        // Across None depth the preview stays readable plain text with Reset bg.
+        let p_none = Presentation::new(
+            Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+            Glyphs::new(GlyphTier::Ascii),
+            false,
+        );
+        let mut none_buf = Buffer::empty(AREA);
+        render_palette(pal, &p_none, AREA, &mut none_buf);
+        assert!(buffer_to_string(&none_buf).is_ascii());
+        let sel_none = cell(&none_buf, "SELECT");
+        assert_eq!(none_buf[sel_none].bg, Color::Reset);
+    }
+}
+
+#[test]
+fn palette_divider_draws_scroll_thumb_without_consuming_extra_columns_or_affecting_hit_row() {
+    let entries: Vec<PaletteEntry> = (0..25)
+        .map(|i| PaletteEntry {
+            group: "Saved",
+            label: format!("saved_query_{i:02}"),
+            detail: format!("SELECT {i};"),
+            command: PaletteCommand::Open(format!("saved_query_{i:02}")),
+        })
+        .collect();
+    let mut pal = Palette::over_saved_queries(entries);
+
+    let p_uni = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let box_area = super::palette_box(&pal, &p_uni, AREA);
+    let inner_w = box_area.width.saturating_sub(2);
+    let preview_w = inner_w * 60 / 100;
+    let list_w = inner_w - preview_w;
+    let divider_x = box_area.x + 1 + list_w;
+    let first_list_y = box_area.y + 2;
+    let end_list_y = box_area.bottom().saturating_sub(2);
+
+    let mut top_buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_uni, AREA, &mut top_buf);
+    let focus_fg = p_uni.theme.color(Token::Focus).unwrap();
+    let border_fg = p_uni.theme.color(Token::Border).unwrap();
+
+    let top_thumbs: Vec<u16> = (first_list_y..=end_list_y)
+        .filter(|&y| top_buf[(divider_x, y)].symbol() == "\u{2503}")
+        .collect();
+    assert!(!top_thumbs.is_empty(), "expected ┃ thumb on divider_x");
+    assert_eq!(top_buf[(divider_x, top_thumbs[0])].fg, focus_fg);
+    let non_thumb_y = (first_list_y..=end_list_y)
+        .find(|y| !top_thumbs.contains(y))
+        .expect("track row");
+    assert_eq!(top_buf[(divider_x, non_thumb_y)].symbol(), "\u{2502}");
+    assert_eq!(top_buf[(divider_x, non_thumb_y)].fg, border_fg);
+
+    // Hit testing stays identical along list column and rejects divider column.
+    assert_eq!(
+        super::hit_row(&pal, &p_uni, AREA, box_area.x + 1, first_list_y),
+        Some(0)
+    );
+    assert_eq!(
+        super::hit_row(&pal, &p_uni, AREA, divider_x, first_list_y),
+        None
+    );
+
+    // Moving selection near bottom moves thumb down.
+    pal.selected = 24;
+    let mut bot_buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_uni, AREA, &mut bot_buf);
+    let bot_thumbs: Vec<u16> = (first_list_y..=end_list_y)
+        .filter(|&y| bot_buf[(divider_x, y)].symbol() == "\u{2503}")
+        .collect();
+    assert!(bot_thumbs[0] > top_thumbs[0], "thumb should scroll down");
+
+    // In ASCII mode, thumb renders as `#` cleanly.
+    let p_ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_ascii, AREA, &mut ascii_buf);
+    assert!(buffer_to_string(&ascii_buf).is_ascii());
+    assert!(
+        (first_list_y..=end_list_y).any(|y| ascii_buf[(divider_x, y)].symbol() == "#"),
+        "ASCII palette divider should show '#' scroll thumb"
+    );
+
+    // When all matches fit on screen, divider stays plain track without thumb.
+    let short_pal = Palette::over_saved_queries(vec![PaletteEntry {
+        group: "Saved",
+        label: "only_one".into(),
+        detail: "SELECT 1;".into(),
+        command: PaletteCommand::Open("only_one".into()),
+    }]);
+    let mut short_buf = Buffer::empty(AREA);
+    render_palette(&short_pal, &p_uni, AREA, &mut short_buf);
+    assert!(
+        (first_list_y..=end_list_y).all(|y| short_buf[(divider_x, y)].symbol() == "\u{2502}"),
+        "unscrollable list should not render a thumb"
+    );
+}

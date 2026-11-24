@@ -173,7 +173,7 @@ impl PlanDocument {
     /// Whether any node has the metric needed for an attention marker.
     #[must_use]
     pub fn has_attention(&self) -> bool {
-        self.root.attention_score(self.analyzed).is_some()
+        self.root.attention_path(self.analyzed).is_some()
     }
 }
 
@@ -228,20 +228,72 @@ impl PlanNode {
             .is_some_and(|ratio| ratio >= 10.0 || ratio <= 0.1)
     }
 
+    /// Observed inclusive time across all executions of this node, in milliseconds.
+    fn inclusive_time_ms(&self) -> Option<f64> {
+        let time = self.actual_total_time?;
+        let loops = self.actual_loops?;
+        if time.is_finite() && loops.is_finite() && time >= 0.0 && loops > 0.0 {
+            let total = time * loops;
+            total.is_finite().then_some(total)
+        } else {
+            None
+        }
+    }
+
+    /// Estimated inclusive total cost in planner cost units.
+    fn inclusive_cost(&self) -> Option<f64> {
+        self.total_cost
+            .filter(|cost| cost.is_finite() && *cost >= 0.0)
+    }
+
+    /// Observed self time in milliseconds: inclusive time minus direct children's inclusive time,
+    /// clamped to at least zero.
+    #[must_use]
+    pub fn exclusive_time_ms(&self) -> Option<f64> {
+        let inclusive = self.inclusive_time_ms()?;
+        let children: f64 = self
+            .children
+            .iter()
+            .filter_map(Self::inclusive_time_ms)
+            .sum();
+        let self_time = (inclusive - children).max(0.0);
+        self_time.is_finite().then_some(self_time)
+    }
+
+    /// Estimated self cost in planner cost units: total cost minus direct children's total cost,
+    /// clamped to at least zero.
+    #[must_use]
+    pub fn exclusive_cost(&self) -> Option<f64> {
+        let inclusive = self.inclusive_cost()?;
+        let children: f64 = self.children.iter().filter_map(Self::inclusive_cost).sum();
+        let self_cost = (inclusive - children).max(0.0);
+        self_cost.is_finite().then_some(self_cost)
+    }
+
+    /// This node's proportional share (`0.0..=1.0`) of `root`'s inclusive metric,
+    /// using self time when `analyzed` is true and self cost otherwise.
+    #[must_use]
+    pub fn share_of_root(&self, root: &Self, analyzed: bool) -> Option<f64> {
+        let self_score = self.attention_score(analyzed)?;
+        let root_total = if analyzed {
+            root.inclusive_time_ms()
+        } else {
+            root.inclusive_cost()
+        }?;
+        if !root_total.is_finite() || root_total <= 0.0 {
+            return None;
+        }
+        let share = (self_score / root_total).clamp(0.0, 1.0);
+        share.is_finite().then_some(share)
+    }
+
     /// The score used for the document's attention marker.
     #[must_use]
     pub fn attention_score(&self, analyzed: bool) -> Option<f64> {
         if analyzed {
-            let time = self.actual_total_time?;
-            let loops = self.actual_loops?;
-            if time.is_finite() && loops.is_finite() && time >= 0.0 && loops > 0.0 {
-                Some(time * loops)
-            } else {
-                None
-            }
+            self.exclusive_time_ms()
         } else {
-            self.total_cost
-                .filter(|cost| cost.is_finite() && *cost >= 0.0)
+            self.exclusive_cost()
         }
     }
 

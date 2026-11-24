@@ -237,8 +237,221 @@ fn match_count_label(count: usize) -> String {
     }
 }
 
+fn matched_label_spans(label: &str, query: &str, theme: &Theme) -> Vec<Span<'static>> {
+    let trimmed = query.trim();
+    let base_style = theme.style(Token::Text);
+    if trimmed.is_empty() || label.is_empty() {
+        return vec![Span::styled(label.to_owned(), base_style)];
+    }
+
+    let chars: Vec<(usize, usize, char)> = label
+        .char_indices()
+        .map(|(start, ch)| {
+            (
+                start,
+                start + ch.len_utf8(),
+                ch.to_lowercase().next().unwrap_or(ch),
+            )
+        })
+        .collect();
+    let needle: Vec<char> = trimmed
+        .chars()
+        .map(|ch| ch.to_lowercase().next().unwrap_or(ch))
+        .collect();
+    if needle.is_empty() || needle.len() > chars.len() {
+        return vec![Span::styled(label.to_owned(), base_style)];
+    }
+
+    let mut matched = vec![false; chars.len()];
+    let mut found_contiguous = false;
+    let mut idx = 0;
+    while idx + needle.len() <= chars.len() {
+        if (0..needle.len()).all(|k| chars[idx + k].2 == needle[k]) {
+            matched[idx..idx + needle.len()].fill(true);
+            found_contiguous = true;
+            idx += needle.len();
+        } else {
+            idx += 1;
+        }
+    }
+
+    if !found_contiguous {
+        let raw: Vec<char> = label.chars().collect();
+        let position_score = |index: usize| -> i32 {
+            let boundary = index == 0
+                || matches!(raw.get(index - 1), Some('_' | '.' | ' ' | '-' | '/'))
+                || (raw[index].is_uppercase()
+                    && raw.get(index - 1).is_some_and(char::is_ascii_lowercase));
+            10 + if boundary { 14 } else { 0 }
+        };
+        const UNMATCHED: i32 = i32::MIN / 4;
+        let n = needle.len();
+        let m = chars.len();
+        let mut dp = vec![vec![UNMATCHED; m]; n];
+        let mut prev = vec![vec![None; m]; n];
+        for (i, needle_ch) in needle.iter().enumerate() {
+            let mut best_gap = UNMATCHED;
+            let mut best_gap_idx = None;
+            for j in 0..m {
+                if i > 0 && j >= 2 && dp[i - 1][j - 2] > best_gap {
+                    best_gap = dp[i - 1][j - 2];
+                    best_gap_idx = Some(j - 2);
+                }
+                if chars[j].2 != *needle_ch {
+                    continue;
+                }
+                if i == 0 {
+                    dp[0][j] = position_score(j);
+                } else {
+                    let consec = if j > 0 && dp[i - 1][j - 1] > UNMATCHED {
+                        dp[i - 1][j - 1] + 18
+                    } else {
+                        UNMATCHED
+                    };
+                    if consec >= best_gap && consec > UNMATCHED {
+                        dp[i][j] = consec + position_score(j);
+                        prev[i][j] = Some(j - 1);
+                    } else if best_gap > UNMATCHED {
+                        dp[i][j] = best_gap + position_score(j);
+                        prev[i][j] = best_gap_idx;
+                    }
+                }
+            }
+        }
+        if let Some((mut j, _)) = dp[n - 1]
+            .iter()
+            .enumerate()
+            .max_by_key(|&(_, &score)| score)
+            .filter(|&(_, &score)| score > UNMATCHED)
+        {
+            for i in (0..n).rev() {
+                matched[j] = true;
+                if i > 0 {
+                    let Some(p) = prev[i][j] else {
+                        break;
+                    };
+                    j = p;
+                }
+            }
+        }
+    }
+
+    let highlight_style = theme
+        .style(Token::Focus)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let mut spans = Vec::new();
+    let mut run_start = 0usize;
+    while run_start < chars.len() {
+        let is_match = matched[run_start];
+        let mut run_end = run_start + 1;
+        while run_end < chars.len() && matched[run_end] == is_match {
+            run_end += 1;
+        }
+        let byte_start = chars[run_start].0;
+        let byte_end = chars[run_end - 1].1;
+        spans.push(Span::styled(
+            label[byte_start..byte_end].to_owned(),
+            if is_match {
+                highlight_style
+            } else {
+                base_style
+            },
+        ));
+        run_start = run_end;
+    }
+    spans
+}
+
+fn push_wrapped_stripe_sql_lines(
+    preview_lines: &mut Vec<Line<'static>>,
+    spans: Vec<Span<'static>>,
+    preview_w: usize,
+    theme: &Theme,
+) {
+    let stripe = theme.stripe();
+    if preview_w == 0 {
+        preview_lines.push(Line::from(spans).style(stripe));
+        return;
+    }
+
+    let mut cells: Vec<(char, Style, usize)> = Vec::new();
+    for span in spans {
+        for ch in span.content.chars() {
+            let mut buf = [0u8; 4];
+            let w = display_width(ch.encode_utf8(&mut buf));
+            cells.push((ch, span.style, w));
+        }
+    }
+    if cells.is_empty() {
+        preview_lines.push(Line::from(Span::styled(" ".repeat(preview_w), stripe)).style(stripe));
+        return;
+    }
+
+    let emit_slice = |out: &mut Vec<Line<'static>>, slice: &[(char, Style, usize)]| {
+        let mut line_spans = Vec::new();
+        let mut run = String::new();
+        let mut run_style: Option<Style> = None;
+        let mut used = 0usize;
+        for &(ch, style, w) in slice {
+            if run_style != Some(style) {
+                if let Some(prev) = run_style {
+                    line_spans.push(Span::styled(std::mem::take(&mut run), prev));
+                }
+                run_style = Some(style);
+            }
+            run.push(ch);
+            used += w;
+        }
+        if let Some(prev) = run_style {
+            line_spans.push(Span::styled(run, prev));
+        }
+        if used < preview_w {
+            line_spans.push(Span::styled(" ".repeat(preview_w - used), stripe));
+        }
+        out.push(Line::from(line_spans).style(stripe));
+    };
+
+    let mut start = 0usize;
+    while start < cells.len() {
+        let mut width_acc = 0usize;
+        let mut end = start;
+        let mut last_space = None;
+        let mut seen_non_space = false;
+        while end < cells.len() {
+            let (ch, _, w) = cells[end];
+            if width_acc + w > preview_w && end > start {
+                break;
+            }
+            if ch.is_whitespace() {
+                if seen_non_space {
+                    last_space = Some(end);
+                }
+            } else {
+                seen_non_space = true;
+            }
+            width_acc += w;
+            end += 1;
+        }
+        if end < cells.len()
+            && let Some(space_idx) = last_space
+            && space_idx > start
+        {
+            emit_slice(preview_lines, &cells[start..space_idx]);
+            start = space_idx + 1;
+        } else {
+            emit_slice(preview_lines, &cells[start..end]);
+            start = end;
+        }
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "match line rendering needs entry, query, selection, layout widths, glyph tier and theme"
+)]
 fn build_palette_match_line(
     entry: &crate::app::palette::PaletteEntry,
+    query: &str,
     selected: bool,
     show_detail: bool,
     text_budget: usize,
@@ -264,15 +477,11 @@ fn build_palette_match_line(
         let label_str =
             truncate_to_width(&sanitize_for_display(&entry.label), label_budget, unicode);
         used += display_width(&label_str);
-        spans.push(Span::styled(
-            label_str,
-            if selected {
-                theme.style(Token::Selection)
-            } else {
-                theme.style(Token::Text)
-            }
-            .patch(selection),
-        ));
+        if selected {
+            spans.push(Span::styled(label_str, theme.style(Token::Selection)));
+        } else {
+            spans.extend(matched_label_spans(&label_str, query, theme));
+        }
     }
 
     if show_detail && !entry.detail.is_empty() {
@@ -377,6 +586,7 @@ pub(crate) fn render_palette(
         for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
             lines.push(build_palette_match_line(
                 entry,
+                &palette.query,
                 index == palette.selected,
                 true,
                 text_budget,
@@ -458,6 +668,8 @@ pub(crate) fn render_palette(
     let preview_x = divider_x + 2;
     let preview_w = inner.width.saturating_sub(list_width + 2);
 
+    let visible = visible_rows(palette, presentation, area);
+    let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
     let divider_glyph = presentation.glyphs.column_rule();
     let divider_style = theme
         .surface(Token::SurfaceOverlay)
@@ -467,15 +679,29 @@ pub(crate) fn render_palette(
             .set_symbol(divider_glyph)
             .set_style(divider_style);
     }
+    let track = usize::from(content_height);
+    if matches.len() > visible && track > 0 {
+        let thumb = ((visible * track) / matches.len()).clamp(1, track);
+        let max_offset = matches.len().saturating_sub(visible).max(1);
+        let position = (offset.min(max_offset) * track.saturating_sub(thumb)) / max_offset;
+        let thumb_glyph = if unicode { "\u{2503}" } else { "#" };
+        let thumb_style = theme
+            .surface(Token::SurfaceOverlay)
+            .patch(theme.style(Token::Focus));
+        for row in position..(position + thumb).min(track) {
+            buf[(divider_x, content_y + u16::try_from(row).unwrap_or(0))]
+                .set_symbol(thumb_glyph)
+                .set_style(thumb_style);
+        }
+    }
 
-    let visible = visible_rows(palette, presentation, area);
-    let offset = palette.selected.saturating_sub(visible.saturating_sub(1));
     let mut match_lines = Vec::new();
     let target_width = usize::from(list_width);
     let text_budget = target_width.saturating_sub(1).max(1);
     for (index, entry) in matches.iter().enumerate().skip(offset).take(visible) {
         match_lines.push(build_palette_match_line(
             entry,
+            &palette.query,
             index == palette.selected,
             false,
             text_budget,
@@ -520,14 +746,26 @@ pub(crate) fn render_palette(
             }
 
             if in_sql_block {
-                preview_lines.push(Line::from(highlighted_sql_spans(&raw_line, theme, false)));
+                push_wrapped_stripe_sql_lines(
+                    &mut preview_lines,
+                    highlighted_sql_spans(&raw_line, theme, true),
+                    usize::from(preview_w),
+                    theme,
+                );
             } else if let Some((key, val)) = raw_line.split_once(": ") {
                 if key == "SQL" {
                     push_preview_hairline(&mut preview_lines, preview_w, presentation, theme);
-                    let mut line_spans =
-                        vec![Span::styled(format!("{key}: "), theme.style(Token::Header))];
-                    line_spans.extend(highlighted_sql_spans(val, theme, false));
-                    preview_lines.push(Line::from(line_spans));
+                    let mut line_spans = vec![Span::styled(
+                        format!("{key}: "),
+                        theme.on_stripe(Token::Header),
+                    )];
+                    line_spans.extend(highlighted_sql_spans(val, theme, true));
+                    push_wrapped_stripe_sql_lines(
+                        &mut preview_lines,
+                        line_spans,
+                        usize::from(preview_w),
+                        theme,
+                    );
                 } else {
                     let value_token = match key {
                         "Query" => Token::Focus,

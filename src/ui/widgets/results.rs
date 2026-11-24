@@ -1,7 +1,8 @@
 use super::overlays::render_plan;
 use super::{
     action_key_label, bound_key, hairline_rule, highlighted_sql_spans, input_cursor,
-    inset_empty_area, overlay_block, pane_block_line, syntax_token, wrapped_line_count,
+    inset_empty_area, overlay_block, overlay_block_line, pane_block_line, syntax_token,
+    wrapped_line_count,
 };
 use crate::app::grid;
 use crate::app::model::{Focus, Model, QueryPhase};
@@ -698,11 +699,24 @@ fn render_structured_inspector(
             model,
             &crate::app::message::Action::GenerateCellUpdate,
         );
-    let title = if editable {
-        " Cell Detail  r Raw  e Edit "
-    } else {
-        " Cell Detail  r Raw "
-    };
+    let block = overlay_block_line(
+        Line::from(vec![
+            Span::styled(
+                format!(" {}Cell Detail", presentation.icon(Icon::Rows)),
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                if editable {
+                    "  r Raw  e Edit "
+                } else {
+                    "  r Raw "
+                },
+                theme.style(Token::Muted),
+            ),
+        ]),
+        presentation,
+    );
+    let inner_width = usize::from(block.inner(area).width);
     let mut lines = Vec::new();
     let status = if tree.truncated {
         format!(
@@ -727,37 +741,112 @@ fn render_structured_inspector(
     let has_path = available >= 3;
     let visible = available.saturating_sub(lines.len() + usize::from(has_path));
     let start = selected.saturating_sub(visible.saturating_sub(1));
+    let guide_unit = presentation.glyphs.indent_guide();
     for (index, node) in tree.nodes.iter().enumerate().skip(start).take(visible) {
-        let marker = if index == selected { ">" } else { " " };
-        let indent = " ".repeat((node.depth * 2).min(width / 2));
+        let is_selected = index == selected;
+        let marker = if is_selected { ">" } else { " " };
+        let prefix = if width >= 2 {
+            format!("{marker} ")
+        } else {
+            truncate_to_width(marker, width, unicode)
+        };
+        let mut used = display_width(&prefix);
+        let guide_budget = width.saturating_sub(used).min(width / 2);
+        let guide_count = node.depth.min(guide_budget / 2);
+        let guides = guide_unit.repeat(guide_count);
+        used += display_width(&guides);
+        let rem = width.saturating_sub(used);
+
         let label = sanitize_for_display(&node.label);
-        let value = sanitize_for_display(tree.preview(index));
-        let text = truncate_to_width(
-            &format!("{marker} {indent}{label}  {value}"),
+        let raw_preview = tree.preview(index);
+        let value = sanitize_for_display(raw_preview);
+        let is_null = raw_preview == "null" || raw_preview == "NULL array element";
+
+        let (label_part, sep_part, value_part) = if rem == 0 {
+            (String::new(), String::new(), String::new())
+        } else {
+            let label_w = display_width(&label);
+            if label_w >= rem {
+                (
+                    truncate_to_width(&label, rem, unicode),
+                    String::new(),
+                    String::new(),
+                )
+            } else if label_w + 2 >= rem {
+                (label, " ".repeat(rem - label_w), String::new())
+            } else {
+                (
+                    label,
+                    "  ".to_owned(),
+                    truncate_to_width(&value, rem - label_w - 2, unicode),
+                )
+            }
+        };
+
+        let row_width = used
+            + display_width(&label_part)
+            + display_width(&sep_part)
+            + display_width(&value_part);
+
+        if is_selected {
+            let sel_style = theme.style(Token::Selection);
+            let mut spans = vec![Span::styled(prefix, sel_style)];
+            if !guides.is_empty() {
+                spans.push(Span::styled(guides, sel_style));
+            }
+            if !label_part.is_empty() {
+                spans.push(Span::styled(label_part, sel_style));
+            }
+            if !sep_part.is_empty() {
+                spans.push(Span::styled(sep_part, sel_style));
+            }
+            if !value_part.is_empty() {
+                spans.push(Span::styled(value_part, sel_style));
+            }
+            let pad = inner_width.saturating_sub(row_width);
+            if pad > 0 {
+                spans.push(Span::styled(" ".repeat(pad), sel_style));
+            }
+            lines.push(Line::from(spans).style(sel_style));
+        } else {
+            let mut spans = vec![Span::styled(prefix, theme.style(Token::Muted))];
+            if !guides.is_empty() {
+                spans.push(Span::styled(guides, theme.style(Token::Border)));
+            }
+            if !label_part.is_empty() {
+                spans.push(Span::styled(label_part, theme.style(Token::Info)));
+            }
+            if !sep_part.is_empty() {
+                spans.push(Span::styled(sep_part, theme.style(Token::Text)));
+            }
+            if !value_part.is_empty() {
+                spans.push(Span::styled(
+                    value_part,
+                    theme.style(if is_null {
+                        Token::NullValue
+                    } else {
+                        Token::Text
+                    }),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+    if has_path {
+        let path_text = truncate_to_width(
+            &format!("Path {}", sanitize_for_display(&tree.path(selected))),
             width,
             unicode,
         );
-        let style = if index == selected {
-            theme.style(Token::Selection)
-        } else {
-            theme.style(Token::Text)
-        };
-        lines.push(Line::from(Span::styled(text, style)));
-    }
-    if has_path {
-        lines.push(Line::from(Span::styled(
-            truncate_to_width(
-                &format!("Path {}", sanitize_for_display(&tree.path(selected))),
-                width,
-                unicode,
-            ),
-            theme.style(Token::Info),
-        )));
+        let pad = inner_width.saturating_sub(display_width(&path_text));
+        let mut path_spans = vec![Span::styled(path_text, theme.on_stripe(Token::Info))];
+        if pad > 0 {
+            path_spans.push(Span::styled(" ".repeat(pad), theme.stripe()));
+        }
+        lines.push(Line::from(path_spans).style(theme.stripe()));
     }
     ratatui::widgets::Clear.render(area, buf);
-    Paragraph::new(lines)
-        .block(overlay_block(title.to_owned(), presentation))
-        .render(area, buf);
+    Paragraph::new(lines).block(block).render(area, buf);
 }
 
 fn render_results_placeholder(
