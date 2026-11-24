@@ -1748,3 +1748,422 @@ fn modal_fitting_falls_back_to_the_tallest_box_when_content_depends_on_height() 
     assert_ne!(fitted, full);
     assert!(buffer_to_string(&fitted).contains("one line"));
 }
+
+#[test]
+fn plan_tree_proportional_share_micro_bar_highlights_self_time_bottleneck() {
+    use crate::app::model::{Focus, Model};
+
+    // Nested Loop: inclusive 20.0 ms, child Seq Scan orders: 14.0 ms (self = 70%),
+    // child Index Scan customers: 2.0 ms (self = 10%). Root self time = 4.0 ms (20%).
+    let json = r#"[
+      {
+        "Plan": {
+          "Node Type": "Nested Loop",
+          "Startup Cost": 0.42,
+          "Total Cost": 24.0,
+          "Plan Rows": 10,
+          "Actual Startup Time": 0.10,
+          "Actual Total Time": 20.0,
+          "Actual Rows": 10,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              "Startup Cost": 0.0,
+              "Total Cost": 16.0,
+              "Plan Rows": 100,
+              "Actual Startup Time": 0.05,
+              "Actual Total Time": 14.0,
+              "Actual Rows": 100,
+              "Actual Loops": 1
+            },
+            {
+              "Node Type": "Index Scan",
+              "Relation Name": "customers",
+              "Index Name": "customers_pkey",
+              "Startup Cost": 0.42,
+              "Total Cost": 4.0,
+              "Plan Rows": 1,
+              "Actual Startup Time": 0.02,
+              "Actual Total Time": 2.0,
+              "Actual Rows": 1,
+              "Actual Loops": 1
+            }
+          ]
+        }
+      }
+    ]"#;
+    let doc = PlanDocument::parse(json, true).expect("valid analyzed plan");
+    assert_eq!(doc.root.attention_path(true), Some(vec![0]));
+    assert!((doc.root.exclusive_time_ms().unwrap() - 4.0).abs() < 1e-6);
+
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    model.plan.ready(doc);
+    // Move selection away from child 0 so unselected child bottleneck bar keeps Warning ink.
+    let keymap = crate::ui::keymap::Keymap::new();
+
+    let uni = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let wide = Rect::new(0, 0, 96, 18);
+    let mut buf = Buffer::empty(wide);
+    render_plan(&model, &keymap, &uni, wide, &mut buf);
+    let rendered = buffer_to_string(&buf);
+
+    assert!(rendered.contains("self time 4.00 ms"), "{rendered}");
+    assert!(
+        rendered.contains("\u{2501}\u{2501}\u{2501}\u{2501}\u{2500}"),
+        "70% bottleneck child should display 4/5 filled bar (━━━━─): {rendered}"
+    );
+    assert!(
+        rendered.contains("\u{2501}\u{2500}\u{2500}\u{2500}\u{2500}"),
+        "10% sibling should display 1/5 bar (━────): {rendered}"
+    );
+
+    let find_tree_row = |needle: &str| -> (u16, String) {
+        (0..wide.height)
+            .find_map(|y| {
+                let line: String = (0..wide.width).map(|x| buf[(x, y)].symbol()).collect();
+                (line.contains(needle) && line.contains(" | ") && !line.contains("Selected:"))
+                    .then_some((y, line))
+            })
+            .unwrap_or_else(|| panic!("tree row {needle:?} missing:\n{rendered}"))
+    };
+    let (warn_y, warn_line) = find_tree_row("Seq Scan orders");
+    let warn_pos = (
+        warn_line
+            .find("\u{2501}\u{2501}\u{2501}\u{2501}\u{2500}")
+            .map(|b| warn_line[..b].chars().count() as u16)
+            .unwrap_or_else(|| {
+                panic!("warning bar missing on row:\n{warn_line}\nfull:\n{rendered}")
+            }),
+        warn_y,
+    );
+    assert_eq!(buf[warn_pos].fg, uni.theme.color(Token::Warning).unwrap());
+    assert_eq!(
+        buf[(warn_pos.0 + 4, warn_pos.1)].fg,
+        uni.theme.color(Token::Border).unwrap()
+    );
+
+    let (info_y, info_line) = find_tree_row("customers_pkey");
+    let info_pos = (
+        info_line
+            .find("\u{2501}\u{2500}\u{2500}\u{2500}\u{2500}")
+            .map(|b| info_line[..b].chars().count() as u16)
+            .expect("info bar on Index Scan row"),
+        info_y,
+    );
+    assert_eq!(buf[info_pos].fg, uni.theme.color(Token::Info).unwrap());
+    assert_eq!(
+        buf[(info_pos.0 + 1, info_pos.1)].fg,
+        uni.theme.color(Token::Border).unwrap()
+    );
+
+    // Below width 72 or in ASCII, the micro-bar is omitted cleanly.
+    let narrow = Rect::new(0, 0, 68, 18);
+    let mut nbuf = Buffer::empty(narrow);
+    render_plan(&model, &keymap, &uni, narrow, &mut nbuf);
+    let ntext = buffer_to_string(&nbuf);
+    let narrow_seq = (0..narrow.height)
+        .map(|y| {
+            (0..narrow.width)
+                .map(|x| nbuf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .find(|line| line.contains("Seq Scan orders") && line.contains(" | "))
+        .expect("narrow Seq Scan row");
+    assert!(
+        !narrow_seq.contains('\u{2501}') && !narrow_seq.contains('\u{2500}'),
+        "narrow plan omits micro-bar: {ntext}"
+    );
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut abuf = Buffer::empty(wide);
+    render_plan(&model, &keymap, &ascii, wide, &mut abuf);
+    let atext = buffer_to_string(&abuf);
+    assert!(atext.is_ascii(), "{atext}");
+    assert!(atext.contains("self time 4.00 ms"), "{atext}");
+}
+
+#[test]
+fn plan_loading_state_uses_inset_padding_comet_and_focus_keycap() {
+    use crate::app::model::{Focus, Model};
+    use crate::app::plan::PlanView;
+    use crate::query::JobId;
+
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    model.frame = 3;
+    model.plan = PlanView::loading(JobId(7), true);
+    let keymap = crate::ui::keymap::Keymap::new();
+
+    let uni = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let area = Rect::new(0, 0, 80, 14);
+    let mut buf = Buffer::empty(area);
+    render_plan(&model, &keymap, &uni, area, &mut buf);
+    let text = buffer_to_string(&buf);
+
+    assert!(
+        text.contains("Measuring the statement once with EXPLAIN ANALYZE."),
+        "{text}"
+    );
+    assert!(text.contains("Ctrl+C cancels the request"), "{text}");
+    // Spinner, heading, and heartbeat comet render with Warning ink for EXPLAIN ANALYZE.
+    let warn_fg = uni.theme.color(Token::Warning).unwrap();
+    let heading = cell_at(&buf, "Measuring the statement");
+    assert_eq!(heading.fg, warn_fg);
+    let cancel_key = cell_at(&buf, "Ctrl+C");
+    assert_eq!(cancel_key.fg, uni.theme.color(Token::Focus).unwrap());
+    assert!(cancel_key.modifier.contains(Modifier::BOLD));
+    let has_comet = (0..area.height).any(|y| {
+        (0..area.width).any(|x| buf[(x, y)].fg == warn_fg && buf[(x, y)].symbol() == "\u{2501}")
+    });
+    assert!(
+        has_comet,
+        "loading plan should paint Warning heartbeat comet"
+    );
+
+    // Non-analyzed EXPLAIN switches heartbeat tint to Info.
+    model.plan = PlanView::loading(JobId(8), false);
+    let mut ebuf = Buffer::empty(area);
+    render_plan(&model, &keymap, &uni, area, &mut ebuf);
+    let etext = buffer_to_string(&ebuf);
+    assert!(etext.contains("Reading the planner estimate."), "{etext}");
+    let info_fg = uni.theme.color(Token::Info).unwrap();
+    let has_info_comet = (0..area.height).any(|y| {
+        (0..area.width).any(|x| ebuf[(x, y)].fg == info_fg && ebuf[(x, y)].symbol() == "\u{2501}")
+    });
+    assert!(
+        has_info_comet,
+        "plain EXPLAIN loading should paint Info comet"
+    );
+
+    // Reduced motion keeps wording clean with no comet bar.
+    let reduced = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let mut rbuf = Buffer::empty(area);
+    render_plan(&model, &keymap, &reduced, area, &mut rbuf);
+    let rtext = buffer_to_string(&rbuf);
+    assert!(rtext.contains("Reading the planner estimate."));
+    assert!(!rtext.contains('\u{2500}'));
+}
+
+#[test]
+fn unified_modal_chrome_styles_titles_tables_chords_bench_deltas_and_review_rail() {
+    use crate::app::model::{Model, PendingUpdate, QueryBenchState};
+    use crate::bench::{BenchConfig, BenchSample, compare_benchmarks, compute_bench_stats};
+    use crate::query::JobId;
+    use crate::query::value::Cell;
+
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let stripe_bg = pres.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    let header_fg = pres.theme.color(Token::Header).unwrap();
+    let focus_fg = pres.theme.color(Token::Focus).unwrap();
+    let border_fg = pres.theme.color(Token::Border).unwrap();
+    let success_fg = pres.theme.color(Token::Success).unwrap();
+    let danger_fg = pres.theme.color(Token::Danger).unwrap();
+
+    // 1. Chord overlay: recessed keycaps + Border column divider + Focus split title.
+    let chord_area = Rect::new(0, 0, 120, 30);
+    let mut chord_buf = Buffer::empty(chord_area);
+    render_chords(
+        &crate::ui::keymap::Keymap::new(),
+        &pres,
+        chord_area,
+        &mut chord_buf,
+    );
+    let chord_text = buffer_to_string(&chord_buf);
+    assert!(chord_text.contains("Ctrl+K then"), "{chord_text}");
+    assert_eq!(cell_at(&chord_buf, "Ctrl+K then").fg, focus_fg);
+    let div_y = row_of(&chord_buf, "estimated query plan");
+    assert!(
+        (1..chord_area.width - 1).any(|x| {
+            chord_buf[(x, div_y)].symbol() == "\u{2502}" && chord_buf[(x, div_y)].fg == border_fg
+        }),
+        "two-column chord menu must draw a Border column divider"
+    );
+
+    // 2. Benchmark summary deltas (negative latency = Success, QPS gain = Success;
+    //    positive latency = Danger, QPS drop = Danger) + stripe table header + loading comet.
+    let cfg = BenchConfig::new(1, 3, true);
+    let base_s = vec![
+        BenchSample {
+            iteration: 1,
+            duration_ms: 10.0,
+            rows_returned: 5,
+        },
+        BenchSample {
+            iteration: 2,
+            duration_ms: 10.0,
+            rows_returned: 5,
+        },
+    ];
+    let fast_s = vec![
+        BenchSample {
+            iteration: 1,
+            duration_ms: 5.0,
+            rows_returned: 5,
+        },
+        BenchSample {
+            iteration: 2,
+            duration_ms: 5.0,
+            rows_returned: 5,
+        },
+    ];
+    let slow_s = vec![
+        BenchSample {
+            iteration: 1,
+            duration_ms: 20.0,
+            rows_returned: 5,
+        },
+        BenchSample {
+            iteration: 2,
+            duration_ms: 20.0,
+            rows_returned: 5,
+        },
+    ];
+    let base = compute_bench_stats("Baseline", "SELECT 1", &cfg, &base_s);
+    let faster = compute_bench_stats("Faster", "SELECT 2", &cfg, &fast_s);
+    let slower = compute_bench_stats("Slower", "SELECT 3", &cfg, &slow_s);
+
+    let fast_report = compare_benchmarks(base.clone(), Some(faster.clone()), None);
+    let fast_state = QueryBenchState {
+        config: cfg,
+        baseline_sql: "SELECT 1".to_owned(),
+        candidate_sql: "SELECT 2".to_owned(),
+        baseline: Some(base.clone()),
+        candidate: Some(faster),
+        report: Some(fast_report),
+        active_tab: 0,
+        selected_idx: 0,
+        loading: false,
+        status_message: None,
+        queued_candidate: None,
+    };
+    let modal_area = Rect::new(0, 0, 120, 32);
+    let mut fbuf = Buffer::empty(modal_area);
+    render_query_bench_with_motion(&fast_state, 2, Some(0.4), &pres, modal_area, &mut fbuf);
+
+    let hdr = cell_at(&fbuf, "METRIC");
+    assert_eq!(hdr.bg, stripe_bg);
+    assert_eq!(hdr.fg, header_fg);
+    assert!(hdr.modifier.contains(Modifier::BOLD));
+
+    let neg_lat = cell_at(&fbuf, "-50.0%");
+    assert_eq!(neg_lat.fg, success_fg);
+    let pos_qps = cell_at(&fbuf, "+100.0 /s");
+    assert_eq!(pos_qps.fg, success_fg);
+
+    let slow_report = compare_benchmarks(base.clone(), Some(slower.clone()), None);
+    let mut slow_state = QueryBenchState {
+        config: cfg,
+        baseline_sql: "SELECT 1".to_owned(),
+        candidate_sql: "SELECT 3".to_owned(),
+        baseline: Some(base),
+        candidate: Some(slower),
+        report: Some(slow_report),
+        active_tab: 0,
+        selected_idx: 0,
+        loading: false,
+        status_message: None,
+        queued_candidate: None,
+    };
+    let mut sbuf = Buffer::empty(modal_area);
+    render_query_bench_with_motion(&slow_state, 2, None, &pres, modal_area, &mut sbuf);
+    assert_eq!(cell_at(&sbuf, "+100.0%").fg, danger_fg);
+    assert_eq!(cell_at(&sbuf, "-50.0 /s").fg, danger_fg);
+
+    slow_state.loading = true;
+    let mut lbuf = Buffer::empty(modal_area);
+    render_query_bench_with_motion(&slow_state, 4, None, &pres, modal_area, &mut lbuf);
+    assert!(buffer_to_string(&lbuf).contains("Running query benchmark"));
+
+    // 3. Review modal rail highlights key tokens in Focus + BOLD on SurfaceAlt while preserving words.
+    let mut review_model = Model::new(100);
+    let source_sql = "SELECT id, status FROM public.orders ORDER BY id ASC;";
+    let candidate = UpdateCandidate {
+        result_job: JobId(1),
+        source_row: 0,
+        result_column: 1,
+        source_sql: source_sql.into(),
+    };
+    let source = crate::query::parse_update_source(source_sql, &["id".into(), "status".into()], 1)
+        .expect("update source");
+    let relation = UpdateRelation {
+        schema: "public".into(),
+        relation: "orders".into(),
+        kind: ObjectKind::Table,
+        readable: true,
+        writable: true,
+        columns: vec![
+            ColumnInfo {
+                name: "id".into(),
+                data_type: "integer".into(),
+                nullable: false,
+                primary_key: true,
+                default: None,
+            },
+            ColumnInfo {
+                name: "status".into(),
+                data_type: "text".into(),
+                nullable: false,
+                primary_key: false,
+                default: None,
+            },
+        ],
+    };
+    let plan = crate::query::plan_update(
+        &source,
+        "public",
+        "orders",
+        &["id".into(), "status".into()],
+        &[Cell::Text("1".into()), Cell::Text("paid".into())],
+        &[
+            crate::query::UpdateColumn {
+                name: "id".into(),
+                primary_key: true,
+            },
+            crate::query::UpdateColumn {
+                name: "status".into(),
+                primary_key: false,
+            },
+        ],
+        "delivered",
+    )
+    .expect("update plan");
+    review_model.pending_update = Some(PendingUpdate {
+        relation,
+        candidate,
+        plan,
+    });
+    let r_area = Rect::new(0, 0, 110, 26);
+    let mut rbuf = Buffer::empty(r_area);
+    render_update_review(&review_model, &pres, r_area, &mut rbuf);
+    let enter_cell = cell_at(&rbuf, "Enter");
+    assert_eq!(enter_cell.bg, stripe_bg);
+    assert_eq!(enter_cell.fg, focus_fg);
+    assert!(enter_cell.modifier.contains(Modifier::BOLD));
+    let esc_cell = cell_at(&rbuf, "Esc");
+    assert_eq!(esc_cell.bg, stripe_bg);
+    assert_eq!(esc_cell.fg, focus_fg);
+    assert!(esc_cell.modifier.contains(Modifier::BOLD));
+}

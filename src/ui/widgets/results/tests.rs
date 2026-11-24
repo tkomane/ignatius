@@ -726,6 +726,91 @@ fn structured_cell_detail_renders_selection_and_path_in_ascii() {
 }
 
 #[test]
+fn structured_cell_detail_draws_border_guides_semantic_tokens_and_striped_path() {
+    let mut model = model_with(
+        &["payload"],
+        &[vec![Cell::Text(r#"{"x":[null,"ok"]}"#.into())]],
+    );
+    let set = model.last_execution.as_mut().unwrap().statements[0]
+        .result_set
+        .as_mut()
+        .unwrap();
+    set.set_structured_columns(vec![Some(crate::structured::Column {
+        kind: crate::structured::Kind::Jsonb,
+        partial_edit: true,
+        origin: None,
+    })]);
+    let mut inspector = crate::app::inspect::Inspector::new();
+    // Move selection to `"ok"` so `x` (depth 1) and `[0]` (`null`, depth 2) are unselected.
+    inspector.move_node(true, 3, 4);
+
+    let area = Rect::new(0, 0, 76, 14);
+    let truecolor = presentation_at(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    super::render_inspector(&model, inspector, &truecolor, area, &mut buf);
+    let rendered = buffer_to_string(&buf);
+    assert!(rendered.contains("Cell Detail"), "{rendered}");
+
+    let cell_of = |needle: &str| -> (u16, u16) {
+        for y in 0..area.height {
+            let line: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if let Some(byte) = line.find(needle) {
+                return (line[..byte].chars().count() as u16, y);
+            }
+        }
+        panic!("{needle:?} missing:\n{rendered}");
+    };
+
+    // Split title puts Cell Detail in bold Focus ink.
+    let title_pos = cell_of("Cell Detail");
+    assert_eq!(
+        buf[title_pos].fg,
+        truecolor.theme.color(Token::Focus).unwrap()
+    );
+    assert!(buf[title_pos].modifier.contains(Modifier::BOLD));
+
+    // Nested unselected row `│ │ [0]  null` uses Border guide, Info key, and NullValue ink.
+    let null_key = cell_of("[0]");
+    assert_eq!(
+        buf[null_key].fg,
+        truecolor.theme.color(Token::Info).unwrap()
+    );
+    let guide_x = null_key.0 - 2;
+    assert_eq!(buf[(guide_x, null_key.1)].symbol(), "\u{2502}");
+    assert_eq!(
+        buf[(guide_x, null_key.1)].fg,
+        truecolor.theme.color(Token::Border).unwrap()
+    );
+    let null_val = cell_of("null");
+    assert_eq!(
+        buf[null_val].fg,
+        truecolor.theme.color(Token::NullValue).unwrap()
+    );
+
+    // Path footer paints SurfaceAlt strip across the entire inner modal width.
+    let box_area = crate::ui::layout::inspector_box(area, &truecolor);
+    let path_pos = cell_of("Path ");
+    let stripe_bg = truecolor.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    for x in box_area.x + 1..box_area.right() - 1 {
+        assert_eq!(
+            buf[(x, path_pos.1)].bg,
+            stripe_bg,
+            "Path strip column {x} should carry SurfaceAlt background"
+        );
+    }
+
+    // Basic16 and None drop the SurfaceAlt background cleanly while preserving words.
+    for depth in [ColorDepth::Basic16, ColorDepth::None] {
+        let low = presentation_at(depth);
+        let low_box = crate::ui::layout::inspector_box(area, &low);
+        let mut lbuf = Buffer::empty(area);
+        super::render_inspector(&model, inspector, &low, area, &mut lbuf);
+        assert!(buffer_to_string(&lbuf).contains("Path $"));
+        assert_eq!(lbuf[(low_box.x + 2, path_pos.1)].bg, Color::Reset);
+    }
+}
+
+#[test]
 fn results_header_row_fills_grid_width_gutter_uses_muted_and_empty_hints_stay_crisp() {
     let model = model_with(
         &["id", "note"],

@@ -1,6 +1,6 @@
 use super::{
-    action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, overlay_block,
-    overlay_block_line, pane_block_line, syntax_token,
+    action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, inset_empty_area,
+    overlay_block, overlay_block_line, pane_block_line, syntax_token,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -93,6 +93,48 @@ fn review_sql_row_mask(
     mask
 }
 
+fn styled_review_rail_spans(line: &str, base_style: Style, key_style: Style) -> Vec<Span<'static>> {
+    const TOKENS: [&str; 9] = [
+        "PageDown", "PageUp", "Ctrl+R", "Enter", "Home", "PgDn", "PgUp", "Esc", "End",
+    ];
+    let mut spans = Vec::new();
+    let mut cursor = 0usize;
+    let mut i = 0usize;
+    while i < line.len() {
+        let prev_is_alnum = line[..i]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric);
+        let matched = (!prev_is_alnum)
+            .then(|| {
+                TOKENS.iter().copied().find(|tok| {
+                    line[i..].starts_with(tok)
+                        && !line[i + tok.len()..]
+                            .chars()
+                            .next()
+                            .is_some_and(char::is_alphanumeric)
+                })
+            })
+            .flatten();
+        if let Some(tok) = matched {
+            if i > cursor {
+                spans.push(Span::styled(line[cursor..i].to_owned(), base_style));
+            }
+            spans.push(Span::styled(tok.to_owned(), key_style));
+            i += tok.len();
+            cursor = i;
+        } else if let Some(ch) = line[i..].chars().next() {
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if cursor < line.len() {
+        spans.push(Span::styled(line[cursor..].to_owned(), base_style));
+    }
+    spans
+}
+
 /// Draws precisely the rows and fixed interaction areas used for admission.
 fn render_sending_review(
     model: &Model,
@@ -169,11 +211,13 @@ fn render_sending_review(
         Token::Warning
     };
     let rail_width = usize::from(view.rail_area.width);
+    let rail_base = theme.on_stripe(rail_token);
+    let rail_key = theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD);
     let rail_lines = view
         .rail
         .iter()
         .map(|line| {
-            let mut spans = vec![Span::styled(line.as_str(), theme.on_stripe(rail_token))];
+            let mut spans = styled_review_rail_spans(line, rail_base, rail_key);
             let line_w = display_width(line);
             if line_w < rail_width {
                 spans.push(Span::styled(
@@ -471,38 +515,60 @@ pub(crate) fn render_plan(
 
     match &model.plan.status {
         crate::app::PlanStatus::Loading { analyzed, .. } => {
-            let lines = if *analyzed {
-                vec![
-                    Line::from(Span::styled(
+            let loading_area = inset_empty_area(inner);
+            let keycap = theme.keycap(Token::Focus);
+            let cancel_key = action_key_label(keymap, &crate::app::Action::Cancel);
+            let leader = if presentation.reduced_motion {
+                String::new()
+            } else {
+                format!("{} ", presentation.glyphs.spinner(model.frame))
+            };
+            let warn_comet = *analyzed
+                || matches!(
+                    model.phase,
+                    crate::app::model::QueryPhase::CancellationRequested { .. }
+                );
+            let mut lines = if *analyzed {
+                vec![Line::from(vec![
+                    Span::styled(leader, theme.style(Token::Warning)),
+                    Span::styled(
                         "Measuring the statement once with EXPLAIN ANALYZE.",
                         theme.style(Token::Warning),
-                    )),
-                    Line::from(Span::styled(
-                        format!(
-                            "{} cancels the request; the statement may still be running.",
-                            action_key_label(keymap, &crate::app::Action::Cancel)
-                        ),
-                        theme.style(Token::Info),
-                    )),
-                ]
+                    ),
+                ])]
             } else {
-                vec![
-                    Line::from(Span::styled(
+                vec![Line::from(vec![
+                    Span::styled(leader, theme.style(Token::Info)),
+                    Span::styled(
                         "Reading the planner estimate. The target statement is not executed.",
                         theme.style(Token::Info),
-                    )),
-                    Line::from(Span::styled(
-                        format!(
-                            "{} cancels the request.",
-                            action_key_label(keymap, &crate::app::Action::Cancel)
-                        ),
-                        theme.style(Token::Muted),
-                    )),
-                ]
+                    ),
+                ])]
             };
+            if !presentation.reduced_motion {
+                lines.push(super::results::heartbeat_line(
+                    model.frame,
+                    warn_comet,
+                    presentation,
+                ));
+            }
+            lines.push(if *analyzed {
+                Line::from(vec![
+                    Span::styled(format!(" {cancel_key} "), keycap),
+                    Span::styled(
+                        "cancels the request; the statement may still be running.",
+                        theme.style(Token::Info),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled(format!(" {cancel_key} "), keycap),
+                    Span::styled("cancels the request.", theme.style(Token::Muted)),
+                ])
+            });
             Paragraph::new(lines)
                 .wrap(Wrap { trim: true })
-                .render(inner, buf);
+                .render(loading_area, buf);
         }
         crate::app::PlanStatus::Failed {
             analyzed,
@@ -679,6 +745,7 @@ fn render_plan_tree(
             path,
             view.collapsed.contains(path),
             selected,
+            usize::from(area.width),
             presentation,
         );
         let line = if selected {
@@ -808,6 +875,7 @@ fn plan_node_segments(
     path: &[usize],
     collapsed: bool,
     selected: bool,
+    row_width: usize,
     presentation: &Presentation,
 ) -> Vec<(String, Style)> {
     let theme = &presentation.theme;
@@ -844,11 +912,29 @@ fn plan_node_segments(
             theme.style(subject_token),
         ),
         (" | ".to_owned(), theme.style(Token::Border)),
-        (
-            plan_row_metrics(node, document.analyzed, !glyphs.is_ascii()),
-            theme.style(metrics_token),
-        ),
     ];
+    if row_width >= 72
+        && !glyphs.is_ascii()
+        && let Some(share) = node.share_of_root(&document.root, document.analyzed)
+    {
+        let filled = (share * 5.0).round().clamp(0.0, 5.0) as usize;
+        let bar_token = if attention || share >= 0.5 {
+            Token::Warning
+        } else {
+            Token::Info
+        };
+        if filled > 0 {
+            segments.push(("\u{2501}".repeat(filled), theme.style(bar_token)));
+        }
+        if filled < 5 {
+            segments.push(("\u{2500}".repeat(5 - filled), theme.style(Token::Border)));
+        }
+        segments.push((" ".to_owned(), theme.style(Token::Muted)));
+    }
+    segments.push((
+        plan_row_metrics(node, document.analyzed, !glyphs.is_ascii()),
+        theme.style(metrics_token),
+    ));
     if attention {
         segments.push((
             format!(" [attention: {}]", document.attention_basis().label()),
@@ -905,7 +991,10 @@ pub(crate) fn plan_metrics(node: &crate::query::PlanNode, analyzed: bool) -> Str
     let total_cost = number_or(node.total_cost, "not supplied");
     let cost = format!("cost {startup_cost}..{total_cost} cost units");
     if !analyzed {
-        return format!("est rows {rows}; width {width}; {cost}");
+        let self_cost = node
+            .exclusive_cost()
+            .map_or_else(|| "not supplied".to_owned(), |c| format!("{c:.2}"));
+        return format!("est rows {rows}; width {width}; {cost}; self cost {self_cost}");
     }
     let actual_rows = number_or(node.actual_rows, "not measured");
     let startup_time = node
@@ -915,9 +1004,12 @@ pub(crate) fn plan_metrics(node: &crate::query::PlanNode, analyzed: bool) -> Str
         .actual_total_time
         .map_or_else(|| "not measured".to_owned(), format_ms);
     let loops = number_or(node.actual_loops, "not measured");
+    let self_time = node
+        .exclusive_time_ms()
+        .map_or_else(|| "not measured".to_owned(), format_ms);
     format!(
         "est rows {rows}; width {width}; actual rows {actual_rows}; actual startup {startup_time}; \
-         actual total {total_time}/loop; loops {loops}; {cost}"
+         actual total {total_time}/loop; loops {loops}; self time {self_time}; {cost}"
     )
 }
 
@@ -1044,10 +1136,42 @@ pub(crate) fn render_chords(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
     let chords = crate::ui::keymap::CHORDS;
     let single_col_height = u16::try_from(chords.len())
         .unwrap_or(u16::MAX)
         .saturating_add(2);
+
+    let prefix = keymap
+        .contextual_hint(&crate::app::Action::BeginPrefix)
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| "Ctrl+K".to_owned());
+    let title_line = Line::from(vec![
+        Span::styled(
+            presentation.icon(Icon::Key).to_owned(),
+            theme.style(Token::Info),
+        ),
+        Span::styled(
+            format!("{prefix} "),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("then", theme.style(Token::Muted)),
+    ]);
+
+    let push_keycap = |spans: &mut Vec<Span<'static>>, key: char| {
+        if unicode {
+            spans.push(Span::styled(
+                format!(" {key} "),
+                theme.recessed_pill(Token::Focus),
+            ));
+            spans.push(Span::raw(" "));
+        } else {
+            spans.push(Span::styled(
+                format!(" {key}  "),
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ));
+        }
+    };
 
     let use_two_columns = single_col_height > area.height && area.width >= 90;
     if use_two_columns {
@@ -1065,37 +1189,49 @@ pub(crate) fn render_chords(
             height.min(area.height),
             OverlayAnchor::Bottom,
         );
+        if chord_area.width < 4 || chord_area.height < 3 {
+            return;
+        }
         ratatui::widgets::Clear.render(chord_area, buf);
 
-        let col_width = usize::from(chord_area.width.saturating_sub(4) / 2);
+        let inner_width = usize::from(chord_area.width.saturating_sub(2));
+        let divider_width = 3usize;
+        let col1_needed = col1
+            .iter()
+            .map(|(_, _, desc)| 4 + display_width(desc))
+            .max()
+            .unwrap_or(0);
+        let col2_needed = col2
+            .iter()
+            .map(|(_, _, desc)| 4 + display_width(desc))
+            .max()
+            .unwrap_or(0);
+        let even_col = inner_width.saturating_sub(divider_width) / 2;
+        let col_width =
+            even_col.min(col1_needed.max(inner_width.saturating_sub(divider_width + col2_needed)));
+        let divider_str = format!(" {} ", presentation.glyphs.column_rule());
         let mut lines = Vec::new();
         for i in 0..split_at {
             let mut spans = Vec::new();
             if let Some((key, _, description)) = col1.get(i) {
-                spans.push(Span::styled(
-                    format!(" {key}  "),
-                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-                ));
+                push_keycap(&mut spans, *key);
                 let pad = col_width.saturating_sub(4);
                 let text = format!("{:<pad$}", description);
                 spans.push(Span::styled(text, theme.style(Token::Text)));
             }
+            spans.push(Span::styled(
+                divider_str.clone(),
+                theme.style(Token::Border),
+            ));
             if let Some((key, _, description)) = col2.get(i) {
-                spans.push(Span::styled(
-                    format!(" {key}  "),
-                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-                ));
+                push_keycap(&mut spans, *key);
                 spans.push(Span::styled(*description, theme.style(Token::Text)));
             }
             lines.push(Line::from(spans));
         }
 
-        let prefix = keymap
-            .contextual_hint(&crate::app::Action::BeginPrefix)
-            .map(|(key, _)| key)
-            .unwrap_or_else(|| "Ctrl+K".to_owned());
         Paragraph::new(lines)
-            .block(overlay_block(format!(" {prefix}  then "), presentation))
+            .block(overlay_block_line(title_line, presentation))
             .render(chord_area, buf);
     } else {
         let chord_area = overlay_box(
@@ -1105,27 +1241,23 @@ pub(crate) fn render_chords(
             single_col_height.min(area.height),
             OverlayAnchor::Bottom,
         );
+        if chord_area.width < 4 || chord_area.height < 3 {
+            return;
+        }
         ratatui::widgets::Clear.render(chord_area, buf);
 
         let lines: Vec<Line> = chords
             .iter()
             .map(|(key, _, description)| {
-                Line::from(vec![
-                    Span::styled(
-                        format!(" {key}  "),
-                        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(*description, theme.style(Token::Text)),
-                ])
+                let mut spans = Vec::new();
+                push_keycap(&mut spans, *key);
+                spans.push(Span::styled(*description, theme.style(Token::Text)));
+                Line::from(spans)
             })
             .collect();
 
-        let prefix = keymap
-            .contextual_hint(&crate::app::Action::BeginPrefix)
-            .map(|(key, _)| key)
-            .unwrap_or_else(|| "Ctrl+K".to_owned());
         Paragraph::new(lines)
-            .block(overlay_block(format!(" {prefix}  then "), presentation))
+            .block(overlay_block_line(title_line, presentation))
             .render(chord_area, buf);
     }
 }
@@ -1462,6 +1594,8 @@ pub(crate) fn render_server_activity(
     }
 
     let right_visible_rows = usize::from(right_area.height);
+    let right_width = usize::from(right_area.width);
+    let unicode = !presentation.glyphs.is_ascii();
     let mut activity_lines = Vec::new();
     if let Some(error) = &activity.error {
         activity_lines.push(Line::from(Span::styled(
@@ -1474,17 +1608,24 @@ pub(crate) fn render_server_activity(
             theme.style(Token::Muted),
         )));
     } else {
-        for line in activity
+        for (offset_idx, line) in activity
             .rendered_lines
             .iter()
             .skip(activity.scroll_y)
             .take(right_visible_rows)
+            .enumerate()
         {
+            let abs_idx = activity.scroll_y.saturating_add(offset_idx);
             let scrolled_line: String = line.chars().skip(activity.scroll_x).collect();
-            activity_lines.push(Line::from(Span::styled(
-                sanitize_for_display(&scrolled_line),
-                theme.style(Token::Text),
-            )));
+            let clean = sanitize_for_display(&scrolled_line);
+            if activity.mode == crate::activity::ActivityViewMode::Backends
+                && abs_idx == 2
+                && !clean.trim().is_empty()
+            {
+                activity_lines.push(modal_table_header_row(clean, right_width, unicode, theme));
+            } else {
+                activity_lines.push(Line::from(Span::styled(clean, theme.style(Token::Text))));
+            }
         }
     }
     Paragraph::new(activity_lines).render(right_area, buf);
@@ -3866,6 +4007,8 @@ pub(crate) fn render_index_advisor(
             .render(split_rule_area, buf);
 
         // Render Table according to active tab
+        let unicode = !presentation.glyphs.is_ascii();
+        let table_width = usize::from(table_area.width);
         match state.active_tab {
             0 => {
                 if report.redundant_indexes.is_empty() {
@@ -3876,15 +4019,15 @@ pub(crate) fn render_index_advisor(
                     .render(table_area, buf);
                 } else {
                     let mut lines = Vec::new();
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{:<24}", "TABLE"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:<26}", "INDEX"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:<16}", "REASON"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:>10}", "SIZE"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:>8}", "SCANS"), theme.style(Token::Muted)),
-                        Span::raw(" "),
-                        Span::styled("COVERED BY", theme.style(Token::Muted)),
-                    ]));
+                    lines.push(modal_table_header_row(
+                        format!(
+                            "{:<24}{:<26}{:<16}{:>10}{:>8} {}",
+                            "TABLE", "INDEX", "REASON", "SIZE", "SCANS", "COVERED BY"
+                        ),
+                        table_width,
+                        unicode,
+                        theme,
+                    ));
 
                     let visible_rows = table_area.height.saturating_sub(1) as usize;
                     let scroll_offset = state
@@ -3949,13 +4092,15 @@ pub(crate) fn render_index_advisor(
                     .render(table_area, buf);
                 } else {
                     let mut lines = Vec::new();
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{:<24}", "TABLE"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:<26}", "INDEX"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:>10}", "TOTAL"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:>10}", "WASTED"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:>8}", "BLOAT %"), theme.style(Token::Muted)),
-                    ]));
+                    lines.push(modal_table_header_row(
+                        format!(
+                            "{:<24}{:<26}{:>10}{:>10}{:>8}",
+                            "TABLE", "INDEX", "TOTAL", "WASTED", "BLOAT %"
+                        ),
+                        table_width,
+                        unicode,
+                        theme,
+                    ));
 
                     let visible_rows = table_area.height.saturating_sub(1) as usize;
                     let scroll_offset = state
@@ -4021,12 +4166,15 @@ pub(crate) fn render_index_advisor(
                     .render(table_area, buf);
                 } else {
                     let mut lines = Vec::new();
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{:<28}", "CONSTRAINT"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:<24}", "CHILD TABLE"), theme.style(Token::Muted)),
-                        Span::styled(format!("{:<20}", "COLUMNS"), theme.style(Token::Muted)),
-                        Span::styled("REFERENCES", theme.style(Token::Muted)),
-                    ]));
+                    lines.push(modal_table_header_row(
+                        format!(
+                            "{:<28}{:<24}{:<20}{}",
+                            "CONSTRAINT", "CHILD TABLE", "COLUMNS", "REFERENCES"
+                        ),
+                        table_width,
+                        unicode,
+                        theme,
+                    ));
 
                     let visible_rows = table_area.height.saturating_sub(1) as usize;
                     let scroll_offset = state
@@ -6707,6 +6855,27 @@ fn bounded_row(
     }
 }
 
+/// Paints a full-width recessed `SurfaceAlt` table header row from pre-styled segments.
+fn modal_table_header_segments(
+    segments: Vec<(String, Style)>,
+    max_width: usize,
+    unicode: bool,
+    theme: &crate::ui::theme::Theme,
+) -> Line<'static> {
+    bounded_row(segments, max_width, unicode, Some(theme.stripe()))
+}
+
+/// Paints a full-width recessed `SurfaceAlt` table header row in bold `Token::Header`.
+fn modal_table_header_row(
+    text: String,
+    max_width: usize,
+    unicode: bool,
+    theme: &crate::ui::theme::Theme,
+) -> Line<'static> {
+    let style = theme.on_stripe(Token::Header).add_modifier(Modifier::BOLD);
+    modal_table_header_segments(vec![(text, style)], max_width, unicode, theme)
+}
+
 /// Draws the offline SQL lint findings overlay.
 pub(crate) fn render_lint_findings(
     state: &crate::app::model::LintFindingsState,
@@ -7018,6 +7187,28 @@ fn render_fitted_modal(
     render(if keeps_every_row { &fitted } else { &tallest }, buf);
 }
 
+fn modal_title_line(title: &str, presentation: &Presentation) -> Line<'static> {
+    let theme = &presentation.theme;
+    let trimmed = title.trim();
+    let title_style = theme.style(Token::Focus).add_modifier(Modifier::BOLD);
+    if !presentation.glyphs.is_ascii()
+        && let Some(first) = trimmed.chars().next().filter(|ch| !ch.is_ascii())
+    {
+        let icon_len = first.len_utf8();
+        let rest = &trimmed[icon_len..];
+        let (icon, text) = if rest.starts_with(' ') {
+            (&trimmed[..icon_len + 1], rest.trim_start())
+        } else {
+            (&trimmed[..icon_len], rest)
+        };
+        return Line::from(vec![
+            Span::styled(icon.to_owned(), theme.style(Token::Info)),
+            Span::styled(text.to_owned(), title_style),
+        ]);
+    }
+    Line::from(Span::styled(trimmed.to_owned(), title_style))
+}
+
 fn modal_inner_layout(
     title: String,
     presentation: &Presentation,
@@ -7048,7 +7239,8 @@ fn modal_inner_layout(
     }
 
     ratatui::widgets::Clear.render(modal_area, buf);
-    overlay_block(title, presentation).render(modal_area, buf);
+    overlay_block_line(modal_title_line(&title, presentation), presentation)
+        .render(modal_area, buf);
 
     let inner = Rect::new(
         modal_area.x.saturating_add(1),
@@ -8404,7 +8596,7 @@ fn render_data_browser_frame(
             let mut lines = Vec::new();
             let mut header_segments = vec![(
                 "  ".to_owned(),
-                theme.style(Token::Header).add_modifier(Modifier::BOLD),
+                theme.on_stripe(Token::Header).add_modifier(Modifier::BOLD),
             )];
             for (col_idx, (col_name, &col_width)) in page
                 .columns
@@ -8422,13 +8614,18 @@ fn render_data_browser_frame(
                 };
                 let fitted = fit_cell(&label, col_width, unicode);
                 let style = if col_idx == active_col {
-                    theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+                    theme.on_stripe(Token::Focus).add_modifier(Modifier::BOLD)
                 } else {
-                    theme.style(Token::Header).add_modifier(Modifier::BOLD)
+                    theme.on_stripe(Token::Header).add_modifier(Modifier::BOLD)
                 };
                 header_segments.push((format!("{fitted} "), style));
             }
-            lines.push(bounded_row(header_segments, body_width, unicode, None));
+            lines.push(modal_table_header_segments(
+                header_segments,
+                body_width,
+                unicode,
+                theme,
+            ));
 
             if page.rows.is_empty() {
                 lines.push(bounded_row(
@@ -8827,19 +9024,16 @@ fn render_plan_diff_frame(
                         unicode,
                         None,
                     ));
-                    lines.push(bounded_row(
-                        vec![(
-                            format!(
-                                "  FINDINGS ({})  |  NODE CHANGES ({})  |  SETTING CHANGES ({})",
-                                report.findings.len(),
-                                report.node_changes.len(),
-                                report.setting_changes.len()
-                            ),
-                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-                        )],
+                    lines.push(modal_table_header_row(
+                        format!(
+                            "  FINDINGS ({})  |  NODE CHANGES ({})  |  SETTING CHANGES ({})",
+                            report.findings.len(),
+                            report.node_changes.len(),
+                            report.setting_changes.len()
+                        ),
                         body_width,
                         unicode,
-                        None,
+                        theme,
                     ));
                     let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
                     if report.findings.is_empty() {
@@ -9003,17 +9197,14 @@ fn render_plan_diff_frame(
                         .render(body_area, buf);
                     } else {
                         let mut lines = Vec::new();
-                        lines.push(bounded_row(
-                            vec![(
-                                format!(
-                                    "  {:<8} {:>10} {:>10} {}",
-                                    "VERDICT", "COST_D", "TIME_D", "NODE CHANGE"
-                                ),
-                                theme.style(Token::Header).add_modifier(Modifier::BOLD),
-                            )],
+                        lines.push(modal_table_header_row(
+                            format!(
+                                "  {:<8} {:>10} {:>10} {}",
+                                "VERDICT", "COST_D", "TIME_D", "NODE CHANGE"
+                            ),
                             body_width,
                             unicode,
-                            None,
+                            theme,
                         ));
                         let start = state
                             .selected_idx
@@ -9077,17 +9268,14 @@ fn render_plan_diff_frame(
                     }
                 } else if let Some(snap) = single_opt {
                     let mut lines = Vec::new();
-                    lines.push(bounded_row(
-                        vec![(
-                            format!(
-                                "  {:<8} {:<20} {:<20} {:>10} {:>10} {:>11}",
-                                "PATH", "NODE", "TARGET", "COST", "ROWS", "HIT/READ"
-                            ),
-                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-                        )],
+                    lines.push(modal_table_header_row(
+                        format!(
+                            "  {:<8} {:<20} {:<20} {:>10} {:>10} {:>11}",
+                            "PATH", "NODE", "TARGET", "COST", "ROWS", "HIT/READ"
+                        ),
                         body_width,
                         unicode,
-                        None,
+                        theme,
                     ));
                     for node in snap.nodes.iter().take(body_rows) {
                         let target = node
@@ -9181,17 +9369,14 @@ fn render_plan_diff_frame(
                         unicode,
                         None,
                     ));
-                    lines.push(bounded_row(
-                        vec![(
-                            format!(
-                                "  {:<32} {:<20} {}",
-                                "SETTING", "BASELINE (A)", "CANDIDATE (B)"
-                            ),
-                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-                        )],
+                    lines.push(modal_table_header_row(
+                        format!(
+                            "  {:<32} {:<20} {}",
+                            "SETTING", "BASELINE (A)", "CANDIDATE (B)"
+                        ),
                         body_width,
                         unicode,
-                        None,
+                        theme,
                     ));
                     let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
                     if report.setting_changes.is_empty() {
@@ -9289,14 +9474,11 @@ fn render_plan_diff_frame(
                         unicode,
                         None,
                     ));
-                    lines.push(bounded_row(
-                        vec![(
-                            format!("  {:<36} {}", "NON-DEFAULT PLANNER SETTING", "VALUE"),
-                            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-                        )],
+                    lines.push(modal_table_header_row(
+                        format!("  {:<36} {}", "NON-DEFAULT PLANNER SETTING", "VALUE"),
                         body_width,
                         unicode,
-                        None,
+                        theme,
                     ));
                     let list_rows = usize::from(body_area.height).saturating_sub(lines.len());
                     if snap.settings.is_empty() {
@@ -10028,9 +10210,9 @@ fn render_footer_hints(
     .render(area, buf);
 }
 
-fn render_overlay_status(
+fn render_overlay_status_styled(
     text: &str,
-    token: Token,
+    style: Style,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
@@ -10038,9 +10220,64 @@ fn render_overlay_status(
     let unicode = !presentation.glyphs.is_ascii();
     Paragraph::new(Line::from(Span::styled(
         truncate_to_width(text, usize::from(area.width), unicode),
-        presentation.theme.style(token),
+        style,
     )))
     .render(area, buf);
+}
+
+fn render_overlay_status(
+    text: &str,
+    token: Token,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_overlay_status_styled(
+        text,
+        presentation.theme.style(token),
+        presentation,
+        area,
+        buf,
+    );
+}
+
+fn latency_delta_token(delta_ms: f64) -> Token {
+    if delta_ms < -1e-9 {
+        Token::Success
+    } else if delta_ms > 1e-9 {
+        Token::Danger
+    } else {
+        Token::Muted
+    }
+}
+
+fn qps_delta_token(delta_qps: f64) -> Token {
+    if delta_qps > 1e-9 {
+        Token::Success
+    } else if delta_qps < -1e-9 {
+        Token::Danger
+    } else {
+        Token::Muted
+    }
+}
+
+fn bench_settle_style(
+    theme: &crate::ui::theme::Theme,
+    resting: Token,
+    settle: Option<f32>,
+) -> Style {
+    let base = theme.style(resting);
+    let overlay = theme.rgb(Token::SurfaceOverlay);
+    let legible = [Token::Success, resting]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(overlay) >= 4.5);
+    match settle
+        .filter(|_| legible)
+        .and_then(|progress| theme.mix(Token::Success, resting, progress))
+    {
+        Some(ink) => base.fg(ink),
+        None => base,
+    }
 }
 
 fn single_line_preview(raw: &str) -> String {
@@ -10072,8 +10309,22 @@ fn fmt_bench_ms_delta(base: f64, cand: Option<f64>) -> Option<String> {
 }
 
 /// Renders the Query Latency Benchmark & A/B Regression Suite overlay (`056`).
+#[cfg(test)]
 pub(crate) fn render_query_bench(
     state: &crate::app::model::QueryBenchState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_query_bench_with_motion(state, 0, None, presentation, area, buf);
+}
+
+/// Renders the Query Latency Benchmark overlay with live spinner/heartbeat frame
+/// and optional `BenchSettle` transition progress.
+pub(crate) fn render_query_bench_with_motion(
+    state: &crate::app::model::QueryBenchState,
+    frame: u64,
+    settle: Option<f32>,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
@@ -10087,18 +10338,20 @@ pub(crate) fn render_query_bench(
             ..state.clone()
         };
         measure_modal_body(area, |fit, scratch| {
-            render_query_bench_frame(&settled, presentation, area, scratch, fit);
+            render_query_bench_frame(&settled, frame, settle, presentation, area, scratch, fit);
         })
     } else {
         0
     };
     render_fitted_modal(area, buf, held, |fit, target| {
-        render_query_bench_frame(state, presentation, area, target, fit);
+        render_query_bench_frame(state, frame, settle, presentation, area, target, fit);
     });
 }
 
 fn render_query_bench_frame(
     state: &crate::app::model::QueryBenchState,
+    frame: u64,
+    settle: Option<f32>,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
@@ -10203,7 +10456,7 @@ fn render_query_bench_frame(
         let (headline, headline_token) = if state.cancelling {
             (
                 format!(
-                    "  Cancelling query benchmark ({} warmup, {} measured, rollback={})...",
+                    "Cancelling query benchmark ({} warmup, {} measured, rollback={})...",
                     state.config.warmup_runs,
                     state.config.measured_runs,
                     if state.config.rollback { "on" } else { "off" }
@@ -10213,7 +10466,7 @@ fn render_query_bench_frame(
         } else {
             (
                 format!(
-                    "  Running query benchmark ({} warmup, {} measured, rollback={})...",
+                    "Running query benchmark ({} warmup, {} measured, rollback={})...",
                     state.config.warmup_runs,
                     state.config.measured_runs,
                     if state.config.rollback { "on" } else { "off" }
@@ -10221,12 +10474,24 @@ fn render_query_bench_frame(
                 Token::Info,
             )
         };
-        let mut lines = vec![bounded_row(
-            vec![(headline, theme.style(headline_token))],
-            body_width,
-            unicode,
-            None,
-        )];
+        let mut head_segments = Vec::new();
+        if presentation.reduced_motion {
+            head_segments.push(("  ".to_owned(), theme.style(headline_token)));
+        } else {
+            head_segments.push((
+                format!("  {} ", presentation.glyphs.spinner(frame)),
+                theme.style(headline_token),
+            ));
+        }
+        head_segments.push((headline, theme.style(headline_token)));
+        let mut lines = vec![bounded_row(head_segments, body_width, unicode, None)];
+        if !presentation.reduced_motion {
+            let mut comet_spans = vec![Span::raw("  ")];
+            comet_spans.extend(
+                super::results::heartbeat_line(frame, state.cancelling, presentation).spans,
+            );
+            lines.push(Line::from(comet_spans));
+        }
         if !state.baseline_sql.trim().is_empty() {
             lines.push(bounded_row(
                 vec![
@@ -10312,7 +10577,21 @@ fn render_query_bench_frame(
             Token::Muted,
         )
     };
-    render_overlay_status(&status_text, status_token, presentation, status_area, buf);
+    let bench_settle_applies = !state.loading
+        && state.report.as_ref().is_some_and(|report| {
+            !report.failed_gate
+                && report
+                    .comparison
+                    .as_ref()
+                    .is_none_or(|cmp| cmp.verdict != crate::bench::BenchVerdict::Slower)
+        })
+        && status_token != Token::Danger;
+    let status_style = if bench_settle_applies {
+        bench_settle_style(theme, status_token, settle)
+    } else {
+        theme.style(status_token)
+    };
+    render_overlay_status_styled(&status_text, status_style, presentation, status_area, buf);
 
     // While a run is in flight m, r and Esc wait, while Ctrl+C cancels.
     let hints: &[(&str, &str)] = if state.loading {
@@ -10434,70 +10713,86 @@ fn render_query_bench_summary(
             None,
         ));
     }
-    lines.push(bounded_row(
-        vec![(
-            format!(
-                "  {:<12} {:<18} {:<18} {}",
-                "METRIC",
-                "BASELINE (A)",
-                if cand.is_some() { "CANDIDATE (B)" } else { "-" },
-                "DELTA / NOTE"
-            ),
-            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-        )],
+    lines.push(modal_table_header_row(
+        format!(
+            "  {:<12} {:<18} {:<18} {}",
+            "METRIC",
+            "BASELINE (A)",
+            if cand.is_some() { "CANDIDATE (B)" } else { "-" },
+            "DELTA / NOTE"
+        ),
         body_width,
         unicode,
-        None,
+        theme,
     ));
 
-    let metric_rows: [(&str, String, Option<String>, Option<String>); 9] = [
+    type BenchMetricRow = (&'static str, String, Option<String>, Option<String>, Token);
+    let metric_rows: [BenchMetricRow; 9] = [
         (
             "min",
             format!("{:.3} ms", base.min_ms),
             cand.map(|c| format!("{:.3} ms", c.min_ms)),
             fmt_bench_ms_delta(base.min_ms, cand.map(|c| c.min_ms)),
+            cand.map_or(Token::Muted, |c| {
+                latency_delta_token(c.min_ms - base.min_ms)
+            }),
         ),
         (
             "mean",
             format!("{:.3} ms", base.mean_ms),
             cand.map(|c| format!("{:.3} ms", c.mean_ms)),
             fmt_bench_ms_delta(base.mean_ms, cand.map(|c| c.mean_ms)),
+            cand.map_or(Token::Muted, |c| {
+                latency_delta_token(c.mean_ms - base.mean_ms)
+            }),
         ),
         (
             "stddev",
             format!("{:.3} ms", base.stddev_ms),
             cand.map(|c| format!("{:.3} ms", c.stddev_ms)),
             fmt_bench_ms_delta(base.stddev_ms, cand.map(|c| c.stddev_ms)),
+            cand.map_or(Token::Muted, |c| {
+                latency_delta_token(c.stddev_ms - base.stddev_ms)
+            }),
         ),
         (
             "p50",
             format!("{:.3} ms", base.p50_ms),
             cand.map(|c| format!("{:.3} ms", c.p50_ms)),
             cmp.map(|c| format!("{:+.3} ms ({:+.1}%)", c.p50_delta_ms, c.p50_delta_pct)),
+            cmp.map_or(Token::Muted, |c| latency_delta_token(c.p50_delta_ms)),
         ),
         (
             "p95",
             format!("{:.3} ms", base.p95_ms),
             cand.map(|c| format!("{:.3} ms", c.p95_ms)),
             cmp.map(|c| format!("{:+.3} ms ({:+.1}%)", c.p95_delta_ms, c.p95_delta_pct)),
+            cmp.map_or(Token::Muted, |c| latency_delta_token(c.p95_delta_ms)),
         ),
         (
             "p99",
             format!("{:.3} ms", base.p99_ms),
             cand.map(|c| format!("{:.3} ms", c.p99_ms)),
             fmt_bench_ms_delta(base.p99_ms, cand.map(|c| c.p99_ms)),
+            cand.map_or(Token::Muted, |c| {
+                latency_delta_token(c.p99_ms - base.p99_ms)
+            }),
         ),
         (
             "max",
             format!("{:.3} ms", base.max_ms),
             cand.map(|c| format!("{:.3} ms", c.max_ms)),
             fmt_bench_ms_delta(base.max_ms, cand.map(|c| c.max_ms)),
+            cand.map_or(Token::Muted, |c| {
+                latency_delta_token(c.max_ms - base.max_ms)
+            }),
         ),
         (
             "qps",
             format!("{:.1} /s", base.qps),
             cand.map(|c| format!("{:.1} /s", c.qps)),
             cand.map(|c| format!("{:+.1} /s", c.qps - base.qps)),
+            cand.map_or(Token::Muted, |c| qps_delta_token(c.qps - base.qps)),
         ),
         (
             "sparkline",
@@ -10512,6 +10807,7 @@ fn render_query_bench_summary(
                     "unicode"
                 }
             )),
+            Token::Muted,
         ),
     ];
 
@@ -10521,7 +10817,7 @@ fn render_query_bench_summary(
     let start = state
         .selected_idx
         .saturating_sub(list_rows.saturating_sub(1));
-    for (idx, (name, base_val, cand_val, delta_val)) in
+    for (idx, (name, base_val, cand_val, delta_val, delta_tok)) in
         metric_rows.iter().enumerate().skip(start).take(list_rows)
     {
         let selected = idx == state.selected_idx;
@@ -10565,7 +10861,7 @@ fn render_query_bench_summary(
                 ),
                 (format!("{base_cell} "), theme.style(base_tok)),
                 (format!("{cand_cell} "), theme.style(cand_tok)),
-                (delta_cell, theme.style(Token::Muted)),
+                (delta_cell, theme.style(*delta_tok)),
             ]
         };
         lines.push(bounded_row(
@@ -10664,14 +10960,8 @@ fn render_query_bench_samples(
             "ITER", "DURATION (ms)", "ROWS RETURNED", "LATENCY PROFILE"
         )
     };
-    lines.push(bounded_row(
-        vec![(
-            header_str,
-            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-        )],
-        body_width,
-        unicode,
-        None,
+    lines.push(modal_table_header_row(
+        header_str, body_width, unicode, theme,
     ));
 
     let base_samples = state.baseline.as_ref().map_or(&[][..], |b| &b.samples);
@@ -10707,9 +10997,12 @@ fn render_query_bench_samples(
             let b_rows = b.map_or_else(|| "-".to_owned(), |s| s.rows_returned.to_string());
             let c_dur = c.map_or_else(|| "-".to_owned(), |s| format!("{:.3}", s.duration_ms));
             let c_rows = c.map_or_else(|| "-".to_owned(), |s| s.rows_returned.to_string());
-            let delta = match (b, c) {
-                (Some(bs), Some(cs)) => format!("{:+.3}", cs.duration_ms - bs.duration_ms),
-                _ => "-".to_owned(),
+            let (delta, delta_tok) = match (b, c) {
+                (Some(bs), Some(cs)) => {
+                    let diff = cs.duration_ms - bs.duration_ms;
+                    (format!("{diff:+.3}"), latency_delta_token(diff))
+                }
+                _ => ("-".to_owned(), Token::Muted),
             };
             if selected {
                 vec![
@@ -10732,7 +11025,7 @@ fn render_query_bench_samples(
                     (format!("{b_rows:>10} "), theme.style(Token::Muted)),
                     (format!("{c_dur:>12} "), theme.style(Token::Text)),
                     (format!("{c_rows:>10} "), theme.style(Token::Muted)),
-                    (format!("{delta:>12}"), theme.style(Token::Focus)),
+                    (format!("{delta:>12}"), theme.style(delta_tok)),
                 ]
             }
         } else {
@@ -11056,17 +11349,14 @@ fn render_schema_snapshot_overview(
                 None,
             ));
         } else {
-            lines.push(bounded_row(
-                vec![(
-                    format!(
-                        "  {:<9} {:<20} {:<26} {}",
-                        "SEVERITY", "KIND", "OBJECT", "DETAIL"
-                    ),
-                    theme.style(Token::Header).add_modifier(Modifier::BOLD),
-                )],
+            lines.push(modal_table_header_row(
+                format!(
+                    "  {:<9} {:<20} {:<26} {}",
+                    "SEVERITY", "KIND", "OBJECT", "DETAIL"
+                ),
                 body_width,
                 unicode,
-                None,
+                theme,
             ));
             let list_rows = usize::from(body_area.height)
                 .saturating_sub(lines.len())
@@ -11176,17 +11466,14 @@ fn render_schema_snapshot_tables(
     }
 
     let mut lines = Vec::new();
-    lines.push(bounded_row(
-        vec![(
-            format!(
-                "  {:<28} {:>5} {:>5} {:>5} {:<7} {:>8} {}",
-                "TABLE", "COLS", "CONS", "IDX", "RLS", "POLICIES", "COLUMNS PREVIEW"
-            ),
-            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-        )],
+    lines.push(modal_table_header_row(
+        format!(
+            "  {:<28} {:>5} {:>5} {:>5} {:<7} {:>8} {}",
+            "TABLE", "COLS", "CONS", "IDX", "RLS", "POLICIES", "COLUMNS PREVIEW"
+        ),
         body_width,
         unicode,
-        None,
+        theme,
     ));
 
     let detail_rows = usize::from(body_area.height >= 10) * 2;
@@ -11511,17 +11798,14 @@ fn render_sql_runbook_cells(
     let body_width = usize::from(body_area.width);
 
     let mut lines = Vec::new();
-    lines.push(bounded_row(
-        vec![(
-            format!(
-                "  {:<4} {:<16} {:<20} {:<11} {:<15} {}",
-                "#", "NAME", "HEADING", "ACCESS", "EXPECT", "SQL PREVIEW"
-            ),
-            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-        )],
+    lines.push(modal_table_header_row(
+        format!(
+            "  {:<4} {:<16} {:<20} {:<11} {:<15} {}",
+            "#", "NAME", "HEADING", "ACCESS", "EXPECT", "SQL PREVIEW"
+        ),
         body_width,
         unicode,
-        None,
+        theme,
     ));
 
     let detail_rows = usize::from(body_area.height >= 10) * 2;
@@ -11675,17 +11959,14 @@ fn render_sql_runbook_dry_run(
         unicode,
         None,
     ));
-    lines.push(bounded_row(
-        vec![(
-            format!(
-                "  {:<4} {:<16} {:<14} {:<11} {:<22} {}",
-                "#", "NAME", "HEADING", "ACCESS", "STATUS", "EXPECT / SQL"
-            ),
-            theme.style(Token::Header).add_modifier(Modifier::BOLD),
-        )],
+    lines.push(modal_table_header_row(
+        format!(
+            "  {:<4} {:<16} {:<14} {:<11} {:<22} {}",
+            "#", "NAME", "HEADING", "ACCESS", "STATUS", "EXPECT / SQL"
+        ),
         body_width,
         unicode,
-        None,
+        theme,
     ));
 
     let list_rows = usize::from(body_area.height).saturating_sub(2).max(1);
