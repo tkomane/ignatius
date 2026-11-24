@@ -136,6 +136,7 @@ below; broadening the feature list does not move a milestone forward.
 | M15 Structured Values, Plan History & Fleet Health | Inspect structured cells, track query plan regressions and compare named environments | W16 (Features 059-061) | Reviewed typed edits, digest-only local plan history and bounded read-only fleet comparisons |
 | M16 Editorial High-Art TUI Aesthetic & Themes | Curated Obsidian/Paper gallery palettes, elevated rail keycaps, recessed modal badges, and editorial chrome typography | W16 (Feature 062) | WCAG-verified `atelier` and `paper` themes, `Theme::keycap` / `Theme::recessed_pill`, right-aligned footer hints, Spotlight palette input strip, 14 2x showcase PNGs |
 | M17 Living Surfaces | Bounded, truthful motion and depth: state first, input wins, reduced motion is stillness, safety rails never move | W16 (Feature 063) | Hard-edge theme curtain, result settle, heartbeat comet meter, static recession behind overlays, header safety capsules at every width, animated real-buffer showcase |
+| M18 Tactile Craft, Truthful Motion & DevSecOps | Reproducible local security gate, cancellable safe benchmarks, SQL-aware editor/motion craft, exclusive plan bottleneck bars, and studio showcase | W16 (Feature 064) | `cargo xtask security`, EOF-safe benchmark cancel + `--allow-write`, `FormatRipple`/`NoticeSettle`/`BenchSettle`, 4.5:1 built-in contrast pins, exclusive plan self-time bars, `boot-reveal` APNG & editorial README |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -254,6 +255,21 @@ M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
   benchmark session safety followed; cancelling a running benchmark stays open
   (see `docs/status.md`).
 
+M18 (`064-tactile-craft-motion-and-devsecops`) is delivered in source as of
+2026-11-24 (#138, #139, #140, #141, #142, and Wave 2 showcase PR):
+
+- [064 Tactile Craft, Truthful Motion, and DevSecOps Hardening](../../specs/064-tactile-craft-motion-and-devsecops/spec.md)
+  delivers the reproducible `cargo xtask security` local gate and workflow
+  sidecar/AGENTS hygiene contracts (#138, #140), EOF-drained and gate-safe
+  benchmark cancellation plus `ignatius bench --allow-write` production
+  gating (#139), `FormatRipple` / `NoticeSettle` / `BenchSettle`, SQL-aware
+  matching bracket highlighting, hairline scrollbars, inline sort chevrons,
+  and `>= 4.5:1` contrast pins across all seven built-in palettes (#141),
+  exclusive self-time query plan bottleneck scoring with proportional 5-cell
+  micro-bars, palette SQL preview cards and scroll thumbs, and studio modal
+  headers/deltas (#142), alongside refreshed showcase stills, the `boot-reveal`
+  APNG, elevated hero SVGs, and editorial `README.md`.
+
 ```mermaid
 flowchart LR
     %% Planning dependencies, not a runtime deployment.
@@ -278,6 +294,7 @@ flowchart LR
     M14 --> M15["M15 Structured Values, Plan History & Fleet Health (059-061)"]
     M15 --> M16["M16 Editorial TUI Aesthetic & Atelier/Paper Themes (062)"]
     M16 --> M17["M17 Living Surfaces (063)"]
+    M17 --> M18["M18 Tactile Craft, Motion & DevSecOps (064)"]
 ```
 
 ## Start here

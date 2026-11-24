@@ -8,6 +8,38 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Security: Added `cargo xtask security` (`xtask/src/security.rs`) to run policy
+  and supply-chain contract suites, byte-identity checks for `AGENTS.md` and
+  `CLAUDE.md`, sidecar `tests.rs` hygiene checks, em/en dash checks, pinned
+  `actionlint`, `zizmor`, and ANSI-stripped `gitleaks` validation using digests
+  parsed directly from `.github/workflows/ci.yml`, and `cargo-deny` advisory/
+  licence checks (`Feature 064`, `#138`, `#140`).
+- New: In-flight query benchmarks can now be cancelled safely with `Ctrl+C`
+  (`BenchmarkCancelHandle`), draining server cancel EOF within a bounded timeout,
+  never holding `user_sql_gate` across `.await`, skipping Query B, and rolling
+  back cleanly so the session stays in `Autocommit` with zero committed writes;
+  `ignatius bench` now enforces `--allow-write` against production targets
+  before opening a connection (`Feature 064`, `#139`).
+- New: Added bounded `FormatRipple` (`360 ms`), `NoticeSettle` (`480 ms`), and
+  `BenchSettle` (`480 ms`) transitions, SQL-aware matching bracket highlighting
+  (`(...)` / `[...]` outside strings, comments, and quoted identifiers), an
+  editor multi-tab pill bar and `Token::Border` split dividers, hairline `┃`/`│`
+  scrollbars, inline column sort chevrons (`▾`/`▴`), and `>= 4.5:1` contrast
+  enforcement across all four surface tiers for every non-border token in all
+  seven built-in themes (`Feature 064`, `#141`).
+- Improved: Query plan attention now scores exclusive self-time/self-cost
+  (`PlanNode::exclusive_time_ms` / `exclusive_cost`) instead of root-biased
+  inclusive totals, displaying proportional 5-cell micro-bars (`━━━──`) while
+  reserving unclipped badge space; command palette highlights query matches,
+  paints `SurfaceAlt` SQL preview cards, and draws a `┃` scroll thumb; modal
+  tables gain `SurfaceAlt` headers (`modal_table_header_row`), colored benchmark
+  deltas, `recessed_pill(Focus)` chord keycaps, structured cell inspector
+  indent guides, and key-emphasized review rails (`Feature 064`, `#142`).
+- Improved: Refreshed all 14 2x showcase stills and 4 animated motion captures
+  (adding `boot-reveal.png` and `boot-reveal-still.png` from real `render_banner`
+  frames), elevated `banner-dark.svg` and `banner-light.svg` with a studio
+  specification matrix, and rewrote `README.md` (`Feature 064`, Wave 69).
+
 - Fixed: Benchmarks and analysed plan comparisons no longer share the session
   with other work. Benchmark Query A and Query B ran at the same time on one
   session, and workbench statements, `\watch` or a plan diff's `EXPLAIN
