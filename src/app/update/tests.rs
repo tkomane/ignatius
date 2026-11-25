@@ -140,6 +140,7 @@ fn manual_theme_direct_action_preserves_every_input_owner_and_pending_prefix() {
         Message::UpdateTargetLoaded {
             request: *request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(prompt.update_prompt.is_some());
@@ -571,6 +572,7 @@ fn review_viewport_case(family: &str, long: bool) -> Model {
                 Message::UpdateTargetLoaded {
                     request: *request,
                     result: Box::new(Ok(update_relation())),
+                    transaction: None,
                 },
             );
             let replacement = if long {
@@ -830,6 +832,7 @@ fn review_privacy_late_metadata_cannot_shadow_the_current_copy_owner() {
         Message::UpdateTargetLoaded {
             request: *request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     let frame = split_frame(&model);
@@ -917,7 +920,8 @@ fn review_late_metadata_discards_only_its_intent_and_preserves_newer_input() {
                     &mut model,
                     Message::UpdateTargetLoaded {
                         request: *request,
-                        result: Box::new(result)
+                        result: Box::new(result),
+                        transaction: None,
                     }
                 )
                 .is_empty()
@@ -964,7 +968,8 @@ fn review_late_metadata_unknown_requests_preserve_the_live_lookup_and_owner() {
                 &mut model,
                 Message::UpdateTargetLoaded {
                     request: unrelated,
-                    result: Box::new(Ok(update_relation()))
+                    result: Box::new(Ok(update_relation())),
+                    transaction: None,
                 }
             )
             .is_empty()
@@ -978,7 +983,8 @@ fn review_late_metadata_unknown_requests_preserve_the_live_lookup_and_owner() {
             &mut model,
             Message::UpdateTargetLoaded {
                 request: *request,
-                result: Box::new(Ok(update_relation()))
+                result: Box::new(Ok(update_relation())),
+                transaction: None,
             }
         )
         .is_empty()
@@ -1220,6 +1226,7 @@ fn review_viewport_each_new_candidate_starts_at_zero() {
                     Message::UpdateTargetLoaded {
                         request: *request,
                         result: Box::new(Ok(update_relation())),
+                        transaction: None,
                     },
                 );
                 update(&mut model, Message::Pasted("synthetic-next-value".into()));
@@ -1486,6 +1493,7 @@ fn review_viewport_entire_existing_update_bound_is_reachable_without_caching_sql
         Message::UpdateTargetLoaded {
             request: *request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     update(
@@ -2700,6 +2708,7 @@ fn connection_loss_discards_server_prompts_but_keeps_local_copy_available() {
         Message::UpdateTargetLoaded {
             request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(cell_update.update_prompt.is_none());
@@ -6550,6 +6559,7 @@ fn cell_update_reads_metadata_then_reviews_and_sends_one_parameterized_effect() 
         Message::UpdateTargetLoaded {
             request: *request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(model.update_prompt.is_some());
@@ -6611,6 +6621,7 @@ fn cell_update_cancel_sends_nothing_and_production_is_refused_before_metadata() 
         Message::UpdateTargetLoaded {
             request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     update(&mut model, Message::Action(Action::Activate));
@@ -6673,6 +6684,7 @@ fn cell_update_refuses_non_table_and_privilege_targets_before_value_input() {
             Message::UpdateTargetLoaded {
                 request,
                 result: Box::new(Ok(relation)),
+                transaction: None,
             },
         );
         assert!(model.update_prompt.is_none());
@@ -6703,6 +6715,43 @@ fn cell_update_refuses_non_table_and_privilege_targets_before_value_input() {
 }
 
 #[test]
+fn a_cell_update_lookup_reports_a_failed_query_transaction_only_for_its_request() {
+    use crate::query::result::TransactionState;
+
+    let mut model = cell_update_model();
+    model.transaction = TransactionState::Open;
+    let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("expected an update target lookup, got {effects:?}");
+    };
+    let failed_lookup = |request| Message::UpdateTargetLoaded {
+        request,
+        result: Box::new(Err(crate::diagnostics::Diagnostic::new(
+            crate::diagnostics::DiagnosticKind::Query,
+            "catalogue read failed",
+            "preparing a result-cell update",
+        ))),
+        transaction: Some(TransactionState::Failed),
+    };
+
+    assert!(update(&mut model, failed_lookup(request + 1)).is_empty());
+    assert_eq!(model.transaction, TransactionState::Open);
+    assert!(update(&mut model, failed_lookup(*request)).is_empty());
+    assert_eq!(model.transaction, TransactionState::Failed);
+    assert!(model.update_lookup.is_none());
+    assert!(model.update_prompt.is_none());
+    assert!(model.pending_update.is_none());
+    assert!(update(&mut model, Message::Action(Action::GenerateCellUpdate)).is_empty());
+    assert!(
+        model
+            .cell_update_notice
+            .as_deref()
+            .unwrap()
+            .contains("transaction is failed")
+    );
+}
+
+#[test]
 fn a_late_update_metadata_response_cannot_replace_a_changed_selection() {
     let mut model = cell_update_model();
     let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
@@ -6716,6 +6765,7 @@ fn a_late_update_metadata_response_cannot_replace_a_changed_selection() {
         Message::UpdateTargetLoaded {
             request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(model.update_prompt.is_none());
@@ -6748,6 +6798,7 @@ fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select(
         Message::UpdateTargetLoaded {
             request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     update(&mut model, Message::Action(Action::Activate));
@@ -9412,6 +9463,7 @@ fn w02_refresh_while_cell_update_lookup_in_flight_invalidates_stale_lookup() {
         Message::UpdateTargetLoaded {
             request: lookup_request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(stale_effects.is_empty(), "stale lookup produces no effects");
@@ -12187,6 +12239,7 @@ fn structured_inspector_uses_existing_review_and_discards_stale_selection() {
         Message::UpdateTargetLoaded {
             request: *request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(model.inspector.is_none());
@@ -12211,6 +12264,7 @@ fn structured_inspector_uses_existing_review_and_discards_stale_selection() {
         Message::UpdateTargetLoaded {
             request: *request,
             result: Box::new(Ok(update_relation())),
+            transaction: None,
         },
     );
     assert!(update(&mut model, Message::Pasted("true".to_owned())).is_empty());

@@ -162,10 +162,13 @@ generated update and verify exactly one row changes only after confirmation.
   `SELECT` with direct source-column projections and MUST refuse ambiguous
   shapes without guessing.
 - **FR-2305**: Relation discovery MUST resolve the source relation against the
-  live PostgreSQL session and MUST return the resolved schema, relation kind,
-  read privilege, update privilege and primary-key membership. Unqualified
-  names include the current session's temporary schema at its effective
-  position in the relation search path.
+  live query session that produced the retained result and will execute the
+  reviewed write. It MUST return the resolved schema, relation kind, read
+  privilege, update privilege and primary-key membership. Unqualified names
+  include that session's temporary schema at its effective position in the
+  relation search path. The `pg_temp` qualifier resolves to the session's
+  physical temporary schema. Discovery is serialized with user SQL and
+  reports the backend's transaction state after a lookup error.
 - **FR-2306**: The client MUST refuse non-table targets, unavailable update
   privilege, missing primary keys, missing projected key columns, NULL key
   values, duplicate mappings and primary-key cell edits.
@@ -238,7 +241,9 @@ generated update and verify exactly one row changes only after confirmation.
   candidate, production target and read-only target emits zero update effects.
 - **SC-2303**: Live disposable PostgreSQL evidence proves one confirmed update
   changes one intended row, a cancelled review changes none, and the original
-  result is not automatically rerun.
+  result is not automatically rerun. With the independent object-tree session
+  connected, the interactive route can review and update the query session's
+  temporary table through unqualified and `pg_temp` sources.
 - **SC-2304**: Automated privacy checks find no synthetic replacement or key
   value in model/effect debug output, history, diagnostics or logging output.
 - **SC-2305**: Generated templates and bound values remain within the existing

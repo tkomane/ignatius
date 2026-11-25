@@ -1105,13 +1105,17 @@ async fn event_loop(
                     );
                 }
                 Effect::LoadUpdateTarget { request, relation } => {
+                    // Use the backend that returned the row, including its temporary schema.
                     spawn_load_update_target(
                         tx.clone(),
-                        reader(&session, &metadata),
+                        Arc::clone(&session),
                         request,
                         relation,
-                        Arc::clone(&connection_generation),
-                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                        ConnectionScope {
+                            generation: Arc::clone(&connection_generation),
+                            request: connection_generation
+                                .load(std::sync::atomic::Ordering::SeqCst),
+                        },
                     );
                 }
                 Effect::LoadDefinition { request, object } => {
@@ -2560,37 +2564,47 @@ fn spawn_load_update_target(
     slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
     request: u64,
     relation: crate::query::RelationReference,
-    generation: Arc<std::sync::atomic::AtomicU64>,
-    request_generation: u64,
+    scope: ConnectionScope,
 ) {
     tokio::spawn(async move {
+        if !scope.is_current() {
+            return;
+        }
         let opened = {
             let held = slot.read().await;
             held.clone()
         };
-        let result = match opened {
-            Some(session) => {
-                session
-                    .update_relation(relation.schema.as_deref(), &relation.relation)
-                    .await
-            }
-            None => Err(Diagnostic::new(
-                DiagnosticKind::Connection,
-                "the connection was unavailable while reading update target metadata",
-                "preparing a result-cell update",
-            )
-            .next_action("reconnect before preparing a cell update")),
-        };
-        if !connection_generation_is_current(&generation, request_generation) {
+        if !scope.is_current() {
             return;
         }
-        let _ = tx.send(connection_message(
-            request_generation,
+        let (result, transaction) = match opened {
+            Some(session) => {
+                session
+                    .update_relation_for_workbench(relation.schema.as_deref(), &relation.relation)
+                    .await
+            }
+            None => (
+                Err(Diagnostic::new(
+                    DiagnosticKind::Connection,
+                    "the connection was unavailable while reading update target metadata",
+                    "preparing a result-cell update",
+                )
+                .next_action("reconnect before preparing a cell update")),
+                None,
+            ),
+        };
+        if !scope.is_current() {
+            return;
+        }
+        send_connection_message(
+            &tx,
+            scope.request,
             Message::UpdateTargetLoaded {
                 request,
                 result: Box::new(result),
+                transaction,
             },
-        ));
+        );
     });
 }
 

@@ -315,9 +315,10 @@ trimming. Earlier interrupted temporary files are preserved for inspection.
 The interactive client supports a deliberately narrow result-cell write flow.
 With Results focused, `Ctrl+K u` or the command palette accepts only a direct
 single-table `SELECT` with direct projections, optional aliases or `*`. The
-relation is resolved in the current session's search path, including its
-temporary schema in PostgreSQL's effective order. PostgreSQL metadata supplies
-its kind, read and update privileges, columns and primary-key membership.
+query backend resolves the relation in its effective PostgreSQL search path,
+including its temporary schema. An explicit `pg_temp` qualifier resolves to
+that backend's physical temporary schema. PostgreSQL metadata supplies the
+relation kind, read and update privileges, columns and primary-key membership.
 Only ordinary and partitioned tables with all primary-key columns
 projected and non-NULL in the selected row are eligible; a primary-key cell is
 not an editable target.

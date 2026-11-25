@@ -397,8 +397,8 @@ pub async fn columns(
 /// for a generated cell update.
 ///
 /// Unqualified names follow the session's explicit search path, with its
-/// temporary schema first when PostgreSQL searches it implicitly. Qualified
-/// names match exactly. Names are bound parameters throughout the query.
+/// temporary schema first when PostgreSQL searches it implicitly. The `pg_temp`
+/// qualifier names that same temporary schema. Names are bound parameters.
 pub async fn update_relation(
     client: &Client,
     schema: Option<&str>,
@@ -411,7 +411,9 @@ pub async fn update_relation(
          FROM pg_catalog.pg_class c \
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          WHERE c.relname = $1 \
-           AND (($2::text IS NOT NULL AND n.nspname = $2) \
+           AND (($2::text IS NOT NULL AND ( \
+                 ($2::text = 'pg_temp' AND n.oid = pg_catalog.pg_my_temp_schema()) \
+                 OR ($2::text <> 'pg_temp' AND n.nspname = $2))) \
              OR ($2::text IS NULL AND (n.nspname = ANY(pg_catalog.current_schemas(false)) \
                OR n.oid = pg_catalog.pg_my_temp_schema()))) \
          ORDER BY CASE WHEN $2::text IS NULL THEN \

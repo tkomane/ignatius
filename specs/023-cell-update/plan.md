@@ -107,6 +107,18 @@ read and reviewed update on a temporary table with the default search path.
 Retain the existing coverage for an explicit temporary schema, relation kind,
 privileges and primary-key requirements.
 
+## W03 query-session relation discovery
+
+Route `LoadUpdateTarget` to the query session, which owns the active relation
+search path, role and temporary schema. Keep the existing request and
+connection-generation checks, including before catalogue I/O. Serialize the
+lookup with user SQL and probe the existing transaction state on lookup
+failure. Bind the qualified `pg_temp` alias to that session's temporary
+namespace and keep its physical schema in the review.
+Verify both spellings with a separate object-tree connection present, then
+confirm one reviewed update and explicitly query the new value. Check that
+metadata failures report open and failed transaction states accurately.
+
 ## Implementation Phases
 
 1. Add the Feature 023 artifacts and active feature pointer.
