@@ -1,59 +1,69 @@
 # Personas and jobs
 
-## Primary: the infrastructure engineer with production access
+## Primary: the backend developer and database engineer
 
-Works across cloud and on-premises systems. Fluent in the terminal, not primarily
-a SQL developer. Has credentials for databases where a careless statement is an
-incident.
-
-What they actually need is not a better editor. It is to know, without looking
-anything up, which database they are pointed at, whether the connection is
-protected, and whether the statement they just cancelled actually stopped.
+Builds services on PostgreSQL every day, splitting time between local Docker
+instances, staging clusters, and production diagnostics over SSH. Wants a fast,
+capable workbench that launches instantaneously inside the terminal alongside
+the rest of their tooling instead of context-switching to a heavy Electron or
+Java GUI.
 
 Their jobs:
 
-- Check something in a database they have not touched in months, quickly, without
-  re-learning the tool.
-- Run a diagnostic query against production and be certain, at a glance, that it
-  is production.
-- Stop a query that is holding a lock, and know whether it stopped.
-- Put the same query into a script tomorrow, with an exit code to branch on.
-- Explain to a colleague what went wrong, using output they can paste safely.
+- Iterate rapidly across multi-tab SQL buffers with schema-aware completions,
+  formatting, and named parameters.
+- Inspect wide result sets, JSONB documents, arrays, and composites without
+  wrapping into unreadable `psql` text.
+- Profile slow queries with interactive `EXPLAIN` trees, bottleneck micro-bars,
+  and A/B query benchmarks to verify fixes before merging.
+- Keep `.sql` queries and schema baselines versioned in Git and automate checks
+  with the same CLI binary in CI.
 
-What makes them abandon a tool: a status that turned out to be a lie, a silent
-fallback, an interface that needs colour they cannot see, or a client that cannot
-be scripted.
+What makes them switch to Ignatius: instant startup, rich studio features in
+the terminal, full keyboard speed, and zero memory bloat.
 
-## Secondary: the application developer
+## Secondary: the DBA and infrastructure engineer
 
-Lives in a repository and a local database. Wants iteration speed: type SQL, see
-rows, adjust, repeat, without leaving the terminal.
-
-Their jobs:
-
-- Iterate on a query against a local or development database.
-- Read a wide result without it wrapping into unreadable text.
-- Understand a PostgreSQL error well enough to fix it without a search engine.
-- Keep useful queries as ordinary `.sql` files in the repository.
-
-What makes them abandon a tool: slow startup, a fight with the editor, or losing
-their buffer.
-
-## Tertiary: the data analyst who lives in a terminal
-
-Comfortable in SQL, less so in infrastructure. Wants results out of the terminal
-and into a file or a pipeline.
+Operates staging and production PostgreSQL clusters across cloud and
+on-premises environments. Needs deep PostgreSQL visibility - live sessions,
+lock trees, schema diffs, ER relationships, and streaming `COPY` - combined
+with deterministic connection hygiene and clear environment boundaries.
 
 Their jobs:
 
-- Explore a schema they do not know.
-- Extract a result to CSV or JSON, and know whether it was complete.
-- Distinguish a NULL from an empty string without guessing.
+- Inspect `pg_stat_activity` and blocking chains, and cancel a runaway query
+  with confirmed server feedback.
+- Verify TLS mode (`verify-full` vs `require`), read-only posture, and `[PROD]`
+  targeting at a glance before issuing any statement.
+- Compare schema snapshots across environments, generate DDL, and run guided
+  maintenance (`VACUUM`, `ANALYZE`, `REINDEX`) with explicit preview and write
+  confirmations.
+- Export results or run scripted operational checks from cron or CI with
+  documented exit codes.
+
+What makes them trust Ignatius: server-reported TLS and transaction state,
+fail-closed configuration, clear plain-text safety markers, and predictable CLI
+exit codes.
+
+## Tertiary: the terminal-native data analyst
+
+Fluent in SQL and command-line pipelines, working directly over terminal
+sessions without needing a desktop BI suite.
+
+Their jobs:
+
+- Explore unfamiliar schemas with catalog search and interactive ER diagrams.
+- Slice retained results locally (column visibility, pinning, sorting, value
+  profiling) without re-running expensive queries.
+- Stream large datasets cleanly to CSV, TSV, JSON, NDJSON, or Markdown with
+  explicit `NULL` vs empty-string clarity and completion guarantees.
 
 ## Who this is not for
 
-- Someone who wants one client for PostgreSQL, MySQL and MongoDB. That
-  contradicts the second principle of the constitution.
-- Someone who wants a GUI. DBeaver, TablePlus and DataGrip are good.
-- A team wanting shared saved queries and accounts. Saved queries are `.sql`
-  files; use Git.
+- Someone who needs one generic client for PostgreSQL, MySQL, and MongoDB.
+  Ignatius goes deep on PostgreSQL semantics rather than lowest-common-denominator
+  SQL.
+- Someone who prefers a mouse-driven desktop window manager or spreadsheet BI
+  tool over a keyboard-first terminal workspace.
+- A team looking for cloud-hosted shared query folders and user accounts.
+  Ignatius keeps queries, configs, and history local.

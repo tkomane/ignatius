@@ -239,12 +239,23 @@ fn deterministic_sweep_decode_edge_underline_and_tagline() {
             }
         }
 
-        // Tagline row (row 7) is blank during revealing
+        // Tagline row (row 7) stays blank on ticks 0..10 and reveals progressively on 10..12
         let tagline_str = line_to_string(&lines[7]);
-        assert!(
-            tagline_str.trim().is_empty(),
-            "tagline must be blank on tick {tick}"
-        );
+        assert_eq!(tagline_str.len(), unicode_wordmark_tagline().len());
+        if tick < 10 {
+            assert!(
+                tagline_str.trim().is_empty(),
+                "tagline must be blank on tick {tick}"
+            );
+        } else {
+            let revealed = tagline_str.trim();
+            assert!(
+                !revealed.is_empty(),
+                "tagline should start revealing at tick {tick}"
+            );
+            assert!(crate::branding::IDENTITY_LINE.starts_with(revealed));
+            assert_ne!(revealed, crate::branding::IDENTITY_LINE);
+        }
     }
 
     // On final frame, tagline appears
@@ -298,7 +309,15 @@ fn deterministic_sweep_decode_edge_underline_and_tagline() {
         }
 
         let tagline_str = line_to_string(&lines[5]);
-        assert!(tagline_str.trim().is_empty());
+        assert_eq!(tagline_str.len(), ascii_wordmark_tagline().len());
+        if tick < 10 {
+            assert!(tagline_str.trim().is_empty());
+        } else {
+            let revealed = tagline_str.trim();
+            assert!(!revealed.is_empty());
+            assert!(crate::branding::IDENTITY_LINE.starts_with(revealed));
+            assert_ne!(revealed, crate::branding::IDENTITY_LINE);
+        }
     }
 }
 
@@ -486,7 +505,7 @@ fn connecting_shell_at_sixty_four_and_eighty_columns_renders_wordmark_above_step
 #[test]
 fn the_identity_line_comes_from_branding_and_sits_centred_under_each_wordmark() {
     let line = crate::branding::IDENTITY_LINE;
-    assert_eq!(line, "a quiet instrument for PostgreSQL");
+    assert_eq!(line, "the PostgreSQL workbench for your terminal");
     for (tagline, art_width) in [
         (
             unicode_wordmark_tagline(),
@@ -510,4 +529,134 @@ fn the_identity_line_comes_from_branding_and_sits_centred_under_each_wordmark() 
         UNICODE_WORDMARK_LINES[0].chars().count()
     );
     assert_eq!(ASCII_WORDMARK_WIDTH, ASCII_WORDMARK_UNDERLINE.len());
+}
+
+#[test]
+fn gleam_crest_highlights_two_cells_behind_decode_frontier_and_clears_on_final() {
+    use ratatui::style::Modifier;
+
+    for depth in [
+        ColorDepth::TrueColor,
+        ColorDepth::Indexed256,
+        ColorDepth::Basic16,
+        ColorDepth::None,
+    ] {
+        for tier in [GlyphTier::Unicode, GlyphTier::Ascii] {
+            let p = presentation(ThemeChoice::Atelier, true, tier, depth);
+            let expected_gleam = p.theme.style(Token::Focus).add_modifier(Modifier::BOLD);
+            let width = if tier == GlyphTier::Ascii {
+                ASCII_WORDMARK_WIDTH
+            } else {
+                UNICODE_WORDMARK_WIDTH
+            };
+            let ramp = p.theme.banner_ramp(width);
+            let state = BannerState::Revealing { tick: 4 };
+            let front = front_col(width, state);
+            assert!(
+                front >= 5,
+                "tick 4 front {front} must leave room for gleam crest"
+            );
+
+            let lines = render_banner_lines(state, &p, 80);
+            let row0_spans = &lines[0].spans;
+            let expected_row0_len = if tier == GlyphTier::Ascii {
+                ASCII_WORDMARK_LINES[0].chars().count()
+            } else {
+                UNICODE_WORDMARK_WIDTH
+            };
+            assert_eq!(row0_spans.len(), expected_row0_len);
+            for (col, span) in row0_spans.iter().enumerate() {
+                if span.content == " " {
+                    continue;
+                }
+                if col + 3 < front && col + 5 >= front {
+                    assert_eq!(
+                        span.style, expected_gleam,
+                        "col {col} (front {front}, {tier:?}, {depth:?}) must render gleam crest"
+                    );
+                } else {
+                    assert_eq!(
+                        span.style, ramp[col],
+                        "col {col} (front {front}, {tier:?}, {depth:?}) must use ramp style"
+                    );
+                }
+            }
+
+            // Final state clears the gleam crest so every cell settles to the ramp.
+            let final_lines = render_banner_lines(BannerState::Final, &p, 80);
+            for (col, span) in final_lines[0].spans.iter().enumerate() {
+                if span.content == " " {
+                    continue;
+                }
+                assert_eq!(span.style, ramp[col]);
+            }
+        }
+    }
+}
+
+#[test]
+fn progressive_tagline_reveals_left_to_right_from_tick_ten_to_final() {
+    let p = presentation(
+        ThemeChoice::Dark,
+        true,
+        GlyphTier::Unicode,
+        ColorDepth::TrueColor,
+    );
+    let expected_full = unicode_wordmark_tagline();
+    let expected_pad = expected_full.len() - crate::branding::IDENTITY_LINE.len();
+
+    let lines_9 = render_banner_lines(BannerState::Revealing { tick: 9 }, &p, 80);
+    assert!(line_to_string(&lines_9[7]).trim().is_empty());
+
+    let lines_10 = render_banner_lines(BannerState::Revealing { tick: 10 }, &p, 80);
+    let tag_10 = line_to_string(&lines_10[7]);
+    assert_eq!(tag_10.len(), expected_full.len());
+    assert!(tag_10.starts_with(&" ".repeat(expected_pad)));
+    let trimmed_10 = tag_10.trim();
+    assert!(!trimmed_10.is_empty());
+    assert!(crate::branding::IDENTITY_LINE.starts_with(trimmed_10));
+
+    let lines_11 = render_banner_lines(BannerState::Revealing { tick: 11 }, &p, 80);
+    let tag_11 = line_to_string(&lines_11[7]);
+    assert_eq!(tag_11.len(), expected_full.len());
+    assert!(tag_11.starts_with(&" ".repeat(expected_pad)));
+    let trimmed_11 = tag_11.trim();
+    assert!(trimmed_11.len() > trimmed_10.len());
+    assert!(crate::branding::IDENTITY_LINE.starts_with(trimmed_11));
+    assert!(trimmed_11.len() < crate::branding::IDENTITY_LINE.len());
+
+    let final_lines = render_banner_lines(BannerState::Final, &p, 80);
+    assert_eq!(line_to_string(&final_lines[7]), expected_full);
+}
+
+#[test]
+fn reduced_motion_renders_static_final_frame_from_tick_zero() {
+    let p = Presentation::new(
+        Theme::new(ThemeChoice::Atelier, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        true,
+    );
+    let mut state = BannerState::new(p.reduced_motion);
+    assert!(state.is_final());
+
+    let area = Rect::new(0, 0, 80, 24);
+    let mut before = Buffer::empty(area);
+    render_banner(state, Some("resolving profile"), &p, area, &mut before);
+
+    state.advance();
+    assert!(state.is_final());
+
+    let mut after = Buffer::empty(area);
+    render_banner(state, Some("resolving profile"), &p, area, &mut after);
+    assert_eq!(before, after);
+
+    let joined: String = before.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(joined.contains(UNICODE_WORDMARK_LINES[0]));
+    assert!(joined.contains(crate::branding::IDENTITY_LINE));
+    for ch in ['░', '▒', '▓'] {
+        assert!(
+            !joined.contains(ch),
+            "reduced motion must not emit decode char {ch}"
+        );
+    }
 }

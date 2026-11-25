@@ -1,4 +1,4 @@
-//! Ignatius - a terminal-native PostgreSQL workbench.
+//! Ignatius - a full-powered PostgreSQL workbench for the terminal.
 //!
 //! The library carries all domain behaviour. The binary in `src/main.rs` is a thin
 //! process entry point. Nothing below `ui` may depend on the terminal, and nothing

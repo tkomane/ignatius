@@ -242,13 +242,14 @@ motion there is no heartbeat at all; the word and the elapsed time remain.
 **The boot reveal wordmark** provides immediate feedback while a connection is
 being established. It operates under strict bounds: a `1.4 s` cap (it takes
 twelve ticks of the 90 ms busy clock, about 1.1 s), a left-to-right sweep with
-easing and a decode leading edge, an any-key skip that still delivers the typed
-key to its handler, immediate truncation on
+easing, a decode leading edge, a 2-cell gleaming crest behind the frontier, and a
+progressive identity-line reveal starting on tick 10, an any-key skip that still
+delivers the typed key to its handler, immediate truncation on
 any connection outcome (success or failure), runs at most once per process,
 renders a static final frame from tick 0 under reduced motion, falls back to a
 compact monogram under 64 columns, is omitted entirely on too-small layouts
 below 40x8, and is never emitted in plain mode or non-interactive machine output.
-Its final frame sets the identity line, `a quiet instrument for PostgreSQL`,
+Its final frame sets the identity line, `the PostgreSQL workbench for your terminal`,
 centred under the wordmark.
 
 Motion stops entirely with `ui.reduced-motion = true`, and the same words and the

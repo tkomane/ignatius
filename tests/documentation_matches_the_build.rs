@@ -512,7 +512,10 @@ fn gui_grade_experience_documentation_matches_the_build_and_quickstart() {
             "so it never fills, never arrives and never completes",
         ),
         (ICONS_AND_MOTION, "twelve ticks of the 90 ms busy clock"),
-        (ICONS_AND_MOTION, "a quiet instrument for PostgreSQL"),
+        (
+            ICONS_AND_MOTION,
+            "the PostgreSQL workbench for your terminal",
+        ),
         (INTERACTION, "Paste is bounded and explicit"),
         (INTERACTION, "The pointer enhances without replacing"),
         (

@@ -4,10 +4,10 @@
 //! displayed over the connecting wait.
 
 use crate::ui::layout::Presentation;
-use crate::ui::theme::Token;
+use crate::ui::theme::{Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
@@ -167,6 +167,111 @@ pub fn front_col(width: usize, state: BannerState) -> usize {
     }
 }
 
+/// First revealing tick on which `IDENTITY_LINE` starts appearing.
+const TAGLINE_REVEAL_START_TICK: u8 = 10;
+
+/// Returns whether `col` lies in the 2-cell gleaming leading crest directly
+/// behind the 3-column decode frontier during `BannerState::Revealing`.
+const fn is_gleam_col(state: BannerState, col: usize, front: usize) -> bool {
+    !state.is_final() && col + 3 < front && col + 5 >= front
+}
+
+fn gleam_style(theme: &Theme) -> Style {
+    theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+}
+
+#[derive(Clone, Copy)]
+struct SweepContext<'a> {
+    state: BannerState,
+    front: usize,
+    decode_pool: &'a [char],
+    gleam: Style,
+}
+
+fn sweep_cell(
+    ctx: SweepContext<'_>,
+    row: usize,
+    col: usize,
+    final_ch: char,
+    base_style: Style,
+) -> (char, Style) {
+    if ctx.state.is_final() || col + 3 < ctx.front {
+        let style = if final_ch == ' ' {
+            Style::default()
+        } else if is_gleam_col(ctx.state, col, ctx.front) {
+            ctx.gleam
+        } else {
+            base_style
+        };
+        (final_ch, style)
+    } else if col < ctx.front {
+        if final_ch != ' ' {
+            let ch = ctx.decode_pool
+                [(col + row + usize::from(ctx.state.tick())) % ctx.decode_pool.len()];
+            (ch, base_style)
+        } else {
+            (' ', Style::default())
+        }
+    } else {
+        (' ', Style::default())
+    }
+}
+
+fn render_underline_row(
+    state: BannerState,
+    front: usize,
+    glyph: &str,
+    ul_len: usize,
+    ramp: &[Style],
+    gleam: Style,
+) -> Line<'static> {
+    let mut spans = Vec::with_capacity(ul_len);
+    for (col, &style) in ramp.iter().enumerate().take(ul_len) {
+        if col < front {
+            let cell_style = if is_gleam_col(state, col, front) {
+                gleam
+            } else {
+                style
+            };
+            spans.push(Span::styled(glyph.to_string(), cell_style));
+        } else {
+            spans.push(Span::raw(" "));
+        }
+    }
+    Line::from(spans)
+}
+
+fn render_tagline_row(state: BannerState, width: usize, theme: &Theme) -> Line<'static> {
+    let line = crate::branding::IDENTITY_LINE;
+    let left_pad = width.saturating_sub(line.len()) / 2;
+    let total_len = left_pad + line.len();
+
+    match state {
+        BannerState::Final => Line::styled(centred_identity_line(width), theme.style(Token::Muted)),
+        BannerState::Revealing { tick } if tick >= TAGLINE_REVEAL_START_TICK => {
+            let total_steps = usize::from(BANNER_TOTAL_TICKS - TAGLINE_REVEAL_START_TICK + 1);
+            let step = usize::from(tick - TAGLINE_REVEAL_START_TICK + 1).min(total_steps);
+            let revealed = (line.len() * step) / total_steps;
+            let mut spans = Vec::with_capacity(3);
+            if left_pad > 0 {
+                spans.push(Span::raw(" ".repeat(left_pad)));
+            }
+            if revealed > 0 {
+                spans.push(Span::styled(
+                    line[..revealed].to_string(),
+                    theme.style(Token::Muted),
+                ));
+            }
+            let trailing = line.len().saturating_sub(revealed);
+            if trailing > 0 {
+                spans.push(Span::raw(" ".repeat(trailing)));
+            }
+            Line::from(spans)
+        }
+        BannerState::Revealing { .. } => Line::raw(" ".repeat(total_len)),
+    }
+}
+
 /// Renders the banner lines according to the presentation tier and active state.
 #[must_use]
 pub fn render_banner_lines(
@@ -192,22 +297,16 @@ pub fn render_banner_lines(
         let width = ASCII_MONOGRAM.len();
         let ramp = theme.banner_ramp(width);
         let front = front_col(width, state);
+        let ctx = SweepContext {
+            state,
+            front,
+            decode_pool: &ASCII_DECODE_POOL,
+            gleam: gleam_style(theme),
+        };
         let art_chars: Vec<char> = ASCII_MONOGRAM.chars().collect();
         let mut spans = Vec::with_capacity(width);
-        for col in 0..width {
-            let final_ch = art_chars[col];
-            let ch = if state.is_final() || col + 3 < front {
-                final_ch
-            } else if col < front {
-                ASCII_DECODE_POOL[(col + usize::from(state.tick())) % ASCII_DECODE_POOL.len()]
-            } else {
-                ' '
-            };
-            let style = if ch != ' ' {
-                ramp[col]
-            } else {
-                Style::default()
-            };
+        for (col, &final_ch) in art_chars.iter().enumerate() {
+            let (ch, style) = sweep_cell(ctx, 0, col, final_ch, ramp[col]);
             spans.push(Span::styled(ch.to_string(), style));
         }
         vec![Line::from(spans)]
@@ -215,28 +314,18 @@ pub fn render_banner_lines(
         let width = 22;
         let ramp = theme.banner_ramp(width);
         let front = front_col(width, state);
+        let ctx = SweepContext {
+            state,
+            front,
+            decode_pool: &UNICODE_DECODE_POOL,
+            gleam: gleam_style(theme),
+        };
         let mut lines = Vec::with_capacity(UNICODE_MONOGRAM_LINES.len());
         for (row, &art_line) in UNICODE_MONOGRAM_LINES.iter().enumerate() {
             let art_chars: Vec<char> = art_line.chars().collect();
             let mut spans = Vec::with_capacity(art_chars.len());
             for (col, &final_ch) in art_chars.iter().enumerate() {
-                let ch = if state.is_final() || col + 3 < front {
-                    final_ch
-                } else if col < front {
-                    if final_ch != ' ' {
-                        UNICODE_DECODE_POOL
-                            [(col + row + usize::from(state.tick())) % UNICODE_DECODE_POOL.len()]
-                    } else {
-                        ' '
-                    }
-                } else {
-                    ' '
-                };
-                let style = if ch != ' ' {
-                    ramp[col]
-                } else {
-                    Style::default()
-                };
+                let (ch, style) = sweep_cell(ctx, row, col, final_ch, ramp[col]);
                 spans.push(Span::styled(ch.to_string(), style));
             }
             lines.push(Line::from(spans));
@@ -249,31 +338,22 @@ fn render_unicode_wordmark(state: BannerState, presentation: &Presentation) -> V
     const WIDTH: usize = UNICODE_WORDMARK_WIDTH;
     let theme = &presentation.theme;
     let ramp = theme.banner_ramp(WIDTH);
+    let gleam = gleam_style(theme);
     let front = front_col(WIDTH, state);
+    let ctx = SweepContext {
+        state,
+        front,
+        decode_pool: &UNICODE_DECODE_POOL,
+        gleam,
+    };
     let mut lines = Vec::with_capacity(8);
 
     for (row, &art_line) in UNICODE_WORDMARK_LINES.iter().enumerate() {
         let art_chars: Vec<char> = art_line.chars().collect();
         let mut spans = Vec::with_capacity(WIDTH);
-        for col in 0..WIDTH {
+        for (col, &base_style) in ramp.iter().enumerate().take(WIDTH) {
             let final_ch = art_chars.get(col).copied().unwrap_or(' ');
-            let ch = if state.is_final() || col + 3 < front {
-                final_ch
-            } else if col < front {
-                if final_ch != ' ' {
-                    UNICODE_DECODE_POOL
-                        [(col + row + usize::from(state.tick())) % UNICODE_DECODE_POOL.len()]
-                } else {
-                    ' '
-                }
-            } else {
-                ' '
-            };
-            let style = if ch != ' ' {
-                ramp[col]
-            } else {
-                Style::default()
-            };
+            let (ch, style) = sweep_cell(ctx, row, col, final_ch, base_style);
             spans.push(Span::styled(ch.to_string(), style));
         }
         lines.push(Line::from(spans));
@@ -281,23 +361,12 @@ fn render_unicode_wordmark(state: BannerState, presentation: &Presentation) -> V
 
     // Underline row (row 6)
     let ul_len = UNICODE_WORDMARK_UNDERLINE.chars().count();
-    let mut spans = Vec::with_capacity(ul_len);
-    for (col, &style) in ramp.iter().enumerate().take(ul_len) {
-        if col < front {
-            spans.push(Span::styled("▔", style));
-        } else {
-            spans.push(Span::raw(" "));
-        }
-    }
-    lines.push(Line::from(spans));
+    lines.push(render_underline_row(
+        state, front, "▔", ul_len, &ramp, gleam,
+    ));
 
     // Tagline row (row 7)
-    let tagline = unicode_wordmark_tagline();
-    if state.is_final() {
-        lines.push(Line::styled(tagline, theme.style(Token::Muted)));
-    } else {
-        lines.push(Line::raw(" ".repeat(tagline.len())));
-    }
+    lines.push(render_tagline_row(state, WIDTH, theme));
 
     lines
 }
@@ -306,32 +375,22 @@ fn render_ascii_wordmark(state: BannerState, presentation: &Presentation) -> Vec
     const WIDTH: usize = ASCII_WORDMARK_WIDTH;
     let theme = &presentation.theme;
     let ramp = theme.banner_ramp(WIDTH);
+    let gleam = gleam_style(theme);
     let front = front_col(WIDTH, state);
+    let ctx = SweepContext {
+        state,
+        front,
+        decode_pool: &ASCII_DECODE_POOL,
+        gleam,
+    };
     let mut lines = Vec::with_capacity(6);
 
     for (row, &art_line) in ASCII_WORDMARK_LINES.iter().enumerate() {
         let art_chars: Vec<char> = art_line.chars().collect();
         let line_len = art_chars.len();
         let mut spans = Vec::with_capacity(line_len);
-        for col in 0..line_len {
-            let final_ch = art_chars[col];
-            let ch = if state.is_final() || col + 3 < front {
-                final_ch
-            } else if col < front {
-                if final_ch != ' ' {
-                    ASCII_DECODE_POOL
-                        [(col + row + usize::from(state.tick())) % ASCII_DECODE_POOL.len()]
-                } else {
-                    ' '
-                }
-            } else {
-                ' '
-            };
-            let style = if ch != ' ' {
-                ramp[col]
-            } else {
-                Style::default()
-            };
+        for (col, &final_ch) in art_chars.iter().enumerate() {
+            let (ch, style) = sweep_cell(ctx, row, col, final_ch, ramp[col]);
             spans.push(Span::styled(ch.to_string(), style));
         }
         lines.push(Line::from(spans));
@@ -339,23 +398,12 @@ fn render_ascii_wordmark(state: BannerState, presentation: &Presentation) -> Vec
 
     // Underline row (row 4)
     let ul_len = ASCII_WORDMARK_UNDERLINE.chars().count();
-    let mut spans = Vec::with_capacity(ul_len);
-    for (col, &style) in ramp.iter().enumerate().take(ul_len) {
-        if col < front {
-            spans.push(Span::styled("-", style));
-        } else {
-            spans.push(Span::raw(" "));
-        }
-    }
-    lines.push(Line::from(spans));
+    lines.push(render_underline_row(
+        state, front, "-", ul_len, &ramp, gleam,
+    ));
 
     // Tagline row (row 5)
-    let tagline = ascii_wordmark_tagline();
-    if state.is_final() {
-        lines.push(Line::styled(tagline, theme.style(Token::Muted)));
-    } else {
-        lines.push(Line::raw(" ".repeat(tagline.len())));
-    }
+    lines.push(render_tagline_row(state, WIDTH, theme));
 
     lines
 }

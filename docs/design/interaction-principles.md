@@ -1,7 +1,9 @@
 # Interaction principles
 
-The emotional target is calm confidence. The user should feel oriented, in
-control, and slightly delighted. Nothing here is decoration for its own sake.
+Ignatius is built for fast, direct, keyboard-first work in PostgreSQL. Every
+panel, status indicator, and motion cue earns its space by keeping the user
+oriented, in control of server state, and productive without leaving the
+terminal.
 
 ## The rules
 

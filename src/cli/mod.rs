@@ -24,7 +24,7 @@ use secrecy::SecretString;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
-/// A terminal-native PostgreSQL workbench.
+/// A full-powered PostgreSQL workbench for the terminal.
 #[derive(Debug, Parser)]
 #[command(
     name = branding::BINARY_NAME,
