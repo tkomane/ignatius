@@ -4,6 +4,28 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 78 - Launch the built-in Entra provider through the Windows MSI - 25 November 2026
+
+- **W06 / 011 T002.** The Windows x64 built-in `entra` route tries a native
+  `az` spawn and falls back only after its missing-program error. It uses the
+  standard x64 MSI in the Program Files known folder when its `wbin` is on
+  PATH. The selected process retains the existing TLS, credential output and
+  deadline boundaries. Configured providers retain their ordinary path.
+  [Feature 011 tasks](../specs/011-cloud-identity/tasks.md)
+- **Focused verification.** The direct zero-timeout fixture received the
+  wrong timeout diagnostic in the draft and the original missing-program
+  diagnostic after correction. All 34 focused provider and picker checks
+  passed on macOS arm64. The full local verifier reported 2,382 passes
+  across 54 summaries on PostgreSQL 18.7 plain and verified TLS. The local
+  socket case and local `cargo-deny` skipped.
+- **Hosted Windows x64.** The opt-in dispatch at `fc221a2` completed all
+  17 CI jobs with the scheduled fixture drift job skipped. On
+  `windows-2025-vs2026` image `20261116.315.1`, Azure CLI MSI `2.93.0` returned
+  `version-matched` for both its direct control and the production launcher,
+  and `missing-program` for bare `az`. The actual directory-junction and
+  zero-timeout tests passed on Windows. The version probe used an account-free
+  synthetic TLS-required target. [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45695897697/job/139493085072)
+
 ## Wave 77 - Verify the Windows Azure CLI MSI launch - 25 November 2026
 
 - **W06 / 011 T001.** The opt-in CI dispatch at `620e6e2` ran the existing
@@ -19,6 +41,9 @@ before trusting anything else.
   cleanup. The selected [hosted CI run](https://github.com/tkomane/ignatius/actions/runs/45691294548)
   passed 17 jobs, including the opt-in step in the Windows job. The
   scheduled fixture-drift job skipped.
+- [PR #154](https://github.com/tkomane/ignatius/pull/154) merged at `346fc71`.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45694922488) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45694922471) passed.
 
 ## Wave 76 - Make sending-review disclosures readable - 25 November 2026
 

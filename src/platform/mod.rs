@@ -10,6 +10,21 @@ use std::path::Path;
 mod atomic;
 pub(crate) use atomic::{create_private_file, write_atomic};
 
+#[cfg(all(windows, target_arch = "x86_64"))]
+mod azure_cli;
+
+/// Discover the supported MSI package only after native Entra launch is missing.
+pub(crate) fn azure_cli_msi_python() -> io::Result<Option<std::path::PathBuf>> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        azure_cli::installed_python()
+    }
+    #[cfg(not(all(windows, target_arch = "x86_64")))]
+    {
+        Ok(None)
+    }
+}
+
 /// Restricts a file to its owner where the platform supports it.
 ///
 /// On Unix this sets mode `0600` for files and `0700` for directories. On Windows

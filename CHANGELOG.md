@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: The Windows x64 built-in Entra provider can launch the standard
+  Azure CLI MSI when the native `az` executable is missing and the installed
+  `wbin` directory is on PATH.
 - Fixed: Required safety and privacy disclosures use full body-text contrast
   in clipboard, production, EXPLAIN ANALYZE and parameter reviews.
 - Fixed: Connection details identify configured authentication providers by

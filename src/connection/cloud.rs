@@ -21,7 +21,12 @@ use crate::connection::target::ConnectionTarget;
 use crate::diagnostics::{Diagnostic, DiagnosticKind, redaction};
 use secrecy::SecretString;
 use std::collections::BTreeMap;
+use std::io;
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::time::Duration;
+use tokio::process::{Child, Command};
+use tokio::time::Instant;
 
 /// How long a provider's program may take before it is treated as hung.
 ///
@@ -316,8 +321,8 @@ pub async fn authenticate(
     let Some(name) = target.auth.clone() else {
         return Ok(target);
     };
-    let provider = find(&registry(configured), &name)?;
-    let token = fetch(&provider, &target).await?;
+    let (provider, launch) = resolve_provider(&name, configured)?;
+    let token = fetch_selected(&provider, &target, launch).await?;
     Ok(target.with_password(token))
 }
 
@@ -335,27 +340,114 @@ pub async fn fetch(
     provider: &Provider,
     target: &ConnectionTarget,
 ) -> Result<SecretString, Box<Diagnostic>> {
+    // A standalone definition carries no trusted registry origin.
+    fetch_selected(provider, target, Launch::Direct).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Launch {
+    Direct,
+    BuiltInEntra,
+}
+
+fn resolve_provider(
+    name: &str,
+    configured: &BTreeMap<String, Provider>,
+) -> Result<(Provider, Launch), Box<Diagnostic>> {
+    let provider = find(&registry(configured), name)?;
+    let launch = if name == "entra" && !configured.contains_key(name) {
+        Launch::BuiltInEntra
+    } else {
+        Launch::Direct
+    };
+    Ok((provider, launch))
+}
+
+fn package_command(python: PathBuf, arguments: &[String]) -> Command {
+    let mut command = Command::new(python);
+    command
+        .args(["-IBm", "azure.cli"])
+        .args(arguments)
+        .env("AZ_INSTALLER", "MSI");
+    command
+}
+
+fn capture_command_output(command: &mut Command) -> &mut Command {
+    command
+        .kill_on_drop(true)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+}
+
+fn spawn_provider(
+    program: &str,
+    arguments: &[String],
+    launch: Launch,
+    expired: impl Fn() -> bool,
+    msi_python: impl FnOnce() -> io::Result<Option<PathBuf>>,
+) -> io::Result<Child> {
+    match capture_command_output(Command::new(program).args(arguments)).spawn() {
+        Err(error) if launch == Launch::BuiltInEntra && error.kind() == io::ErrorKind::NotFound => {
+            if expired() {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            let Some(python) = msi_python()? else {
+                return Err(error);
+            };
+            // Native spawn and the fixed local metadata calls run through the
+            // OS synchronously. Their elapsed time counts against the same limit.
+            if expired() {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            capture_command_output(&mut package_command(python, arguments)).spawn()
+        }
+        result => result,
+    }
+}
+
+async fn fetch_selected(
+    provider: &Provider,
+    target: &ConnectionTarget,
+    launch: Launch,
+) -> Result<SecretString, Box<Diagnostic>> {
     require_encryption(target, &provider.name)?;
 
     let (program, arguments) = command_for(provider, target)?;
 
-    let mut command = tokio::process::Command::new(&program);
-    command
-        .args(&arguments)
-        .kill_on_drop(true)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    let started = command.output();
-    let output = match tokio::time::timeout(provider.timeout, started).await {
-        Err(_) => return Err(timed_out(provider, &program)),
-        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(not_found(provider, &program));
+    let io_diagnostic = |error: io::Error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            not_found(provider, &program)
+        } else {
+            could_not_run(provider, &program, &error.to_string())
         }
-        Ok(Err(error)) => return Err(could_not_run(provider, &program, &error.to_string())),
-        Ok(Ok(output)) => output,
     };
+    let output = if cfg!(all(windows, target_arch = "x86_64")) && launch == Launch::BuiltInEntra {
+        let deadline = Instant::now().checked_add(provider.timeout);
+        let expired = || deadline.is_some_and(|end| Instant::now() >= end);
+        let started = spawn_provider(
+            &program,
+            &arguments,
+            launch,
+            expired,
+            crate::platform::azure_cli_msi_python,
+        );
+        if expired() {
+            return Err(timed_out(provider, &program));
+        }
+        let wait = started.map_err(io_diagnostic)?.wait_with_output();
+        match deadline {
+            Some(end) => tokio::time::timeout_at(end, wait).await,
+            // Preserve Tokio's timeout behavior outside the clock's range.
+            None => tokio::time::timeout(provider.timeout, wait).await,
+        }
+    } else {
+        let mut command = Command::new(&program);
+        let started = capture_command_output(command.args(&arguments)).output();
+        tokio::time::timeout(provider.timeout, started).await
+    }
+    .map_err(|_| timed_out(provider, &program))?
+    .map_err(io_diagnostic)?;
 
     if !output.status.success() {
         // The program's own words are the most useful thing here and the least

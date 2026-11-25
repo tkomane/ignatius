@@ -79,6 +79,11 @@ directories = "6.0.0"
 unicode-width = "0.2.2"
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
 
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+# Use the existing safe known-folder wrapper and its matching SDK constants.
+dirs-sys = "0.5.0"
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3.24.0"
 # Integration tests drive the async API directly.

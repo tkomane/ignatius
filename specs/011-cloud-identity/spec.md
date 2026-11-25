@@ -5,7 +5,8 @@
 **Created**: 2026-08-16
 
 **Status**: Mechanism implemented and verified against synthetic TLS PostgreSQL.
-The Azure CLI x64 MSI launch result is recorded in
+The Windows x64 automatic Azure CLI MSI launch is verified with a hosted
+version-only probe and recorded in
 [compatibility](../../docs/support/compatibility.md#cloud-identity-providers).
 Other native Windows launcher rows and live Entra/AWS/GCP acceptance remain open.
 
@@ -173,6 +174,14 @@ sentences, each naming what to do.
   be reported as a timeout.
 - **FR-1108**: `{host}`, `{port}`, `{user}` and `{database}` MUST be substituted
   into argument elements whole. No shell is involved at any point.
+
+- **FR-1109**: On the Windows x64 build, the built-in `entra` provider tries
+  its native `az` command first. Only a missing program at process start may
+  select the standard Azure CLI x64 MSI under the Windows Program Files
+  known folder, with that installation's `wbin` on PATH. Launch its bundled
+  interpreter directly with the documented fixed module arguments and the
+  original argument elements. A configured provider always uses its configured
+  program. A process that starts has one outcome under the existing timeout.
 
 ### Security
 
