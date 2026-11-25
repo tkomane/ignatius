@@ -4688,3 +4688,113 @@ fn curtain_paints_luminous_focus_seam_only_at_truecolour() {
         }
     }
 }
+
+#[test]
+fn floating_modals_paint_architectural_shadow_clamped_inside_body_and_never_on_rails() {
+    use crate::config::Density;
+    use crate::ui::theme::{ColorDepth, Token};
+    use ratatui::style::Color;
+
+    let area = Rect::new(0, 0, RECEDE_WIDTH, RECEDE_HEIGHT);
+    let mut model = recede_model(presentation_at_depth(
+        ThemeChoice::Atelier,
+        true,
+        GlyphTier::Unicode,
+        ColorDepth::TrueColor,
+    ));
+    model.help_open = true;
+
+    let help_box = crate::ui::help::build(&model, &model.presentation, area).outer;
+    let body = super::curtain_body(&model, area);
+    let surface_bg = model.presentation.theme.surface(Token::Surface).bg.unwrap();
+    let frame = rendered_buffer(&model, &model.presentation, RECEDE_WIDTH, RECEDE_HEIGHT);
+
+    // Right shadow column: x = box.right(), y = box.y+1..=box.bottom()
+    let right_x = help_box.right();
+    assert!(right_x < body.right());
+    for y in (help_box.y + 1)..=help_box.bottom() {
+        assert_eq!(
+            frame[(right_x, y)].bg,
+            surface_bg,
+            "right shadow at ({right_x}, {y}) must use darkened Surface bg"
+        );
+    }
+
+    // Bottom shadow row: y = box.bottom(), x = box.x+1..=box.right()
+    let bottom_y = help_box.bottom();
+    assert!(bottom_y < body.bottom());
+    for x in (help_box.x + 1)..=help_box.right() {
+        assert_eq!(
+            frame[(x, bottom_y)].bg,
+            surface_bg,
+            "bottom shadow at ({x}, {bottom_y}) must use darkened Surface bg"
+        );
+    }
+
+    // Top-right corner at box.y is NOT shadowed (offset by +1).
+    assert_ne!(frame[(right_x, help_box.y)].bg, surface_bg);
+    // Bottom-left corner at box.x is NOT shadowed (offset by +1).
+    assert_ne!(frame[(help_box.x, bottom_y)].bg, surface_bg);
+
+    // Even when a bottom-anchored overlay touches the footer edge in Compact mode,
+    // header and footer rails are NEVER touched by the shadow.
+    let mut chords_model = recede_model(
+        presentation_at_depth(
+            ThemeChoice::Dark,
+            true,
+            GlyphTier::Unicode,
+            ColorDepth::TrueColor,
+        )
+        .with_density(Density::Compact),
+    );
+    chords_model.size = (100, 34);
+    chords_model.prefix_pending = true;
+    let compact_area = Rect::new(0, 0, 100, 34);
+    let geometry = pane_geometry(&chords_model, compact_area);
+    let compact_frame = rendered_buffer(&chords_model, &chords_model.presentation, 100, 34);
+    let mut workbench_only = Buffer::empty(compact_area);
+    super::render_workbench(
+        &chords_model,
+        &Keymap::new(),
+        &chords_model.presentation,
+        compact_area,
+        &mut workbench_only,
+    );
+    for x in 0..100 {
+        assert_eq!(
+            compact_frame[(x, geometry.header.y)],
+            workbench_only[(x, geometry.header.y)],
+            "header rail cell ({x}, {}) must never receive shadow",
+            geometry.header.y
+        );
+        assert_eq!(
+            compact_frame[(x, geometry.footer.y)],
+            workbench_only[(x, geometry.footer.y)],
+            "footer rail cell ({x}, {}) must never receive shadow",
+            geometry.footer.y
+        );
+    }
+
+    // ASCII, Basic16, None, and colour-off omit the shadow cleanly.
+    for (depth, color, tier) in [
+        (ColorDepth::TrueColor, true, GlyphTier::Ascii),
+        (ColorDepth::Basic16, true, GlyphTier::Unicode),
+        (ColorDepth::None, true, GlyphTier::Unicode),
+        (ColorDepth::TrueColor, false, GlyphTier::Unicode),
+    ] {
+        let mut plain = model.clone();
+        plain.presentation = presentation_at_depth(ThemeChoice::Atelier, color, tier, depth);
+        let plain_buf = rendered_buffer(&plain, &plain.presentation, RECEDE_WIDTH, RECEDE_HEIGHT);
+        if depth == ColorDepth::Basic16 || depth == ColorDepth::None || !color {
+            assert!(plain_buf.content.iter().all(|c| c.bg == Color::Reset));
+        } else {
+            let pane_bg = plain
+                .presentation
+                .theme
+                .surface(Token::SurfacePane)
+                .bg
+                .unwrap();
+            assert_eq!(plain_buf[(right_x, help_box.y + 1)].bg, pane_bg);
+        }
+    }
+}

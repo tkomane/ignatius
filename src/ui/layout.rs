@@ -270,126 +270,314 @@ fn render_overlays(
     area: Rect,
     buf: &mut Buffer,
 ) {
+    let shadow_body =
+        (layout_mode(area) != LayoutMode::TooSmall).then(|| curtain_body(model, area));
+    let shadow_active = shadow_body.is_some()
+        && presentation.theme.color
+        && presentation.theme.depth.paints_surfaces()
+        && !presentation.glyphs.is_ascii();
+    let mut render_layer = |require_overlay_bg: bool, draw: &mut dyn FnMut(&mut Buffer)| {
+        if !shadow_active {
+            draw(buf);
+            return;
+        }
+        let before = buf.clone();
+        draw(buf);
+        if let Some(body) = shadow_body
+            && let Some(box_area) =
+                changed_overlay_box(&before, buf, area, presentation, require_overlay_bg)
+        {
+            paint_overlay_shadow(box_area, body, presentation, buf);
+        }
+    };
+
     if let Some(inspector) = &model.inspector {
-        render_inspector(model, *inspector, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_inspector(model, *inspector, presentation, area, b);
+        });
     }
     if let Some(definition) = &model.definition {
-        render_definition(definition, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_definition(definition, presentation, area, b);
+        });
     }
     if let Some(diagram) = &model.schema_diagram {
-        render_schema_diagram(diagram, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_schema_diagram(diagram, presentation, area, b);
+        });
     }
     if let Some(activity) = &model.server_activity {
-        render_server_activity(activity, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_server_activity(activity, presentation, area, b);
+        });
     }
     if let Some(audit) = &model.security_audit {
-        render_security_audit(audit, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_security_audit(audit, presentation, area, b);
+        });
     }
     if let Some(diff) = &model.schema_diff {
-        render_schema_diff(diff, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_schema_diff(diff, presentation, area, b);
+        });
     }
     if let Some(wizard) = &model.import_wizard {
-        render_import_wizard(wizard, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_import_wizard(wizard, presentation, area, b);
+        });
     }
     if let Some(runner) = &model.routine_runner {
-        render_routine_runner(runner, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_routine_runner(runner, presentation, area, b);
+        });
     }
     if let Some(ops) = &model.maintenance_ops {
-        render_maintenance_ops(ops, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_maintenance_ops(ops, presentation, area, b);
+        });
     }
     if let Some(perf) = &model.query_performance {
-        render_query_performance(perf, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_query_performance(perf, presentation, area, b);
+        });
     }
     if let Some(advisor) = &model.index_advisor {
-        render_index_advisor(advisor, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_index_advisor(advisor, presentation, area, b);
+        });
     }
     if let Some(wal) = &model.wal_observability {
-        render_wal_observability(wal, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_wal_observability(wal, presentation, area, b);
+        });
     }
     if let Some(pool) = &model.connection_pool {
-        render_connection_pool(pool, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_connection_pool(pool, presentation, area, b);
+        });
     }
     if let Some(mask) = &model.data_masking {
-        render_data_masking(mask, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_data_masking(mask, presentation, area, b);
+        });
     }
     if let Some(sync) = &model.data_sync {
-        render_data_sync(sync, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_data_sync(sync, presentation, area, b);
+        });
     }
     if let Some(seed) = &model.synthetic_seed {
-        render_synthetic_seed(seed, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_synthetic_seed(seed, presentation, area, b);
+        });
     }
     if let Some(snippet_lib) = &model.snippet_library {
-        render_snippet_library(snippet_lib, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_snippet_library(snippet_lib, presentation, area, b);
+        });
     }
     if let Some(lint) = &model.lint_findings {
-        render_lint_findings(lint, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_lint_findings(lint, presentation, area, b);
+        });
     }
     if let Some(rep) = &model.logical_replication {
-        render_logical_replication(rep, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_logical_replication(rep, presentation, area, b);
+        });
     }
     if let Some(cfg) = &model.cluster_config {
-        render_cluster_config(cfg, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_cluster_config(cfg, presentation, area, b);
+        });
     }
     if let Some(browser) = &model.data_browser {
-        render_data_browser(browser, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_data_browser(browser, presentation, area, b);
+        });
     }
     if let Some(diff) = &model.plan_diff {
-        render_plan_diff(diff, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_plan_diff(diff, presentation, area, b);
+        });
     }
     if let Some(analytics) = &model.result_analytics {
-        render_result_analytics(analytics, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_result_analytics(analytics, presentation, area, b);
+        });
     }
     if let Some(bench) = &model.query_bench {
         let settle = (!model.reduced_motion && !presentation.reduced_motion)
             .then(|| model.motion().bench_settle())
             .flatten();
-        render_query_bench_with_motion(bench, model.frame, settle, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_query_bench_with_motion(bench, model.frame, settle, presentation, area, b);
+        });
     }
     if let Some(snapshot) = &model.schema_snapshot {
-        render_schema_snapshot(snapshot, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_schema_snapshot(snapshot, presentation, area, b);
+        });
     }
     if let Some(runbook) = &model.sql_runbook {
-        render_sql_runbook(runbook, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_sql_runbook(runbook, presentation, area, b);
+        });
     }
     if model.help_open {
-        render_help(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_help(model, presentation, area, b);
+        });
     }
     if model.notice_details.is_some() {
-        crate::ui::notices::render(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            crate::ui::notices::render(model, presentation, area, b);
+        });
     }
     if let Some(palette) = &model.palette {
-        render_palette(palette, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_palette(palette, presentation, area, b);
+        });
     }
     if model.connection_details {
-        render_connection_details(model, presentation, area, buf);
+        render_layer(true, &mut |b| {
+            render_connection_details(model, presentation, area, b);
+        });
     }
     if model.prefix_pending {
-        render_chords(keymap, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_chords(keymap, presentation, area, b);
+        });
     }
     if model.pending_run.is_some() {
-        render_confirmation(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_confirmation(model, presentation, area, b);
+        });
     }
     if model.pending_plan.is_some() {
-        render_plan_confirmation(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_plan_confirmation(model, presentation, area, b);
+        });
     }
     if model.pending_copy.is_some() {
-        render_copy_confirmation(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_copy_confirmation(model, presentation, area, b);
+        });
     }
     if model.pending_update.is_some() {
-        render_update_review(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_update_review(model, presentation, area, b);
+        });
     }
     if let Some(prompt) = &model.update_prompt {
-        render_update_value_prompt(prompt, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_update_value_prompt(prompt, presentation, area, b);
+        });
     }
     if model.parameter_prompt.is_some() {
-        render_parameter_prompt(model, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_parameter_prompt(model, presentation, area, b);
+        });
     }
     if let Some(prompt) = &model.name_prompt {
-        render_name_prompt(prompt, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_name_prompt(prompt, presentation, area, b);
+        });
     }
     // Topmost, because nothing else can be done until the connection is open.
     if let Some(prompt) = &model.password_prompt {
-        render_password_prompt(prompt, presentation, area, buf);
+        render_layer(false, &mut |b| {
+            render_password_prompt(prompt, presentation, area, b);
+        });
+    }
+}
+
+fn changed_overlay_box(
+    before: &Buffer,
+    after: &Buffer,
+    area: Rect,
+    presentation: &Presentation,
+    require_overlay_bg: bool,
+) -> Option<Rect> {
+    let bounds = area.intersection(after.area);
+    let overlay_bg = presentation.theme.surface(Token::SurfaceOverlay).bg;
+    let mut min_x = u16::MAX;
+    let mut min_y = u16::MAX;
+    let mut max_x = 0u16;
+    let mut max_y = 0u16;
+    let mut found = false;
+
+    for y in bounds.top()..bounds.bottom() {
+        for x in bounds.left()..bounds.right() {
+            let (Some(old), Some(new)) = (before.cell((x, y)), after.cell((x, y))) else {
+                continue;
+            };
+            if old == new {
+                continue;
+            }
+            if require_overlay_bg && Some(new.bg) != overlay_bg {
+                continue;
+            }
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+            found = true;
+        }
+    }
+
+    found.then(|| Rect::new(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1))
+}
+
+/// Paints a crisp 1-cell architectural drop shadow along the right and bottom
+/// edges of a floating modal, clamped strictly inside `body` between the header
+/// and footer rails.
+pub(crate) fn paint_overlay_shadow(
+    box_area: Rect,
+    body: Rect,
+    presentation: &Presentation,
+    buf: &mut Buffer,
+) {
+    if !presentation.theme.color
+        || !presentation.theme.depth.paints_surfaces()
+        || presentation.glyphs.is_ascii()
+        || box_area.width < 2
+        || box_area.height < 2
+    {
+        return;
+    }
+    let Some(surface_bg) = presentation.theme.surface(Token::Surface).bg else {
+        return;
+    };
+    let border_fg = presentation.theme.color(Token::Border);
+    let body = body.intersection(buf.area);
+
+    let paint_cell = |buf: &mut Buffer, x: u16, y: u16| {
+        if let Some(cell) = buf.cell_mut((x, y)) {
+            cell.bg = surface_bg;
+            if let Some(fg) = border_fg {
+                cell.fg = fg;
+            }
+            cell.modifier.remove(ratatui::style::Modifier::DIM);
+        }
+    };
+
+    let right_x = box_area.right();
+    if right_x > body.left() && right_x < body.right() {
+        let y_start = box_area.y.saturating_add(1).max(body.top());
+        let y_end = box_area.bottom().saturating_add(1).min(body.bottom());
+        for y in y_start..y_end {
+            paint_cell(buf, right_x, y);
+        }
+    }
+
+    let bottom_y = box_area.bottom();
+    if bottom_y > body.top() && bottom_y < body.bottom() {
+        let x_start = box_area.x.saturating_add(1).max(body.left());
+        let x_end = box_area.right().saturating_add(1).min(body.right());
+        for x in x_start..x_end {
+            paint_cell(buf, x, bottom_y);
+        }
     }
 }
 

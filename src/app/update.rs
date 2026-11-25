@@ -7869,6 +7869,20 @@ fn palette_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     Vec::new()
                 }
                 Some(crate::app::palette::PaletteCommand::Run(next)) => apply_action(model, next),
+                Some(crate::app::palette::PaletteCommand::SelectTheme(choice)) => {
+                    let next = crate::ui::theme::Theme::from_choice(
+                        choice,
+                        model.presentation.theme.color,
+                        model.presentation.theme.depth,
+                    );
+                    if model.presentation.theme != next {
+                        let outgoing = std::mem::replace(&mut model.presentation.theme, next);
+                        if model.allows_motion() {
+                            model.motion.begin_theme_curtain(outgoing);
+                        }
+                    }
+                    Vec::new()
+                }
                 Some(crate::app::palette::PaletteCommand::NoticeDetails) => {
                     model.notice_details = Some(crate::app::model::NoticeDetails {
                         snapshot: model.notice_state.snapshot(),
@@ -8466,6 +8480,31 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         group: "Session",
         command: PaletteCommand::Run(Action::SwitchTheme),
     });
+    for (choice, summary) in [
+        (crate::config::ThemeChoice::Dark, "Dark palette"),
+        (crate::config::ThemeChoice::Light, "Light palette"),
+        (
+            crate::config::ThemeChoice::HighContrast,
+            "High contrast palette",
+        ),
+        (
+            crate::config::ThemeChoice::FieldIndustrial,
+            "Dark industrial palette",
+        ),
+        (crate::config::ThemeChoice::Material, "Dark tonal palette"),
+        (
+            crate::config::ThemeChoice::Atelier,
+            "Dark editorial palette",
+        ),
+        (crate::config::ThemeChoice::Paper, "Light archival palette"),
+    ] {
+        entries.push(PaletteEntry {
+            label: format!("Theme: {}", choice.label()),
+            detail: summary.to_owned(),
+            group: "Theme",
+            command: PaletteCommand::SelectTheme(choice),
+        });
+    }
     for action in crate::app::discovery::palette_actions(model) {
         if action == Action::SwitchTheme {
             continue;

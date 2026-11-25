@@ -11,6 +11,7 @@
 use crate::app::grid::GridCommand;
 use crate::app::message::Action;
 use crate::app::model::ExportFormat;
+use crate::config::ThemeChoice;
 use crate::query::value::sanitize_for_display;
 
 /// What choosing an entry does.
@@ -18,6 +19,8 @@ use crate::query::value::sanitize_for_display;
 pub enum PaletteCommand {
     /// Perform an action, exactly as a key binding would.
     Run(Action),
+    /// Switch directly to a built-in theme for this session.
+    SelectTheme(ThemeChoice),
     /// Open the read-only connection and authentication details surface.
     ConnectionDetails,
     /// Open fixed client-side notice retention accounting.
@@ -339,6 +342,10 @@ impl Palette {
                 .entries
                 .iter()
                 .any(|entry| !matches!(entry.command, PaletteCommand::Run(_))),
+            Purpose::Commands => self
+                .matches()
+                .iter()
+                .any(|entry| entry.theme_choice().is_some()),
             _ => false,
         }
     }
@@ -360,10 +367,40 @@ impl Palette {
 }
 
 impl PaletteEntry {
+    /// Returns the built-in theme targeted by this entry, if any.
+    #[must_use]
+    pub const fn theme_choice(&self) -> Option<ThemeChoice> {
+        match self.command {
+            PaletteCommand::SelectTheme(choice) => Some(choice),
+            _ => None,
+        }
+    }
+
     /// Formats safe, multi-line preview text for this entry under the given palette purpose.
     #[must_use]
     pub fn preview_lines(&self, purpose: Purpose) -> Vec<String> {
         match purpose {
+            Purpose::Commands => {
+                if let Some(choice) = self.theme_choice() {
+                    let mut lines = vec![
+                        format!("Theme: {}", choice.label()),
+                        format!("Family: {}", theme_family_label(choice)),
+                    ];
+                    if !self.detail.is_empty() {
+                        lines.push(format!("Summary: {}", sanitize_for_display(&self.detail)));
+                    }
+                    lines
+                } else {
+                    let mut lines = vec![
+                        format!("Command: {}", sanitize_for_display(&self.label)),
+                        format!("Group: {}", sanitize_for_display(self.group)),
+                    ];
+                    if !self.detail.is_empty() {
+                        lines.push(format!("Details: {}", sanitize_for_display(&self.detail)));
+                    }
+                    lines
+                }
+            }
             Purpose::GoTo => {
                 let mut lines = Vec::new();
                 lines.push(format!("Kind: {}", sanitize_for_display(self.group)));
@@ -423,6 +460,19 @@ impl PaletteEntry {
             }
             _ => Vec::new(),
         }
+    }
+}
+
+/// Human-readable luminance family label for a built-in theme.
+#[must_use]
+pub const fn theme_family_label(choice: ThemeChoice) -> &'static str {
+    match choice {
+        ThemeChoice::Light | ThemeChoice::Paper => "Light",
+        ThemeChoice::HighContrast => "High contrast",
+        ThemeChoice::Dark
+        | ThemeChoice::FieldIndustrial
+        | ThemeChoice::Material
+        | ThemeChoice::Atelier => "Dark",
     }
 }
 

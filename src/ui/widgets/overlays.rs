@@ -8,7 +8,7 @@ use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::{OverlayAnchor, overlay_box, prompt_box};
 use crate::ui::layout::{Presentation, definition_box, definition_viewport};
-use crate::ui::theme::Token;
+use crate::ui::theme::{Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -613,7 +613,10 @@ fn render_plan_body(
                 .render(inner, buf);
         }
         crate::app::PlanStatus::Ready(document) => {
-            render_ready_plan(document, &model.plan, presentation, inner, buf);
+            let plan_sweep = (!model.reduced_motion && !presentation.reduced_motion)
+                .then(|| model.motion().plan_sweep())
+                .flatten();
+            render_ready_plan(document, &model.plan, presentation, plan_sweep, inner, buf);
         }
         crate::app::PlanStatus::Hidden => {}
     }
@@ -623,6 +626,7 @@ fn render_ready_plan(
     document: &crate::query::PlanDocument,
     view: &crate::app::PlanView,
     presentation: &Presentation,
+    plan_sweep: Option<f32>,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -640,20 +644,35 @@ fn render_ready_plan(
         return;
     }
 
-    let (summary_area, tree_area, detail_area) = plan_areas(area);
+    let (kpi_area, summary_area, tree_area, detail_area) = plan_areas(area);
+    if let Some(kpi) = kpi_area {
+        render_plan_kpi_strip(document, presentation, kpi, buf);
+    }
     render_plan_summary(&summary, document, presentation, summary_area, buf);
-    render_plan_tree(document, view, presentation, tree_area, buf);
+    let sweep = f64::from(plan_sweep.unwrap_or(1.0));
+    render_plan_tree_with_sweep(document, view, presentation, sweep, tree_area, buf);
     if let Some(detail) = detail_area {
         render_plan_detail(document, view, presentation, detail, buf);
     }
 }
 
 /// Plan sections, shared with keyboard paging through the tree.
-fn plan_areas(area: Rect) -> (Rect, Rect, Option<Rect>) {
+fn plan_areas(area: Rect) -> (Option<Rect>, Rect, Rect, Option<Rect>) {
     if area.height < 3 {
-        return (area, Rect::default(), None);
+        return (None, area, Rect::default(), None);
     }
-    if area.height >= 8 {
+    if area.height >= 10 {
+        let detail_height = 5.min(area.height.saturating_sub(4));
+        let tree_height = area.height.saturating_sub(3 + detail_height);
+        let [kpi, summary, tree, detail] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Length(tree_height),
+            Constraint::Length(detail_height),
+        ])
+        .areas(area);
+        (Some(kpi), summary, tree, Some(detail))
+    } else if area.height >= 8 {
         let detail_height = 5.min(area.height.saturating_sub(3));
         let tree_height = area.height.saturating_sub(2 + detail_height);
         let [summary, tree, detail] = Layout::vertical([
@@ -662,11 +681,11 @@ fn plan_areas(area: Rect) -> (Rect, Rect, Option<Rect>) {
             Constraint::Length(detail_height),
         ])
         .areas(area);
-        (summary, tree, Some(detail))
+        (None, summary, tree, Some(detail))
     } else {
         let [summary, tree] =
             Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
-        (summary, tree, None)
+        (None, summary, tree, None)
     }
 }
 
@@ -675,8 +694,71 @@ pub(crate) fn plan_capacity(pane: Rect) -> usize {
     if inner.width == 0 {
         0
     } else {
-        usize::from(plan_areas(inner).1.height)
+        usize::from(plan_areas(inner).2.height)
     }
+}
+
+fn render_plan_kpi_strip(
+    document: &crate::query::PlanDocument,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let sep = if unicode { " \u{00b7} " } else { " | " };
+    let planning = document
+        .planning_time_ms
+        .map_or_else(|| "n/a".to_owned(), format_ms);
+    let execution = if document.analyzed {
+        document
+            .execution_time_ms
+            .map_or_else(|| "n/a".to_owned(), format_ms)
+    } else {
+        "estimate".to_owned()
+    };
+    let hotspot = if document.has_attention() {
+        document
+            .root
+            .at_path(&document.attention_path)
+            .map_or_else(|| "n/a".to_owned(), |node| safe_plan_text(&node.node_type))
+    } else {
+        "none".to_owned()
+    };
+    let hotspot_token = if document.has_attention() {
+        Token::Warning
+    } else {
+        Token::Muted
+    };
+    let segments = vec![
+        (" Nodes ".to_owned(), theme.on_stripe(Token::Muted)),
+        (
+            format!("{}", document.node_count),
+            theme.on_stripe(Token::Header).add_modifier(Modifier::BOLD),
+        ),
+        (sep.to_owned(), theme.on_stripe(Token::Border)),
+        ("Planning ".to_owned(), theme.on_stripe(Token::Muted)),
+        (planning, theme.on_stripe(Token::Info)),
+        (sep.to_owned(), theme.on_stripe(Token::Border)),
+        ("Execution ".to_owned(), theme.on_stripe(Token::Muted)),
+        (execution, theme.on_stripe(Token::Info)),
+        (sep.to_owned(), theme.on_stripe(Token::Border)),
+        (
+            "Hotspot ".to_owned(),
+            theme.on_stripe(hotspot_token).add_modifier(Modifier::BOLD),
+        ),
+        (hotspot, theme.on_stripe(hotspot_token)),
+    ];
+    let line = bounded_row(
+        segments,
+        usize::from(area.width),
+        unicode,
+        Some(theme.stripe()),
+    );
+    Paragraph::new(line).style(theme.stripe()).render(area, buf);
 }
 
 fn render_plan_summary(
@@ -727,10 +809,22 @@ fn render_plan_summary(
         .render(area, buf);
 }
 
+#[cfg(test)]
 fn render_plan_tree(
     document: &crate::query::PlanDocument,
     view: &crate::app::PlanView,
     presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_plan_tree_with_sweep(document, view, presentation, 1.0, area, buf);
+}
+
+fn render_plan_tree_with_sweep(
+    document: &crate::query::PlanDocument,
+    view: &crate::app::PlanView,
+    presentation: &Presentation,
+    sweep: f64,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -763,6 +857,7 @@ fn render_plan_tree(
             view.collapsed.contains(path),
             selected,
             usize::from(area.width),
+            sweep,
             presentation,
         );
         let line = if selected {
@@ -886,6 +981,10 @@ fn plan_summary(document: &crate::query::PlanDocument) -> String {
 /// units and loop timing in full stay in the detail block below the tree.
 /// The selected row keeps its ASCII `>` marker so selection survives colour
 /// loss, and attention and estimate-mismatch flags stay as words.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "plan row segments need document, node, path, collapsed/selected flags, width, sweep progress and presentation"
+)]
 fn plan_node_segments(
     document: &crate::query::PlanDocument,
     node: &crate::query::PlanNode,
@@ -893,6 +992,7 @@ fn plan_node_segments(
     collapsed: bool,
     selected: bool,
     row_width: usize,
+    sweep: f64,
     presentation: &Presentation,
 ) -> Vec<(String, Style)> {
     let theme = &presentation.theme;
@@ -943,8 +1043,9 @@ fn plan_node_segments(
         && unicode
         && let Some(share) = node.share_of_root(&document.root, document.analyzed)
     {
-        let mut filled = (share * 5.0).round().clamp(0.0, 5.0) as usize;
-        if share > 0.0 && filled == 0 {
+        let scaled = share * sweep.clamp(0.0, 1.0);
+        let mut filled = (scaled * 5.0).round().clamp(0.0, 5.0) as usize;
+        if scaled > 0.0 && filled == 0 {
             filled = 1;
         }
         let bar_token = if attention || share >= 0.5 {
@@ -1406,8 +1507,49 @@ pub(crate) fn render_schema_diagram(
         return;
     }
 
-    let body_height = inner.height.saturating_sub(1);
-    let body_area = Rect::new(inner.x, inner.y, inner.width, body_height);
+    let show_summary_pills = !diagram.loading && diagram.error.is_none() && inner.height >= 4;
+    let body_top = if show_summary_pills {
+        let kpi_area = Rect::new(inner.x, inner.y, inner.width, 1);
+        let mut capsules = vec![Span::raw(" ")];
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "TABLES: ",
+            diagram.graph.tables.len().to_string(),
+            Token::Focus,
+        );
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "EDGES: ",
+            diagram.graph.edges.len().to_string(),
+            Token::Info,
+        );
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "DEPTH: ",
+            diagram.depth.label().to_owned(),
+            Token::Text,
+        );
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "FORMAT: ",
+            diagram.format.label().to_owned(),
+            Token::Info,
+        );
+        render_capsule_bar(capsules, kpi_area, buf);
+        inner.y.saturating_add(1)
+    } else {
+        inner.y
+    };
+
+    let body_height = inner
+        .height
+        .saturating_sub(1)
+        .saturating_sub(u16::from(show_summary_pills));
+    let body_area = Rect::new(inner.x, body_top, inner.width, body_height);
     let footer_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
 
     let left_width = (body_area.width.saturating_mul(28) / 100)
@@ -1488,24 +1630,48 @@ pub(crate) fn render_schema_diagram(
             theme.style(Token::Muted),
         )));
     } else {
-        for line in diagram
+        let is_box_mode = diagram.format != crate::diagram::DiagramFormat::Mermaid;
+        for (offset_idx, line) in diagram
             .rendered_lines
             .iter()
             .skip(diagram.scroll_y)
             .take(right_visible_rows)
+            .enumerate()
         {
-            let scrolled_line: String = line.chars().skip(diagram.scroll_x).collect();
-            diagram_lines.push(Line::from(Span::styled(
-                scrolled_line,
-                theme.style(Token::Text),
-            )));
+            let abs_idx = diagram.scroll_y.saturating_add(offset_idx);
+            if is_box_mode {
+                let prev = abs_idx
+                    .checked_sub(1)
+                    .and_then(|i| diagram.rendered_lines.get(i))
+                    .map(String::as_str);
+                let next = diagram.rendered_lines.get(abs_idx + 1).map(String::as_str);
+                diagram_lines.push(style_er_diagram_line(
+                    prev,
+                    line,
+                    next,
+                    diagram.scroll_x,
+                    usize::from(right_area.width),
+                    theme,
+                ));
+            } else {
+                let scrolled_line: String = line.chars().skip(diagram.scroll_x).collect();
+                diagram_lines.push(Line::from(Span::styled(
+                    scrolled_line,
+                    theme.style(Token::Text),
+                )));
+            }
         }
     }
     Paragraph::new(diagram_lines).render(right_area, buf);
 
+    let nav_key = if presentation.glyphs.is_ascii() {
+        " [Up/Down] "
+    } else {
+        " [\u{2191}/\u{2193}] "
+    };
     let footer_hints = vec![
         Span::styled(
-            " [↑/↓] ",
+            nav_key,
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),
         ),
         Span::styled("Table  ", theme.style(Token::Muted)),
@@ -1536,6 +1702,175 @@ pub(crate) fn render_schema_diagram(
         Span::styled("Close", theme.style(Token::Muted)),
     ];
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
+fn is_card_top_rule(line: &str) -> bool {
+    let t = line.trim_start();
+    (t.starts_with('\u{250c}') && t.ends_with('\u{2510}'))
+        || (t.starts_with('+') && t.ends_with('+'))
+}
+
+fn is_card_mid_rule(line: &str) -> bool {
+    let t = line.trim_start();
+    (t.starts_with('\u{251c}') && t.ends_with('\u{2524}'))
+        || (t.starts_with('+') && t.ends_with('+'))
+}
+
+fn is_card_rule_line(line: &str) -> bool {
+    let t = line.trim();
+    (t.starts_with('\u{250c}') && t.ends_with('\u{2510}'))
+        || (t.starts_with('\u{251c}') && t.ends_with('\u{2524}'))
+        || (t.starts_with('\u{2514}') && t.ends_with('\u{2518}'))
+        || (t.starts_with('+') && t.ends_with('+') && t.contains('-'))
+}
+
+fn slice_styled_spans(
+    spans: Vec<Span<'static>>,
+    scroll_x: usize,
+    max_width: usize,
+    line_style: Option<Style>,
+) -> Line<'static> {
+    let mut styled_chars: Vec<(char, Style)> = Vec::new();
+    for span in spans {
+        for ch in span.content.chars() {
+            styled_chars.push((ch, span.style));
+        }
+    }
+    let mut out_spans = Vec::new();
+    let mut run = String::new();
+    let mut run_style: Option<Style> = None;
+    for (ch, style) in styled_chars.into_iter().skip(scroll_x).take(max_width) {
+        if run_style != Some(style) {
+            if let Some(prev) = run_style {
+                out_spans.push(Span::styled(std::mem::take(&mut run), prev));
+            }
+            run_style = Some(style);
+        }
+        run.push(ch);
+    }
+    if let Some(prev) = run_style {
+        out_spans.push(Span::styled(run, prev));
+    }
+    let line = Line::from(out_spans);
+    match line_style {
+        Some(style) => line.style(style),
+        None => line,
+    }
+}
+
+fn style_er_diagram_line(
+    prev: Option<&str>,
+    line: &str,
+    next: Option<&str>,
+    scroll_x: usize,
+    right_width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let clean = sanitize_for_display(line);
+    if is_card_rule_line(&clean) {
+        return slice_styled_spans(
+            vec![Span::styled(clean, theme.style(Token::Border))],
+            scroll_x,
+            right_width,
+            None,
+        );
+    }
+
+    let is_card_body = (clean.starts_with('\u{2502}') && clean.ends_with('\u{2502}'))
+        || (clean.starts_with('|') && clean.ends_with('|'));
+    if !is_card_body {
+        let style = if clean.starts_with("Relationships") {
+            theme.style(Token::Header).add_modifier(Modifier::BOLD)
+        } else if clean.starts_with("Schema ER Diagram") {
+            theme.style(Token::Info)
+        } else {
+            theme.style(Token::Text)
+        };
+        return slice_styled_spans(
+            vec![Span::styled(clean, style)],
+            scroll_x,
+            right_width,
+            None,
+        );
+    }
+
+    let mut chars = clean.chars();
+    let Some(left_border) = chars.next() else {
+        return Line::default();
+    };
+    let Some(right_border) = chars.next_back() else {
+        return Line::default();
+    };
+    let interior: String = chars.collect();
+
+    let is_table_header = prev.is_some_and(is_card_top_rule) && next.is_some_and(is_card_mid_rule);
+    if is_table_header {
+        let border_style = theme.style(Token::Border);
+        let header_style = theme.on_stripe(Token::Header).add_modifier(Modifier::BOLD);
+        return slice_styled_spans(
+            vec![
+                Span::styled(left_border.to_string(), border_style),
+                Span::styled(interior, header_style),
+                Span::styled(right_border.to_string(), border_style),
+            ],
+            scroll_x,
+            right_width,
+            None,
+        );
+    }
+
+    let border_style = theme.style(Token::Border);
+    let mut spans = vec![Span::styled(left_border.to_string(), border_style)];
+    let mut rest = interior.as_str();
+    if let Some(after_lead) = rest.strip_prefix(' ') {
+        spans.push(Span::raw(" "));
+        rest = after_lead;
+    }
+
+    if let Some(tail) = rest.strip_prefix("PK,FK") {
+        spans.push(Span::styled(
+            "PK",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(",", border_style));
+        spans.push(Span::styled(
+            "FK",
+            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+        ));
+        rest = tail;
+    } else if let Some(tail) = rest.strip_prefix("PK") {
+        spans.push(Span::styled(
+            "PK",
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ));
+        rest = tail;
+    } else if let Some(tail) = rest.strip_prefix("FK") {
+        spans.push(Span::styled(
+            "FK",
+            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+        ));
+        rest = tail;
+    } else if let Some(tail) = rest.strip_prefix("UQ") {
+        spans.push(Span::styled(
+            "UQ",
+            theme.style(Token::Warning).add_modifier(Modifier::BOLD),
+        ));
+        rest = tail;
+    }
+
+    if let Some((col_part, type_part)) = rest.split_once(" : ") {
+        spans.push(Span::styled(col_part.to_owned(), theme.style(Token::Text)));
+        spans.push(Span::styled(" : ", border_style));
+        spans.push(Span::styled(
+            type_part.to_owned(),
+            theme.style(Token::Muted),
+        ));
+    } else {
+        spans.push(Span::styled(rest.to_owned(), theme.style(Token::Text)));
+    }
+    spans.push(Span::styled(right_border.to_string(), border_style));
+
+    slice_styled_spans(spans, scroll_x, right_width, None)
 }
 
 /// Shows an interactive server activity and lock contention dashboard overlay.
@@ -1585,8 +1920,27 @@ pub(crate) fn render_server_activity(
         return;
     }
 
-    let body_height = inner.height.saturating_sub(1);
-    let body_area = Rect::new(inner.x, inner.y, inner.width, body_height);
+    let show_telemetry_header = !activity.loading && activity.error.is_none() && inner.height >= 6;
+    let body_top = if show_telemetry_header {
+        let kpi_area = Rect::new(inner.x, inner.y, inner.width, 1);
+        let bar_area = Rect::new(inner.x, inner.y.saturating_add(1), inner.width, 1);
+        render_activity_kpi_and_bar(
+            &activity.snapshot.backends,
+            presentation,
+            kpi_area,
+            bar_area,
+            buf,
+        );
+        inner.y.saturating_add(2)
+    } else {
+        inner.y
+    };
+
+    let body_height = inner
+        .height
+        .saturating_sub(1)
+        .saturating_sub(if show_telemetry_header { 2 } else { 0 });
+    let body_area = Rect::new(inner.x, body_top, inner.width, body_height);
     let footer_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
 
     let left_width = 28u16.min(body_area.width.saturating_sub(4)).max(16);
@@ -1695,9 +2049,14 @@ pub(crate) fn render_server_activity(
     }
     Paragraph::new(activity_lines).render(right_area, buf);
 
+    let nav_key = if presentation.glyphs.is_ascii() {
+        " [Up/Down] "
+    } else {
+        " [\u{2191}/\u{2193}] "
+    };
     let footer_hints = vec![
         Span::styled(
-            " [↑/↓] ",
+            nav_key,
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),
         ),
         Span::styled("Backend  ", theme.style(Token::Muted)),
@@ -1728,6 +2087,170 @@ pub(crate) fn render_server_activity(
         Span::styled("Close", theme.style(Token::Muted)),
     ];
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
+}
+
+fn render_activity_kpi_and_bar(
+    backends: &[crate::activity::BackendProcess],
+    presentation: &Presentation,
+    kpi_area: Rect,
+    bar_area: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let active_count = backends.iter().filter(|b| b.state == "active").count();
+    let idle_count = backends
+        .iter()
+        .filter(|b| b.state.starts_with("idle"))
+        .count();
+    let blocked_count = backends.iter().filter(|b| !b.blocked_by.is_empty()).count();
+    let waiting_count = backends
+        .iter()
+        .filter(|b| {
+            b.wait_event_type
+                .as_deref()
+                .is_some_and(|w| !w.is_empty() && w != "Client")
+        })
+        .count();
+
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "Active: ",
+        active_count.to_string(),
+        count_token(active_count, Token::Success),
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "Idle: ",
+        idle_count.to_string(),
+        Token::Muted,
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "Blocked: ",
+        blocked_count.to_string(),
+        count_token(blocked_count, Token::Danger),
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "Waiting: ",
+        waiting_count.to_string(),
+        count_token(waiting_count, Token::Warning),
+    );
+    render_capsule_bar(capsules, kpi_area, buf);
+
+    let bar_w = usize::from(bar_area.width).saturating_sub(26).clamp(10, 36);
+    let waiting_bar_count = backends
+        .iter()
+        .filter(|b| {
+            !b.blocked_by.is_empty()
+                || b.wait_event_type
+                    .as_deref()
+                    .is_some_and(|w| !w.is_empty() && w != "Client")
+        })
+        .count();
+    let active_bar_count = backends
+        .iter()
+        .filter(|b| {
+            b.blocked_by.is_empty()
+                && !b
+                    .wait_event_type
+                    .as_deref()
+                    .is_some_and(|w| !w.is_empty() && w != "Client")
+                && b.state == "active"
+        })
+        .count();
+    let idle_bar_count = backends
+        .len()
+        .saturating_sub(waiting_bar_count + active_bar_count);
+
+    let mut spans = vec![
+        Span::styled(" State mix: ", theme.style(Token::Muted)),
+        Span::styled("[", theme.style(Token::Border)),
+    ];
+    let total = active_bar_count + waiting_bar_count + idle_bar_count;
+    if total == 0 {
+        let empty_ch = if unicode { "\u{2500}" } else { "-" };
+        spans.push(Span::styled(
+            empty_ch.repeat(bar_w),
+            theme.style(Token::Border),
+        ));
+    } else {
+        let mut active_cells = (active_bar_count * bar_w).checked_div(total).unwrap_or(0);
+        let mut waiting_cells = (waiting_bar_count * bar_w).checked_div(total).unwrap_or(0);
+        let mut idle_cells = (idle_bar_count * bar_w).checked_div(total).unwrap_or(0);
+        if active_bar_count > 0 && active_cells == 0 {
+            active_cells = 1;
+        }
+        if waiting_bar_count > 0 && waiting_cells == 0 {
+            waiting_cells = 1;
+        }
+        if idle_bar_count > 0 && idle_cells == 0 {
+            idle_cells = 1;
+        }
+        while active_cells + waiting_cells + idle_cells > bar_w {
+            if idle_cells >= active_cells && idle_cells >= waiting_cells && idle_cells > 1 {
+                idle_cells -= 1;
+            } else if active_cells >= waiting_cells && active_cells > 1 {
+                active_cells -= 1;
+            } else if waiting_cells > 1 {
+                waiting_cells -= 1;
+            } else {
+                break;
+            }
+        }
+        let assigned = active_cells + waiting_cells + idle_cells;
+        if assigned < bar_w {
+            let rem = bar_w - assigned;
+            if active_bar_count >= waiting_bar_count && active_bar_count >= idle_bar_count {
+                active_cells += rem;
+            } else if waiting_bar_count >= idle_bar_count {
+                waiting_cells += rem;
+            } else {
+                idle_cells += rem;
+            }
+        }
+
+        let (active_sym, wait_sym, idle_sym) = if unicode {
+            ("\u{2588}", "\u{2593}", "\u{2591}")
+        } else {
+            ("#", "~", "-")
+        };
+        let wait_token = if blocked_count > 0 {
+            Token::Danger
+        } else {
+            Token::Warning
+        };
+        if active_cells > 0 {
+            spans.push(Span::styled(
+                active_sym.repeat(active_cells),
+                theme.style(Token::Success),
+            ));
+        }
+        if waiting_cells > 0 {
+            spans.push(Span::styled(
+                wait_sym.repeat(waiting_cells),
+                theme.style(wait_token),
+            ));
+        }
+        if idle_cells > 0 {
+            spans.push(Span::styled(
+                idle_sym.repeat(idle_cells),
+                theme.style(Token::Muted),
+            ));
+        }
+    }
+    spans.push(Span::styled("]", theme.style(Token::Border)));
+    spans.push(Span::styled(
+        "  active / wait / idle",
+        theme.style(Token::Muted),
+    ));
+    Paragraph::new(Line::from(spans)).render(bar_area, buf);
 }
 
 /// Shows an interactive roles, privilege grants, and Row-Level Security (RLS) auditor overlay.
@@ -9980,6 +10503,12 @@ fn render_result_analytics_frame(
                         None,
                     ));
                 } else {
+                    let max_top = col
+                        .top_values
+                        .iter()
+                        .map(|(_, count)| *count)
+                        .max()
+                        .unwrap_or(0);
                     for (rank, (val, count)) in col.top_values.iter().enumerate() {
                         let pct = if col.non_null_count > 0 {
                             (*count as f64) * 100.0 / (col.non_null_count as f64)
@@ -9991,6 +10520,7 @@ fn render_result_analytics_frame(
                         } else {
                             sanitize_for_display(val)
                         };
+                        let meter = proportional_meter(*count, max_top, 16, unicode);
                         lines.push(bounded_row(
                             vec![
                                 (format!("    #{:<2} ", rank + 1), theme.style(Token::Muted)),
@@ -9999,9 +10529,10 @@ fn render_result_analytics_frame(
                                     theme.style(Token::Text),
                                 ),
                                 (
-                                    format!("{count:>6} ({pct:>5.1}%)",),
+                                    format!("{count:>6} ({pct:>5.1}%)  "),
                                     theme.style(Token::Info),
                                 ),
+                                (meter, theme.style(Token::Info)),
                             ],
                             body_width,
                             unicode,
@@ -10019,18 +10550,8 @@ fn render_result_analytics_frame(
                     None,
                 ));
                 let max_bucket = col.histogram_counts.iter().copied().max().unwrap_or(0);
-                let bar_char = if presentation.glyphs.is_ascii() {
-                    '#'
-                } else {
-                    '\u{2588}'
-                };
                 for (bucket_idx, count) in col.histogram_counts.iter().enumerate() {
-                    let bar_len = if max_bucket > 0 && *count > 0 {
-                        ((*count * 20) / max_bucket).max(1)
-                    } else {
-                        0
-                    };
-                    let bar: String = std::iter::repeat_n(bar_char, bar_len).collect();
+                    let bar = proportional_meter(*count, max_bucket, 20, unicode);
                     lines.push(bounded_row(
                         vec![
                             (
@@ -10120,6 +10641,29 @@ fn render_result_analytics_frame(
         None,
     ))
     .render(footer_area, buf);
+}
+
+fn proportional_meter(value: usize, max: usize, width_cells: usize, unicode: bool) -> String {
+    if value == 0 || max == 0 || width_cells == 0 {
+        return String::new();
+    }
+    if !unicode {
+        let len = ((value.saturating_mul(width_cells)) / max).max(1);
+        return "#".repeat(len.min(width_cells));
+    }
+    const EIGHTHS: [char; 9] = [
+        ' ', '\u{258f}', '\u{258e}', '\u{258d}', '\u{258c}', '\u{258b}', '\u{258a}', '\u{2589}',
+        '\u{2588}',
+    ];
+    let total_eighths = ((value.saturating_mul(width_cells).saturating_mul(8)) / max)
+        .clamp(1, width_cells.saturating_mul(8));
+    let full = total_eighths / 8;
+    let rem = total_eighths % 8;
+    let mut out = "\u{2588}".repeat(full);
+    if rem > 0 {
+        out.push(EIGHTHS[rem]);
+    }
+    out
 }
 
 fn format_analytics_opt_str(value: Option<&str>) -> String {

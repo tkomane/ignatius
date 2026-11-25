@@ -977,3 +977,174 @@ fn palette_divider_draws_scroll_thumb_without_consuming_extra_columns_or_affecti
         "unscrollable list should not render a thumb"
     );
 }
+
+#[test]
+fn command_palette_renders_live_mini_workbench_theme_preview_for_builtin_themes() {
+    let active_dark = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+
+    let entries: Vec<PaletteEntry> = [
+        (ThemeChoice::Dark, "Dark"),
+        (ThemeChoice::Light, "Light"),
+        (ThemeChoice::HighContrast, "High contrast"),
+        (ThemeChoice::FieldIndustrial, "Dark"),
+        (ThemeChoice::Material, "Dark"),
+        (ThemeChoice::Atelier, "Dark"),
+        (ThemeChoice::Paper, "Light"),
+    ]
+    .into_iter()
+    .map(|(choice, family)| PaletteEntry {
+        group: "Theme",
+        label: format!("Theme: {}", choice.label()),
+        detail: format!("{family} palette"),
+        command: PaletteCommand::SelectTheme(choice),
+    })
+    .collect();
+
+    for (idx, (choice, expected_family)) in [
+        (ThemeChoice::Dark, "Dark"),
+        (ThemeChoice::Light, "Light"),
+        (ThemeChoice::HighContrast, "High contrast"),
+        (ThemeChoice::FieldIndustrial, "Dark"),
+        (ThemeChoice::Material, "Dark"),
+        (ThemeChoice::Atelier, "Dark"),
+        (ThemeChoice::Paper, "Light"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut pal = Palette::over_commands(entries.clone(), "Context note");
+        pal.selected = idx;
+        let mut buf = Buffer::empty(AREA);
+        render_palette(&pal, &active_dark, AREA, &mut buf);
+        let text = buffer_to_string(&buf);
+
+        assert!(text.contains(choice.label()), "{choice:?}: {text}");
+        assert!(text.contains(expected_family), "{choice:?}: {text}");
+        assert!(
+            text.contains("Ignatius: demo  [PROD]"),
+            "{choice:?}: {text}"
+        );
+        assert!(
+            text.contains("SELECT id, total FROM orders WHERE status = 'paid';"),
+            "{choice:?}: {text}"
+        );
+        assert!(text.contains("paid | 14500"), "{choice:?}: {text}");
+        assert!(text.contains("[null] | 7350"), "{choice:?}: {text}");
+        assert!(text.contains("\u{2588}\u{2588}"), "{choice:?}: {text}");
+
+        let target_theme = Theme::from_choice(choice, true, ColorDepth::TrueColor);
+        let prod_pos = cell(&buf, "[PROD]");
+        let expected_prod = target_theme.capsule(Token::EnvironmentProduction);
+        assert_eq!(
+            Some(buf[prod_pos].bg),
+            expected_prod.bg,
+            "{choice:?} [PROD] bg"
+        );
+        assert_eq!(
+            Some(buf[prod_pos].fg),
+            expected_prod.fg,
+            "{choice:?} [PROD] fg"
+        );
+
+        let keycap_pos = cell(&buf, "Ignatius:");
+        assert_eq!(
+            Some(buf[keycap_pos].bg),
+            target_theme.keycap(Token::Header).bg,
+            "{choice:?} mini header keycap bg"
+        );
+
+        let select_pos = cell(&buf, "SELECT");
+        assert_eq!(
+            Some(buf[select_pos].fg),
+            target_theme.color(Token::SyntaxKeyword),
+            "{choice:?} SQL keyword fg"
+        );
+        assert_eq!(
+            Some(buf[select_pos].bg),
+            target_theme.surface(Token::SurfacePane).bg,
+            "{choice:?} SQL SurfacePane bg"
+        );
+
+        let null_pos = cell(&buf, "[null]");
+        assert_eq!(
+            Some(buf[null_pos].fg),
+            target_theme.color(Token::NullValue),
+            "{choice:?} [null] fg"
+        );
+        assert_eq!(
+            Some(buf[null_pos].bg),
+            target_theme.surface(Token::SurfaceAlt).bg,
+            "{choice:?} row 2 SurfaceAlt bg"
+        );
+
+        let swatch_pos = cell(&buf, "\u{2588}\u{2588}");
+        for (swatch_idx, token) in [
+            Token::Focus,
+            Token::Info,
+            Token::Success,
+            Token::Warning,
+            Token::Danger,
+            Token::SyntaxKeyword,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let x = swatch_pos.0 + u16::try_from(swatch_idx * 3).unwrap();
+            assert_eq!(
+                Some(buf[(x, swatch_pos.1)].fg),
+                target_theme.color(token),
+                "{choice:?} swatch {token:?}"
+            );
+        }
+    }
+
+    // hit_row & narrow layout stay intact.
+    let mut pal = Palette::over_commands(entries, "Context note");
+    pal.selected = 5; // Atelier
+    let box_area = super::palette_box(&pal, &active_dark, AREA);
+    let inner_width = box_area.width - 2;
+    let list_width = inner_width - (inner_width * 60 / 100);
+    let divider_x = box_area.x + 1 + list_width;
+    let first_item_y = box_area.y + 3; // filter + 1 context note line
+    assert_eq!(
+        super::hit_row(&pal, &active_dark, AREA, box_area.x + 2, first_item_y),
+        Some(0)
+    );
+    assert_eq!(
+        super::hit_row(&pal, &active_dark, AREA, divider_x + 4, first_item_y),
+        None
+    );
+
+    let narrow_area = Rect::new(0, 0, 70, 24);
+    let mut narrow_buf = Buffer::empty(narrow_area);
+    render_palette(&pal, &active_dark, narrow_area, &mut narrow_buf);
+    let narrow_text = buffer_to_string(&narrow_buf);
+    assert!(!narrow_text.contains("Ignatius: demo"));
+    assert!(!narrow_text.contains("\u{2588}\u{2588}"));
+
+    // NO_COLOR and ASCII modes degrade cleanly to plain summary text.
+    let plain = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut plain_buf = Buffer::empty(AREA);
+    render_palette(&pal, &plain, AREA, &mut plain_buf);
+    let plain_text = buffer_to_string(&plain_buf);
+    assert!(plain_text.is_ascii(), "{plain_text}");
+    assert!(plain_text.contains("Theme: atelier (Dark)"), "{plain_text}");
+    assert!(
+        plain_text.contains("Header: Ignatius: demo  [PROD]"),
+        "{plain_text}"
+    );
+    assert!(
+        plain_buf
+            .content
+            .iter()
+            .all(|cell| cell.fg == Color::Reset && cell.bg == Color::Reset)
+    );
+}

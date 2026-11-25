@@ -401,6 +401,12 @@ impl Theme {
         }
     }
 
+    /// Builds a theme for a built-in palette choice at an explicit colour depth.
+    #[must_use]
+    pub const fn from_choice(choice: ThemeChoice, color: bool, depth: ColorDepth) -> Self {
+        Self::new(choice, color).with_depth(depth)
+    }
+
     /// Sets the colour depth this theme emits at.
     #[must_use]
     pub const fn with_depth(mut self, depth: ColorDepth) -> Self {
