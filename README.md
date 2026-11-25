@@ -357,8 +357,10 @@ ignatius recovery discard
 ```
 
 In the workbench, `Ctrl+K r` restores the active draft and omits empty scratch
-tabs. If the active tab was empty, recovery selects the next retained tab or
-falls back to the last retained tab.
+tabs. If the active scratch tab was omitted, recovery selects the next retained
+tab or falls back to the last retained tab. Clearing a file-backed tab is a
+recoverable edit. `ignatius recovery restore --format json` preserves its
+exact text and file association.
 
 Paths, file permissions, and retention lifetimes are documented in [data handling](docs/security/data-handling.md).
 

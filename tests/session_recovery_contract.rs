@@ -234,6 +234,81 @@ fn restore_refuses_a_clean_or_absent_journal() {
 }
 
 #[test]
+fn a_cleared_file_buffer_is_reported_and_restored_losslessly() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let file_path = root.path().join("cleared.sql");
+    let original = b"SELECT 'kept on disk';\n";
+    std::fs::write(&file_path, original).expect("create user file");
+
+    let mut manager = BufferManager::new();
+    manager.active_buffer_mut().file_path = Some(file_path.clone());
+    manager.active_buffer_mut().editor.set_text(" ");
+    manager.active_buffer_mut().editor.backspace();
+    let journal = RecoveryJournal::from_buffers(&manager, "cleared-file", false);
+    journal
+        .save_to_disk(&recovery_dir(root.path()))
+        .expect("seed journal");
+
+    let status = binary(root.path())
+        .args(["recovery", "status", "--format", "json"])
+        .output()
+        .expect("run status");
+    assert_eq!(code(&status), 0, "stderr: {}", stderr(&status));
+    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).expect("json");
+    assert_eq!(status_json["present"], true);
+    assert_eq!(status_json["recoverable_buffers"], 1);
+    assert_eq!(status_json["unsaved_buffers"], 0);
+
+    let table = binary(root.path())
+        .args(["recovery", "status"])
+        .output()
+        .expect("run table status");
+    assert_eq!(code(&table), 0, "stderr: {}", stderr(&table));
+    assert!(stdout(&table).contains("0 unsaved scratch"));
+
+    let restored = binary(root.path())
+        .args(["recovery", "restore", "--format", "json"])
+        .output()
+        .expect("run JSON restore");
+    assert_eq!(code(&restored), 0, "stderr: {}", stderr(&restored));
+    let restore_json: serde_json::Value = serde_json::from_slice(&restored.stdout).expect("json");
+    assert_eq!(restore_json["buffers"].as_array().unwrap().len(), 1);
+    assert_eq!(restore_json["buffers"][0]["sql"], "");
+    assert_eq!(
+        restore_json["buffers"][0]["file_path"],
+        file_path.to_string_lossy().as_ref()
+    );
+    assert_eq!(restore_json["buffers"][0]["dirty"], true);
+    assert_eq!(
+        std::fs::read(&file_path).expect("user file remains"),
+        original
+    );
+
+    let sql = binary(root.path())
+        .args(["recovery", "restore"])
+        .output()
+        .expect("run SQL restore");
+    assert_eq!(code(&sql), 0, "stderr: {}", stderr(&sql));
+    assert!(stdout(&sql).is_empty(), "blank SQL is not exported");
+    let message = stderr(&sql);
+    assert!(message.contains("No SQL buffers were emitted"), "{message}");
+    assert!(message.contains("--format json"), "{message}");
+    assert!(
+        message.contains("The journal is still on disk."),
+        "{message}"
+    );
+    assert!(!message.contains("Recovered SQL was written"), "{message}");
+    assert_eq!(
+        RecoveryJournal::load_from_disk(&recovery_dir(root.path())).expect("read journal"),
+        Some(journal)
+    );
+    assert_eq!(
+        std::fs::read(&file_path).expect("user file remains"),
+        original
+    );
+}
+
+#[test]
 fn the_documented_recovery_routes_exist_and_advertise_no_retired_chords() {
     let root = temp_root();
     let output = binary(&root)

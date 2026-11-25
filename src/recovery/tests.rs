@@ -84,6 +84,66 @@ fn several_empty_tabs_are_not_a_crash_to_report() {
 }
 
 #[test]
+fn a_cleared_file_buffer_is_checkpointed_counted_and_restored_exactly() {
+    for remaining in ["", " \t\n"] {
+        assert_cleared_file_recovery(remaining);
+    }
+}
+
+fn assert_cleared_file_recovery(remaining: &str) {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let file_path = temp_dir.path().join("cleared.sql");
+    let original = format!("{remaining}X");
+    std::fs::write(&file_path, &original).expect("create source file");
+
+    let mut manager = BufferManager::new();
+    manager.load_files(std::slice::from_ref(&file_path));
+    let editor = &mut manager.active_buffer_mut().editor;
+    editor.set_cursor(original.len());
+    editor.backspace();
+
+    let mut session = RecoverySession::new(temp_dir.path().join("recovery"), true);
+    assert!(session.checkpoint(&manager, false).expect("checkpoint"));
+    let journal = RecoveryJournal::load_from_disk(session.dir())
+        .expect("load journal")
+        .expect("journal exists");
+    assert!(!journal.clean_exit);
+    assert!(journal.has_recoverable_content());
+    assert_eq!(journal.recoverable_buffer_count(), 1);
+    assert_eq!(journal.unsaved_buffer_count(), 0);
+    assert_eq!(journal.buffers[0].sql, remaining);
+    assert_eq!(
+        journal.buffers[0].file_path.as_deref(),
+        Some(file_path.as_path())
+    );
+    assert!(journal.buffers[0].dirty);
+
+    let mut next_session = RecoverySession::new(session.dir().to_path_buf(), true);
+    let startup = next_session
+        .take_startup()
+        .expect("startup must retain the crashed file buffer");
+    assert_eq!(
+        startup.expect("recoverable journal").session_id,
+        journal.session_id
+    );
+    assert!(session.dir().join(RECOVERY_FILE_NAME).exists());
+
+    let mut restored = BufferManager::new();
+    assert_eq!(journal.restore_into(&mut restored), 1);
+    assert_eq!(restored.active_buffer().editor.text(), remaining);
+    assert_eq!(restored.active_buffer().editor.cursor(), remaining.len());
+    assert_eq!(
+        restored.active_buffer().file_path.as_deref(),
+        Some(file_path.as_path())
+    );
+    assert!(restored.active_buffer().editor.is_modified());
+    assert_eq!(
+        std::fs::read(&file_path).expect("file still exists"),
+        original.as_bytes()
+    );
+}
+
+#[test]
 fn restore_into_rebuilds_exact_buffer_state() {
     let mut source = BufferManager::new();
     source

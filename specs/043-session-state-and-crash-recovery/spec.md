@@ -25,11 +25,21 @@ tab was omitted, select the first retained tab after it, or the last retained
 tab when none follows. An out-of-range active position also selects the last
 retained tab. If no tab can be restored, keep the current workspace.
 
+An empty or whitespace-only file-backed tab is an editor draft. Recovery
+retains its exact text, file association and modified marker. Opening and
+restoring the draft leaves the original file on disk, ready for the operator
+to save through the ordinary editor action.
+
 ### Scenario 2: Headless Scriptable Recovery
 An operator working in an automated terminal environment or headless server checks if any orphaned queries remain:
 - `ignatius recovery status` prints a clear summary of unrecovered buffers, timestamps, and session ID.
 - `ignatius recovery restore --format sql` outputs the recovered SQL statements directly to stdout.
 - `ignatius recovery discard` cleans up orphaned recovery files.
+
+The status includes file-backed drafts with blank text in its recoverable
+buffer count. The SQL route emits nonblank SQL and reports an empty SQL
+export on stderr. JSON restore retains the exact editor text and file
+association for cleared drafts. Both formats leave the journal available.
 
 ### Scenario 3: Clean Exit Safety
 When the operator exits normally via `q`, `Quit`, or `Ctrl+C`:

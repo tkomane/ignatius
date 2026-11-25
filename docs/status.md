@@ -4,6 +4,26 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 79 - Recover cleared file-backed drafts - 25 November 2026
+
+- **W10 / 043 T012.** An empty or whitespace-only file-backed draft now
+  qualifies for checkpointing and recovery. The workbench restores its text,
+  file association and modified marker. Status counts it. When SQL restore
+  has no text to emit, it directs the operator to lossless JSON restore and
+  leaves the journal available.
+  [Feature 043 tasks](../specs/043-session-state-and-crash-recovery/tasks.md)
+- **Local checks.** On the `e8fd6ff` base, the unit regression could not
+  checkpoint a lone cleared file and the CLI reported zero recoverable
+  buffers for a prewritten journal. The fix passed 1,896 library tests
+  and nine recovery binary contracts, including preservation of the saved
+  file and the journal after headless export.
+- **Owned PTY on macOS arm64.** After clearing a synthetic one-byte file and
+  terminating the test process, the base build discarded the pending
+  journal on startup. The fixed build reported one buffer and exported
+  exact JSON; its next launch offered recovery, and `Ctrl+K r` restored the
+  editor with the original path, empty text and cursor at zero, still
+  modified. `Ctrl+Q` exited zero. The saved file held its original byte.
+
 ## Wave 78 - Launch the built-in Entra provider through the Windows MSI - 25 November 2026
 
 - **W06 / 011 T002.** The Windows x64 built-in `entra` route tries a native
