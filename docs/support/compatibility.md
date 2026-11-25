@@ -88,6 +88,13 @@ Connection details use the selected entry at startup and after a profile
 switch. A configured provider shows its executable and output format, with
 arguments hidden and a lifetime defined by the provider.
 
+On the Windows Server 2025 x64 runner, Azure CLI MSI 2.93.0 exposed `az.cmd`.
+The provider subprocess returned its missing-program diagnostic for bare `az`
+on the MSI search path. Running the package interpreter directly produced the
+registered version using `version --output json`. The run covers installed
+command launch. Native launch checks for other packages and live Entra
+PostgreSQL authentication remain open. [Hosted Windows launch probe](https://github.com/tkomane/ignatius/actions/runs/45691294548/job/139477135355)
+
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and
 none was found, both the full-screen client and plain mode ask for one, without

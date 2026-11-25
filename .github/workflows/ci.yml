@@ -13,6 +13,10 @@ on:
         description: Compare reviewed PostgreSQL fixture digests with current official tags
         type: boolean
         default: false
+      check_windows_azure_msi:
+        description: Check account-free Azure CLI x64 MSI launch routes on Windows
+        type: boolean
+        default: false
   schedule:
     # Ecosystem advisories and supported PostgreSQL images can change without
     # a source commit. Recheck them weekly at 05:17 Africa/Johannesburg.
@@ -179,6 +183,11 @@ jobs:
             echo "expected connection exit code 4, got $query_status" >&2
             exit 1
           fi
+      - name: Check installed Azure CLI x64 MSI launch routes
+        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.check_windows_azure_msi
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/check-windows-azure-msi.ps1
 
   # Run plain and TLS contracts for every supported major before merge,
   # including revisions to reviewed fixture digests for intermediate majors.
