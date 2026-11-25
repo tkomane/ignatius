@@ -167,6 +167,11 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Compile every workspace target
         run: cargo build --locked --workspace --all-targets --all-features
+      - name: Check pinned Google Cloud CLI x64 archive launch routes
+        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.check_windows_gcloud_archive
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/check-windows-gcloud-archive.ps1
       - name: Run every auto-discovered test target
         run: cargo test --locked --workspace --all-targets --all-features
       - name: Run documentation examples
@@ -201,11 +206,6 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: ./scripts/check-windows-aws-cli.ps1
-      - name: Check pinned Google Cloud CLI x64 archive launch routes
-        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.check_windows_gcloud_archive
-        timeout-minutes: 10
-        shell: pwsh
-        run: ./scripts/check-windows-gcloud-archive.ps1
 
   # Run plain and TLS contracts for every supported major before merge,
   # including revisions to reviewed fixture digests for intermediate majors.
