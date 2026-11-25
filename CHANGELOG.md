@@ -8,6 +8,28 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: Reframed Ignatius's product identity (`TAGLINE` and
+  `IDENTITY_LINE`: `"the PostgreSQL workbench for your terminal"`) across
+  `src/branding.rs`, CLI `--help`, `docs/product/vision.md`, and
+  `docs/product/personas-and-jobs.md`, and upgraded the startup boot reveal with
+  a gleaming 2-cell `Token::Focus` crest and progressive tagline reveal
+  (`Feature 065`, `#144`).
+- New: Added bounded `FocusPulse` (`240 ms`), `TabGlide` (`260 ms`), and
+  `PlanSweep` (`420 ms`) `OutCubic` transitions, a luminous truecolour
+  `ThemeCurtain` leading seam, an Objects tree overflow scrollbar and
+  highlighted filter matches, a 5-cell phosphor heartbeat comet, Results
+  row-gutter settle shimmer and right-aligned `row/total · col_name` coordinate
+  readouts, and Editor buffer line counts (`Feature 065`, `#145`).
+- New: Added live mini-workbench theme previews (`Theme: ...`) inside the `Ctrl+P`
+  Spotlight palette (`PaletteCommand::SelectTheme`), 1-cell architectural drop
+  shadows (`paint_overlay_shadow`) on floating modals, and a top summary KPI
+  strip (`Nodes`, `Planning`, `Execution`, `Hotspot`) in the Plan Explorer
+  (`Feature 065`, `#146`).
+- Improved: Refreshed all 14 2x showcase stills (`docs/assets/screenshots/*.png`)
+  and 6 looping animated APNGs + `-still.png` posters under `docs/assets/motion/`
+  (adding `format-and-plan` and `palette-themes`), updated `banner-dark.svg` and
+  `banner-light.svg`, and rewrote `README.md` (`Feature 065`, Wave 70).
+
 - Security: Added `cargo xtask security` (`xtask/src/security.rs`) to run policy
   and supply-chain contract suites, byte-identity checks for `AGENTS.md` and
   `CLAUDE.md`, sidecar `tests.rs` hygiene checks, em/en dash checks, pinned

@@ -3,17 +3,17 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg" />
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg" />
-  <img src="docs/assets/banner-dark.svg" alt="Ignatius, a quiet instrument for PostgreSQL" width="96%" />
+  <img src="docs/assets/banner-dark.svg" alt="Ignatius, the PostgreSQL workbench for your terminal" width="96%" />
 </picture>
 
-<p><em>A local-first PostgreSQL workbench for the terminal, built for unhurried thinking and truthful state.</em></p>
+<p><em>A fast, full-powered PostgreSQL workbench for your terminal.</em></p>
 
 [![CI](https://github.com/tkomane/ignatius/actions/workflows/ci.yml/badge.svg)](https://github.com/tkomane/ignatius/actions/workflows/ci.yml)
 [![PostgreSQL 14-18](https://img.shields.io/badge/postgresql-14--18-25486B?labelColor=1B1917&logo=postgresql&logoColor=FAF5EC)](docs/support/compatibility.md)
 [![Telemetry: none](https://img.shields.io/badge/telemetry-none-144F63?labelColor=1B1917)](docs/security/data-handling.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4B443C?labelColor=1B1917)](LICENSE)
 
-<a href="#what-it-is-like-to-use">Tour</a> &middot;
+<a href="#workbench-tour">Tour</a> &middot;
 <a href="#quick-start">Quick start</a> &middot;
 <a href="#everyday-keys">Keys</a> &middot;
 <a href="#connecting">Connecting</a> &middot;
@@ -22,49 +22,49 @@
 
 <br />
 
-<img src="docs/assets/screenshots/workbench-atelier.png" alt="The Ignatius workbench in the atelier theme: multi-tab SQL buffers with matching bracket highlight, the object tree on the left, and a locally sorted result grid with an inline chevron and hairline scrollbar where NULL, an empty string and the literal text NULL stay visually distinct." width="96%" />
+<img src="docs/assets/screenshots/workbench-atelier.png" alt="The Ignatius workbench in the atelier theme: multi-tab SQL buffers with matching bracket highlight, an overflowing object tree with hairline scrollbar on the left, and a locally sorted result grid with coordinate readout, inline chevron, and distinct [null], empty string, and literal NULL rendering." width="96%" />
 
 </div>
 
-Most engineers explore a schema in one tool and retreat to `psql` the moment a database becomes real. Ignatius is built to stay open for both. It pairs warm editorial typography and tonal surfaces with PostgreSQL's own semantics, telling you in plain words which role, database, and TLS posture you are holding, and saying "unknown" whenever the server withholds an answer.
+Ignatius brings full PostgreSQL IDE power straight to your terminal in one fast, local Rust binary. Write SQL across up to 16 split tabs, browse schemas with live fuzzy filtering, inspect structured JSONB and array cells, profile `EXPLAIN ANALYZE` bottlenecks, run rollback-safe A/B benchmarks, generate ER diagrams and schema diffs, monitor live server locks, and stream `COPY` imports or CI checks from the exact same engine.
 
-Every action is driven from the keyboard, discovers itself without a manual, and runs inside a single local binary with no account, no cloud service, and no telemetry.
+No Electron bloat, no account, no cloud sync, and zero telemetry. Everything is keyboard-first with optional mouse support, works over SSH or locally, and includes clear built-in guardrails (`[PROD]` badges, `--read-only` server transactions, and reviewed confirmations) whenever you need them.
 
-**Calm.** Tonal elevation across four surfaces, optional iconography, and brief motion that yields to every keystroke.<br />
-**Truthful.** Transport security read back from the session, production marked as a word you declare, and uncertainty spoken aloud.<br />
-**Complete.** One instrument for interactive exploration, explain-plan forensics, schema drift, and scriptable CI checks.
+**Fast.** Instant startup, responsive async execution, and bounded transitions that yield immediately to every keystroke.<br />
+**Deep.** Multi-tab SQL studio, schema-aware autocomplete, plan forensics, A/B benchmarks, ER diagrams, diffs, and live locks in one workspace.<br />
+**Scriptable.** Interactive TUI and headless CLI subcommands sharing one PostgreSQL engine, configuration, and exit-code contract.
 
 ---
 
-## What it is like to use
+## Workbench tour
 
-### Arrival and orientation
+### Fast startup and clear session posture
 
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/boot-reveal-still.png" />
-    <img src="docs/assets/motion/boot-reveal.png" alt="The Ignatius startup wordmark sweeping cleanly left to right across connecting stages in the atelier theme, settling on the identity line 'a quiet instrument for PostgreSQL' before opening the workbench." width="92%" />
+    <img src="docs/assets/motion/boot-reveal.png" alt="The Ignatius startup wordmark sweeping left to right with a gleaming focus crest across connecting stages in the atelier theme, revealing 'the PostgreSQL workbench for your terminal' before opening the workbench." width="92%" />
   </picture>
 </p>
 
-Opening a connection greets you with a bounded 1.1-second sweep across the connecting handshake, settling on the wordmark and its quiet tagline before handing focus to the editor. Press any key or enable `ui.reduced-motion = true` and the final frame appears immediately.
+Connecting opens with a crisp 1.1-second wordmark reveal across the handshake stages before handing focus straight to the SQL editor. Any keypress skips straight in, and `ui.reduced-motion = true` jumps immediately to the resting frame.
 
 <p align="center">
-  <img src="docs/assets/screenshots/workbench-overview.png" alt="The full workbench in the dark theme: a header naming the role, host, database, and [PROD] marker above the object tree, SQL editor with matching parentheses highlighted, and a locally sorted result grid." width="92%" />
+  <img src="docs/assets/screenshots/workbench-overview.png" alt="The full workbench in the dark theme: top rail with role, host, database, and [PROD] marker, scrollable object tree, multi-line SQL editor with line count and focused title, and sorted result grid with coordinate readout." width="92%" />
 </p>
 
-The top rail answers the questions you should never have to guess. Which role, host, and database. Whether you declared this target `[PROD]` or `[STAGING]`. Whether the session is `[READ ONLY]`, or whether a transaction is open (`[TX ACTIVE]`) or aborted (`[TX FAILED]`). Open **Connection and auth details** from the palette to inspect the exact TLS mode read back from PostgreSQL, so `require` and `verify-full` are never blurred together. Strip colour away or shrink the terminal, and decoration yields first while those markers remain intact as words.
+The top rail keeps your active role, host, database, `[PROD]` / `[STAGING]` environment label, `[READ ONLY]` mode, and `[TX ACTIVE]` / `[TX FAILED]` state visible at a glance. Open **Connection and auth details** from the command palette to inspect the exact TLS mode (`require` vs `verify-full`) and cipher reported by PostgreSQL. The editor title tracks cursor position, buffer line count (`line X, column Y · N lines`), `[modified]` state, and `[focused]` status, while the object tree and result grid add hairline scrollbars (`┃`/`│`) whenever rows overflow.
 
-### Answers, as they arrive
+### Live query execution and grid exploration
 
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/run-and-settle-still.png" />
-    <img src="docs/assets/motion/run-and-settle.png" alt="A query running in the atelier theme: a small comet travels back and forth under Running and the elapsed clock, then the rows arrive and Completed settles softly from green to its resting ink." width="92%" />
+    <img src="docs/assets/motion/run-and-settle.png" alt="Running a query in the atelier theme: a 5-cell phosphor comet travels across the 24-cell track beside Running and the live clock, then rows land with Completed and row-gutter shimmer settling cleanly." width="92%" />
   </picture>
 </p>
 
-While PostgreSQL works, a small comet travels back and forth along a 24-cell hairline track beside `Running` and a live tenth-of-a-second clock. Because PostgreSQL reports no completion percentage for an ordinary query, the track never pretends to fill. When rows land, `Completed` and the grid rule glow briefly and settle back to calm ink, making even an identical rerun unmistakably fresh. Inside the grid, `[null]`, an empty cell, and the literal text `NULL` stay distinct without relying on colour alone, while sorted columns display an inline chevron (`▾` / `▴`) when column width allows.
+While a query runs, a 5-cell phosphor comet glides back and forth beside `Running` and a live tenth-of-a-second clock. When rows land, `Completed`, the header rule, and the row-number gutter flash green and settle back cleanly, alongside a right-aligned `row/total · column` coordinate readout in the toolbar. Inside the grid, `[null]`, empty strings, and literal `NULL` stay visually distinct even without colour, and locally sorted columns show an inline chevron (`▾` / `▴`).
 
 <p align="center">
   <picture>
@@ -73,51 +73,67 @@ While PostgreSQL works, a small comet travels back and forth along a 24-cell hai
   </picture>
 </p>
 
-Press `Ctrl+C` and the heartbeat turns amber while the status reports `Cancellation requested`, because until PostgreSQL replies with SQLSTATE `57014` the statement may still be running. In-flight benchmarks cancel through the same bounded socket-EOF handoff and roll back cleanly without leaving an open transaction behind. If a connection drops mid-flight, Ignatius states `Connection lost - query outcome unknown`.
+Press `Ctrl+C` at any time to send a PostgreSQL cancel request; the comet turns amber (`Cancellation requested`) until the server confirms with SQLSTATE `57014`. In-flight A/B benchmarks cancel cleanly through the same bounded socket-EOF handoff and roll back without leaving an open transaction behind.
 
-### Reading plans and catching slips
+### Formatting, EXPLAIN ANALYZE forensics, and A/B benchmarks
 
 <p align="center">
-  <img src="docs/assets/screenshots/plan-explorer.png" alt="The EXPLAIN ANALYZE plan explorer showing proportional 5-cell self-time micro-bars, non-root exclusive-time bottleneck detection on Sort, unclipped [estimate mismatch] markers, and self time in the detail pane." width="92%" />
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/format-and-plan-still.png" />
+    <img src="docs/assets/motion/format-and-plan.png" alt="Formatting a SQL buffer ripples down the editor statement gutter in green, then EXPLAIN ANALYZE opens with a KPI strip and sweeps proportional 5-cell plan micro-bars into place." width="92%" />
+  </picture>
 </p>
 
-`Ctrl+K l` inspects the planner's estimate without touching data; `Ctrl+K a` runs `EXPLAIN ANALYZE` after explicit confirmation. Each tree node displays a proportional 5-cell micro-bar alongside measured rows, loop timing, and unclipped `[attention: measured time]` and `[estimate mismatch]` badges. Because attention scores exclusive self-time rather than inclusive parent totals, the warning lands on the real bottleneck node rather than almost always on the root.
+Press `Ctrl+Shift+F` to format your SQL locally with a crisp green wave down the editor statement gutter. Press `Ctrl+K l` for a safe estimated plan or `Ctrl+K a` for `EXPLAIN ANALYZE`: the plan explorer surfaces a KPI strip (`Nodes`, `Planning`, `Execution`, `Hotspot`), sweeps 5-cell proportional micro-bars across each node, scores exclusive self-time/self-cost so attention flags the actual bottleneck node rather than the root, and highlights `[estimate mismatch]` rows cleanly.
+
+<p align="center">
+  <img src="docs/assets/screenshots/plan-explorer.png" alt="The EXPLAIN ANALYZE plan explorer showing the KPI strip, proportional 5-cell self-time micro-bars, non-root exclusive-time bottleneck detection on Sort, unclipped [estimate mismatch] markers, and self time in the detail pane." width="92%" />
+</p>
 
 <table>
   <tr>
     <td align="center" width="50%">
       <img src="docs/assets/screenshots/error-diagnostics.png" alt="A server error naming a misspelled column, underlining the token and aligning a caret on a recessed SQL strip above SQLSTATE 42703 and next steps." />
       <br />
-      <sub>Error carets align directly beneath the failing token.</sub>
+      <sub>Error carets align squarely beneath the failing SQL token.</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/assets/screenshots/reviewed-update.png" alt="A reviewed cell update showing the exact parameterized UPDATE statement on a recessed strip before any write leaves the client." />
       <br />
-      <sub>Every generated cell edit is reviewed before it runs.</sub>
+      <sub>Inline cell edits build a reviewed parameterized UPDATE first.</sub>
     </td>
   </tr>
 </table>
 
-Server diagnostics preserve exact whitespace so carets land squarely beneath the failing identifier, while `Ctrl+D` opens SQLSTATE and severity fields on demand. Editing a result cell synthesizes the exact bound `UPDATE` for review first, and stays disabled on production and read-only sessions. Writes from the editor against `[PROD]` pause for confirmation, destructive DDL asks you to type the database name, and `ignatius query` and `ignatius bench` refuse non-read statements on production unless `--allow-write` is supplied. Because advisory SQL classification is never a security boundary, `--read-only` enforces server-side read-only transactions in PostgreSQL itself.
+PostgreSQL diagnostics preserve exact SQL whitespace so error carets line up under the offending token, with `Ctrl+D` toggling full SQLSTATE and severity details. Practical built-in guardrails keep mistakes cheap: inline result-cell edits preview the exact parameterized `UPDATE` first, writes against `[PROD]` pause for confirmation, destructive DDL asks for the database name, `ignatius query` and `ignatius bench` require `--allow-write` for non-read statements on production targets, and `--read-only` enforces server-side read-only transactions.
 
-### Everything a few keys away
+### Spotlight command palette, chords, and floating overlays
 
 <p align="center">
-  <img src="docs/assets/screenshots/palette-preview.png" alt="The saved queries palette open over a calmly receded workbench, featuring a Spotlight search strip, proportional scroll thumb along the divider, and syntax-highlighted SQL preview card." width="92%" />
+  <img src="docs/assets/screenshots/palette-preview.png" alt="The saved queries palette open as a floating modal with a 1-cell drop shadow over a receded workbench, featuring a Spotlight search strip, proportional scroll thumb, and syntax-highlighted SQL preview card." width="92%" />
 </p>
 
-`Ctrl+P` opens a Spotlight-style command palette with fuzzy matching, proportional divider scroll indicators, and syntax-highlighted SQL preview cards. Saved queries, statement history, and connection profiles use the same surface. `Ctrl+K` opens a two-key chord guide listing every action available next, leaving plain letters free for SQL. When any modal opens, the panes behind it step into quiet receded ink while the header, safety capsules, and modal-scoped footer stay razor clear. There are no Vim modes to memorize, and mouse support is pure progressive enhancement.
+Press `Ctrl+P` for the Spotlight command palette with fuzzy match highlighting, proportional divider scrollbars, and live SQL preview cards across commands, saved queries, statement history, and connection profiles. Press `Ctrl+K` to open the two-key chord guide for all 56 workbench tools, leaving ordinary keys free for writing SQL. Floating modals cast a crisp 1-cell architectural drop shadow over the receded workspace while keeping the header and modal-scoped footer razor sharp. Mouse gestures work out of the box and can be turned off without losing any feature.
 
-### Seven studio palettes
+### Live theme previews and seven adaptive palettes
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/palette-themes-still.png" />
+    <img src="docs/assets/motion/palette-themes.png" alt="Browsing Theme entries in the floating Spotlight palette renders live mini-workbench previews for field-industrial, material, atelier, and paper before sweeping a luminous theme curtain across the workspace." width="92%" />
+  </picture>
+</p>
+
+Browse `Theme: ...` entries right inside the `Ctrl+P` palette to inspect a live mini-workbench preview (header, syntax-highlighted SQL, sample grid rows, and semantic swatches) before switching. Confirming a theme sweeps a crisp truecolour `ThemeCurtain` across the pane body with a luminous `Token::Focus` leading seam while switching the header and footer atomically on frame zero.
 
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/motion/theme-curtain-still.png" />
-    <img src="docs/assets/motion/theme-curtain.png" alt="Switching between dark, atelier, paper, and material themes behind a crisp left-to-right curtain while the header and footer switch atomically in the first frame." width="92%" />
+    <img src="docs/assets/motion/theme-curtain.png" alt="Switching between dark, atelier, paper, and material themes behind a luminous left-to-right curtain while header and footer rails update atomically in the first frame." width="92%" />
   </picture>
 </p>
 
-Seven curated themes, led by warm obsidian-espresso `atelier` and archival rag-paper `paper`, switch live from the palette without reconnecting, or adapt automatically at startup via `ui.theme = "auto"` (OSC 11 luminance). The theme curtain sweeps across the pane body behind a hard edge in 320 ms so no cell ever passes through low-contrast blended intermediates, while the header and footer switch atomically on frame zero. Every non-border foreground token across all seven palettes is pinned by automated tests at `>= 4.5:1` WCAG contrast (`>= 7.0:1` in `high-contrast`) across all four surfaces. Formatting changes (`Ctrl+Shift+F`) ripple quietly down the active statement gutter in 360 ms, and `ui.reduced-motion = true` stops every animation completely.
+Seven curated built-in palettes (`atelier`, `paper`, `material`, `field-industrial`, `dark`, `light`, and `high-contrast`) ship out of the box, or `ui.theme = "auto"` can match your terminal background via OSC 11. Every non-border foreground token across all seven palettes is pinned by automated tests at `>= 4.5:1` WCAG contrast (`>= 7.0:1` in `high-contrast`) across all four elevation surfaces.
 
 <details>
 <summary>All themes</summary>
@@ -169,7 +185,7 @@ Seven curated themes, led by warm obsidian-espresso `atelier` and archival rag-p
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/assets/screenshots/plan-explorer.png" alt="The query plan explorer with self-time micro-bars and mismatch markers." />
+      <img src="docs/assets/screenshots/plan-explorer.png" alt="The query plan explorer with KPI strip, self-time micro-bars, and mismatch markers." />
       <br />
       <sub>Query plans: <code>Ctrl+K l</code> estimates safely, <code>Ctrl+K a</code> measures after confirmation.</sub>
     </td>
@@ -195,7 +211,7 @@ Seven curated themes, led by warm obsidian-espresso `atelier` and archival rag-p
 
 </details>
 
-Every image and animation above is captured deterministically from real Ratatui widget buffers over synthetic fixtures and framed in a 2x Retina studio window. No frame is tweened.
+Every image and animation above is captured deterministically from real Ratatui widget buffers over synthetic fixtures and framed in a 2x Retina studio window.
 
 ---
 
@@ -210,26 +226,26 @@ cargo xtask db up      # disposable PostgreSQL 18 on ports 55432 and 55433
 cargo xtask run        # open Ignatius against the practice fixture
 ```
 
-A few first moves once the workbench opens:
+Try these right after the workbench opens:
 
-- Type `SELECT label, value FROM rendering_cases;` and press `Ctrl+R`. Observe `[null]`, empty text, and literal `NULL` stay distinct.
-- Move the cursor onto `SELECT * FROM orders WHERE customer_id = 10482;` and press `Ctrl+K l` for an estimated plan without executing the statement; press `Esc` to return.
-- Press `Tab` into Results, choose any cell with the arrow keys, and press `Enter` to open Cell Detail (`Esc` closes it).
-- Press `Ctrl+P`, type `theme`, and run **Switch theme** to sweep between `atelier`, `paper`, `material`, and the rest.
-- Press `Ctrl+K` alone to browse every chord, `F1` for help, and `Ctrl+Q` to quit.
+- Type `SELECT label, value FROM rendering_cases;` and press `Ctrl+R` to see `[null]`, empty text, and literal `NULL` side by side.
+- Place your cursor on `SELECT * FROM orders WHERE customer_id = 10482;` and press `Ctrl+K l` for an estimated query plan (`Esc` closes).
+- Press `Tab` into Results, pick a cell with the arrow keys, and press `Enter` to open the structured Cell Detail inspector.
+- Press `Ctrl+P`, type `Theme:`, and arrow through `atelier`, `paper`, `material`, and `field-industrial` to preview them live before pressing `Enter`.
+- Press `Ctrl+K` to browse all 56 chords, `F1` for help, and `Ctrl+Q` to quit.
 
 When you finish, `cargo xtask db down` removes the practice containers and volumes. Synthetic fixture credentials live in `docker/dev.env` and are wired automatically by `cargo xtask run`.
 
-To install a release build into `~/.local/bin` (or `--dir PATH`), run `cargo xtask install`, then verify and connect to your own target while supplying passwords via `.pgpass`, `PGPASSWORD`, or the masked prompt:
+To install a release build into `~/.local/bin` (or `--dir PATH`), run `cargo xtask install`, then check and connect to any PostgreSQL instance using `.pgpass`, `PGPASSWORD`, or the masked prompt:
 
 ```bash
 ignatius connect --check "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
 ignatius connect "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
 ```
 
-`--check` verifies each connection and TLS stage without entering the full-screen terminal interface.
+`--check` verifies reachability, authentication, and TLS stage without launching the full-screen TUI.
 
-Ignatius is built and tested across macOS, Linux, and Windows in CI. Warp on macOS and Windows Terminal on Windows 11 are first-class targets; human interactive acceptance and ADR-0008 owner signing gates remain open and are tracked honestly in [the compatibility guide](docs/support/compatibility.md). The full three-pane workspace fits 80x24 and adapts cleanly down to 40x8.
+Ignatius is built and tested across macOS, Linux, and Windows in CI. Warp on macOS and Windows Terminal on Windows 11 are first-class targets; human interactive acceptance and ADR-0008 owner signing gates remain open and are tracked in [the compatibility guide](docs/support/compatibility.md). The full three-pane workspace fits 80x24 and adapts cleanly down to 40x8.
 
 ---
 
@@ -327,9 +343,9 @@ Resolution order: connection string, `PGPASSWORD`, `.pgpass`, then a masked prom
 
 ---
 
-## What stays on your machine
+## Local-first privacy
 
-- **Nothing leaves to third parties.** No telemetry, no update pings, no accounts, and no sync. Ignatius opens sockets only to the PostgreSQL servers you configure.
+- **Zero third-party network calls.** No telemetry, no update pings, no accounts, and no sync. Ignatius connects only to the PostgreSQL servers you specify.
 - **Result rows stay ephemeral** unless you explicitly export them.
 - **History logs only SQL text, never result data**, and omits statements containing password-like tokens. Pause recording anytime with `Ctrl+K v`, skip a session with `--no-history`, or disable it with `history.enabled = false`.
 - **Unsaved buffers survive crashes** in a bounded recovery journal (disabled when `--no-history` or `history.enabled = false` is set; pausing with `Ctrl+K v` leaves recovery active). Inspect, export, or discard journals from the CLI:
@@ -539,11 +555,11 @@ Feature slugs such as `026-schema-er-diagrams` correspond to [the roadmap](docs/
 
 **Exploring and querying**
 
-- Object tree across schemas, tables, views, functions, indexes, constraints, and sequences, with definitions (`Ctrl+K d`) and reverse dependencies (`Ctrl+K y`).
-- Up to 16 SQL editor buffers with tab pills, vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting, snippet library (`Ctrl+K ;`), saved queries (`Ctrl+K w`, `Ctrl+K o`), and bounded bracketed paste.
-- Result grid with inline sort chevrons, local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), and structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`).
+- Object tree across schemas, tables, views, functions, indexes, constraints, and sequences, with fuzzy filter highlighting, hairline scrollbars, definitions (`Ctrl+K d`), and reverse dependencies (`Ctrl+K y`).
+- Up to 16 SQL editor buffers with tab pills, vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, snippet library (`Ctrl+K ;`), saved queries (`Ctrl+K w`, `Ctrl+K o`), and bounded bracketed paste.
+- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), and structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`).
 - Bounded `psql` backslash commands (`\d`, `\dt`, `\conninfo`, `\x`, `\watch` with `Ctrl+K :` stop) without claiming full `psql` parity.
-- Query plans, estimated (`Ctrl+K l`) or measured (`Ctrl+K a`) with exclusive self-time bottleneck micro-bars, plus extended `EXPLAIN (BUFFERS, WAL)` A/B plan comparison (`Ctrl+K /`, `ignatius plan-diff`).
+- Query plans, estimated (`Ctrl+K l`) or measured (`Ctrl+K a`) with KPI strip and exclusive self-time bottleneck micro-bars, plus extended `EXPLAIN (BUFFERS, WAL)` A/B plan comparison (`Ctrl+K /`, `ignatius plan-diff`).
 
 **Schema and data**
 
@@ -571,7 +587,7 @@ Feature slugs such as `026-schema-er-diagrams` correspond to [the roadmap](docs/
 
 ### Themes
 
-`atelier` (warm obsidian-espresso dark), `paper` (warm archival rag-paper light), `material` (cool tonal dark), `field-industrial` (matte anodized slate), `dark` (midnight), `light` (crisp daylight), and `high-contrast` (black with 7:1+ ink). `auto` probes terminal background luminance via OSC 11, and `[theme]` lets you extend any built-in palette. All non-border tokens across all seven palettes pass `>= 4.5:1` contrast across all four surface tiers (`Surface`, `SurfacePane`, `SurfaceAlt`, `SurfaceOverlay`). At 16 colours or `NO_COLOR`, surface backgrounds stay transparent and words carry every distinction. See [theme tokens](docs/design/theme-tokens.md).
+`atelier` (warm obsidian-espresso dark), `paper` (warm archival rag-paper light), `material` (cool tonal dark), `field-industrial` (matte anodized slate), `dark` (midnight), `light` (crisp daylight), and `high-contrast` (black with 7:1+ ink). `auto` probes terminal background luminance via OSC 11, and `[theme]` lets you extend any built-in palette. Browse `Theme: ...` in `Ctrl+P` to preview any theme live inside the palette before applying it. All non-border tokens across all seven palettes pass `>= 4.5:1` contrast across all four surface tiers (`Surface`, `SurfacePane`, `SurfaceAlt`, `SurfaceOverlay`). At 16 colours or `NO_COLOR`, surface backgrounds stay transparent and words carry every distinction. See [theme tokens](docs/design/theme-tokens.md).
 
 ### Plain Mode
 
@@ -581,12 +597,12 @@ Feature slugs such as `026-schema-er-diagrams` correspond to [the roadmap](docs/
 
 ## Documentation
 
-- [Product vision](docs/product/vision.md): the problem, principles, and explicit non-goals
+- [Product vision](docs/product/vision.md): the problem, principles, and built-in guardrails
 - [Compatibility](docs/support/compatibility.md): supported PostgreSQL versions, terminals, platforms, and open acceptance boundaries
 - [Keymap](docs/design/keymap.md): every binding, chord, and mouse gesture
 - [Diagnostics](docs/support/diagnostics.md): reading server errors and exit codes
 - [Data handling](docs/security/data-handling.md) and [threat model](docs/security/threat-model.md): local persistence, privacy, and secret boundaries
-- [Icons and motion](docs/design/icons-and-motion.md) and [theme tokens](docs/design/theme-tokens.md): visual hierarchy, contrast guarantees, and truthful motion grammar
+- [Icons and motion](docs/design/icons-and-motion.md) and [theme tokens](docs/design/theme-tokens.md): visual hierarchy, contrast guarantees, and bounded motion grammar
 - [Local development](docs/operations/local-development.md) and [verification](docs/operations/verification.md): the practice database, `cargo xtask verify`, and `cargo xtask security`
 - [Release operations](docs/operations/release.md): release checklist and open ADR-0008 owner gates
 - [Status](docs/status.md): current wave ledger and unverified gates
