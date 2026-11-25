@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Required safety and privacy disclosures use full body-text contrast
+  in clipboard, production, EXPLAIN ANALYZE and parameter reviews.
 - Fixed: Connection details identify configured authentication providers by
   their actual definition, including overrides of `entra`, `aws` and `gcp`.
 - Fixed: Crash recovery restores the active editor draft when empty scratch

@@ -4,6 +4,30 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 76 - Make sending-review disclosures readable - 25 November 2026
+
+- **W09 / 018 T042.** Clipboard destination, write-only behavior and
+  unconfirmed acceptance, the analyzed-plan target, both permissions
+  advisories and the named-parameter text and history disclosures now use
+  undimmed body text. The real overlay assertion failed for all eight
+  disclosures on the baseline. The fix passed 48 focused overlay, viewport
+  and confirmation checks. [Feature 018 tasks](../specs/018-clipboard-copy/tasks.md#w09-sending-review-disclosure-contrast---25-november-2026)
+- **Synthetic rendering.** On macOS arm64 with Homebrew Rust 1.100.0,
+  four Dark Ratatui buffers and their rasterizations showed only the
+  disclosure styles changing, across 541 cells on nine rendered rows.
+  Rasterized foreground contrast increased from 2.98:1 to 11.04:1.
+  Visual inspection covered the destination and acceptance text, query
+  previews, action rails and parameter input layout. W08 hand use
+  in native terminals remains open.
+- **W04 clipboard privacy at the base.** An owned macOS arm64 PTY ran
+  `6c162ee`, which has the same Git tree as merged `8a0a1a1`, against the
+  PostgreSQL 18.7 `verify-full` fixture with debug logging enabled. The copy
+  review showed only metadata for a server-generated synthetic result. Escape
+  emitted zero OSC 52 packets. Confirm emitted one PTY-captured packet whose
+  decoded payload matched the visible result. The result was absent from the
+  active debug log and history. `Ctrl+Q` exited zero. The PTY combined stdout
+  and stderr.
+
 ## Wave 75 - Reconcile M16 and M18 merge evidence - 25 November 2026
 
 - **W01 / M16 Feature 062 T020.** [PR #123](https://github.com/tkomane/ignatius/pull/123)
