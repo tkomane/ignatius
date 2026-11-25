@@ -15,4 +15,7 @@ fn the_identity_line_is_plain_ascii_so_every_glyph_tier_can_set_it() {
     assert!(IDENTITY_LINE.is_ascii());
     assert!(!IDENTITY_LINE.is_empty());
     assert_eq!(IDENTITY_LINE.trim(), IDENTITY_LINE);
+    assert!(IDENTITY_LINE.len() <= 48);
+    assert!(!TAGLINE.is_empty());
+    assert_eq!(TAGLINE.trim(), TAGLINE);
 }

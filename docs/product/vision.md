@@ -1,66 +1,76 @@
 # Vision
 
-## The problem
+## Why Ignatius exists
 
-There are two kinds of PostgreSQL client and neither is the one you want when the
-database is real.
+PostgreSQL practitioners usually get stuck choosing between two imperfect tools:
 
-`psql` is the reference implementation of client behaviour. It is complete,
-scriptable, and always available. It is also a line-oriented REPL where a wide
-result is a wall of text, where the only thing telling you which database you are
-about to run `DELETE` against is your shell prompt, and where a mistyped column
-gives you an error and nothing to do about it.
+- `psql` is fast, scriptable, and faithful to PostgreSQL, yet line-oriented:
+  wide results wrap into unreadable walls of text, inspecting query plans or
+  table relationships takes repetitive meta-commands, and multi-buffer query
+  iteration has no visual workspace.
+- Heavy Electron and Java desktop GUIs give you grids, diagrams, and plan
+  trees, yet take seconds to start, consume hundreds of megabytes of memory,
+  require a window server, and hide PostgreSQL semantics behind lowest-common-denominator
+  database abstractions.
 
-The full-screen clients are pleasant. They give you a grid, a buffer, and
-navigation. Most of them are multi-database by design, which caps how deep the
-PostgreSQL semantics can go, and almost none of them tells you what protection
-your connection actually has, as distinct from what you asked for.
+Ignatius eliminates that trade-off: a fast, full-powered PostgreSQL workbench
+for your terminal, shipped as one local Rust binary that serves both
+interactive studio work and scripted CI automation.
 
-So people use `psql` for the connections that matter and something nicer for the
-rest, which means the tool they are least fluent in is the one they use under the
-most pressure.
+## What Ignatius delivers
 
-## What this is
+Ignatius brings complete PostgreSQL studio workflows directly to the terminal
+without sacrificing speed, clarity, or keyboard flow:
 
-A terminal-native PostgreSQL workbench: a full-screen client that is pleasant
-enough for daily exploration, and honest enough to point at production, in one
-small local binary that is also a scriptable CLI.
+- **SQL Studio and Results Workbench.** Multi-tab SQL buffers with schema-aware
+  autocomplete, local formatting, bracket matching, prompted named parameters,
+  pinned columns, server/local sort, structured JSONB/array/composite
+  inspection, and reviewed single-cell updates.
+- **Query Plan Forensics (`EXPLAIN` / `EXPLAIN ANALYZE`).** Interactive plan
+  trees with exclusive self-time and self-cost bottleneck scoring, proportional
+  micro-bars, estimate-vs-actual mismatch markers, and persisted plan comparison
+  history.
+- **A/B Query Benchmarks.** Repeatable warmup + measured benchmark runs comparing
+  two statements side by side with percentile latency deltas, safe rollback
+  isolation, and live cancellation.
+- **Schema Diagrams and Diffs.** Terminal ER diagrams with primary/foreign-key
+  relationships, deep catalog browsing, DDL generation, schema snapshot diffs,
+  and migration checks.
+- **Live Server Activity and Maintenance.** Real-time session, lock-tree, and
+  blocking diagnostics alongside guided vacuum, analyze, reindex, and partition
+  operations.
+- **Streaming COPY and Scripted CI CLI.** Fast streaming CSV/TSV/JSON/NDJSON/SQL
+  import and export, plus a non-interactive CLI sharing the same engine, SQL
+  linter, and documented exit codes.
 
-The emotional target is calm confidence. Oriented, in control, slightly
-delighted. Never noisy, cryptic, brittle, or smug.
+## Practical built-in guardrails
 
-## What makes it different
+When a workbench handles real databases, safety features belong in the engine
+as sharp, low-friction engineering guardrails:
 
-Not the grid, and not the editor. Harlequin and Rainfrog already do those well.
-The difference is what the tool tells you about itself:
+- **Server-verified transport.** TLS status is read back from `pg_stat_ssl`,
+  distinguishing `require` from `verify-full`, and options the client cannot
+  honour fail loudly instead of silently downgrading.
+- **Explicit posture markers.** `[PROD]`, `[STAGING]`, `[READ ONLY]`,
+  `[TX ACTIVE]`, and `[TX FAILED]` are plain-text state indicators backed by
+  typed-name confirmations on production writes and `--allow-write` gates in CLI
+  runs.
+- **Truthful async state.** Cancellation reports `Cancellation requested` until
+  the server confirms stop; dropped connections state `Connection lost - query
+  outcome unknown` rather than guessing.
+- **Accessible across terminals.** Every state and action survives `NO_COLOR`,
+  ASCII fallback, narrow terminals, and `ui.reduced-motion = true`, with full
+  terminal restoration on exit or signal.
 
-- **The transport state is the server's answer, not yours.** Read back from
-  `pg_stat_ssl`. `require` and `verify-full` are never described identically,
-  because they are not the same guarantee.
-- **An option it cannot honour fails.** Silently ignoring `sslrootcert` gives you
-  less protection than you asked for while looking like success. That is the one
-  failure mode a client must never have.
-- **Production is a word you declared**, not a colour inferred from a host name,
-  and it survives with colour switched off.
-- **Uncertainty is stated.** `Cancellation requested` until the server confirms.
-  `Connection lost - query outcome unknown` when that is the truth.
-- **One binary for exploring and automating**, with documented exit codes, so the
-  thing you learn is the thing you script.
+## Non-goals
 
-## What it will not become
+Ignatius stays focused on being the best terminal workbench for PostgreSQL. It
+will not become a multi-database client, a cloud-synced SaaS account, a BI
+dashboard builder, or an AI wrapper that uploads your schema or queries to third
+parties.
 
-A generic multi-database client. A place that sends your schema to an AI provider.
-A cloud account or sync service. A BI tool. A plugin marketplace. Each of those is
-a different product, and taking one on would cost the focus that makes this one
-worth using.
+## How success is measured
 
-Full pgAdmin replacement parity (M6) does not compromise this boundary: schema diagrams,
-deep catalog inspection, DDL generation, streaming COPY/backup, live activity dashboards,
-and role auditing belong in Ignatius as transparent, terminal-native, SQL-first workflows
-with explicit preview and write guards rather than opaque, bloated GUI wizards.
-
-## How success will be judged
-
-Not by stars. By whether a senior engineer reaches for this instead of `psql`
-when the database is production-adjacent, and does not feel they gave anything up
-to do so.
+An engineer, DBA, or backend developer opens Ignatius over SSH or in a local
+terminal and has the full power of a PostgreSQL IDE at native Rust speed -
+with nothing held back and nothing hidden.

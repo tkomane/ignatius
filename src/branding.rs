@@ -15,12 +15,11 @@ pub const BINARY_NAME: &str = "ignatius";
 pub const PRODUCT_NAME: &str = "Ignatius";
 
 /// One-sentence description shown on first run and in `--help`.
-pub const TAGLINE: &str = "A terminal-native PostgreSQL workbench";
+pub const TAGLINE: &str = "A full-powered PostgreSQL workbench for the terminal";
 
 /// The identity line set under the wordmark in the boot reveal. Plain ASCII,
-/// so the same words read in every glyph tier. The README banner SVGs are
-/// drawn separately and take this line in the Feature 063 showcase refresh.
-pub const IDENTITY_LINE: &str = "a quiet instrument for PostgreSQL";
+/// so the same words read in every glyph tier.
+pub const IDENTITY_LINE: &str = "the PostgreSQL workbench for your terminal";
 
 /// Directory name used under the platform configuration and data roots.
 pub const CONFIG_DIR_NAME: &str = "ignatius";
