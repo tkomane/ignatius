@@ -163,6 +163,9 @@ and verify one history outcome with the safe template and no prompted value.
 - **FR-2410**: Refresh outcomes MUST use the existing history, diagnostics and
   cancellation contracts, including one outcome per explicit execution and no
   automatic retry.
+- **FR-2411**: A position-bearing refresh failure MUST identify the retained
+  query as the source of the position and leave the editor caret, marker and
+  current focus independent of that position.
 
 ### Security and Compatibility Requirements
 
@@ -201,8 +204,9 @@ and verify one history outcome with the safe template and no prompted value.
 - **SC-2402**: One hundred percent of tested multi-statement, write,
   structural, destructive, unknown, unavailable and failed-transaction cases
   emit zero execution requests.
-- **SC-2403**: In all focused refresh tests, the editor text and revision are
-  unchanged from before the action, including when the refresh fails.
+- **SC-2403**: Focused refresh tests preserve editor text and revision,
+  including when refresh fails. A position-bearing failure also preserves the
+  editor caret and current focus and reports the position's retained origin.
 - **SC-2404**: Every successful refresh test produces exactly one new result
   outcome and zero automatic follow-up requests; every passive view-only test
   produces zero refresh requests.

@@ -24,6 +24,9 @@ only.
 5. The Results surface reports running and then the actual result outcome.
 6. The ordinary result lifecycle applies the new snapshot, counts, timing,
    local-view reset and history rules.
+7. When PostgreSQL reports an error position, the diagnostic identifies the
+   retained query as its source. The editor caret and current focus stay in
+   place.
 
 ## Refused flow
 
