@@ -193,8 +193,7 @@ fn a_result_cell_plan_updates_the_selected_primary_key_row_only_when_executed() 
     let fx = fixture(&uri);
     let setup = fx.block_on(fx.session.execute(
         "CREATE TEMP TABLE cell_update_probe (id integer PRIMARY KEY, note text); \
-         INSERT INTO cell_update_probe VALUES (1, 'before'); \
-         SET search_path TO pg_temp",
+         INSERT INTO cell_update_probe VALUES (1, 'before')",
         100,
         JobId(303),
     ));
@@ -211,7 +210,8 @@ fn a_result_cell_plan_updates_the_selected_primary_key_row_only_when_executed() 
         ignatius::query::parse_update_source(source_sql, &set.columns, 1).expect("direct source");
     let relation = fx
         .block_on(fx.session.update_relation(None, "cell_update_probe"))
-        .expect("search-path relation metadata");
+        .expect("an unqualified temporary table resolves in the default search path");
+    assert!(relation.schema.starts_with("pg_temp_"));
     assert_eq!(
         relation.kind,
         ignatius::postgres::metadata::ObjectKind::Table

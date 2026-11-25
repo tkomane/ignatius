@@ -4,6 +4,19 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 82 - Resolve temporary tables for reviewed cell edits - 25 November 2026
+
+- **W03 / 023 T021.** An unqualified temporary table resolves at its
+  effective position in the current session's relation search path. The
+  cell-edit review uses the resolved schema, relation and primary key.
+  [Feature 023 tasks](../specs/023-cell-update/tasks.md)
+- **Live PostgreSQL 18.7.** With the default search path, the `e8fd6ff`
+  regression could select a row from a temporary table and then failed
+  to resolve the relation for editing. The fixed test resolved the
+  physical temporary schema, read the original value after preparing
+  the update, executed the reviewed statement once, and verified a
+  one-row outcome and the new value.
+
 ## Wave 81 - Verify the installed Windows AWS CLI launch - 25 November 2026
 
 - **W06 / 011 T003.** The opt-in Windows Server 2025 x64 dispatch at
