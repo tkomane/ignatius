@@ -11034,8 +11034,94 @@ fn restore_keeps_edits_typed_after_the_capsule_appeared() {
 }
 
 #[test]
-fn restore_refuses_when_preserving_in_flight_edits_would_exceed_the_tab_bound() {
+fn restore_preserves_cleared_file_backed_drafts_with_exact_state_and_saved_bytes() {
     use crate::buffer::BufferManager;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let journal = seed_recovery_journal(&recovery_dir);
+    let mut model = Model::new(100);
+    model.buffers = BufferManager::new();
+    let drafts = [
+        (
+            "cleared-empty.sql",
+            "",
+            0,
+            b"saved empty draft bytes".as_slice(),
+        ),
+        (
+            "cleared-whitespace.sql",
+            " \t\n ",
+            2,
+            b"saved whitespace draft bytes".as_slice(),
+        ),
+    ];
+    let mut files = Vec::new();
+    for (index, (title, text, cursor, saved_bytes)) in drafts.iter().enumerate() {
+        if index > 0 {
+            model.buffers.new_buffer(Some((*title).to_owned()), None);
+        }
+        let path = temp_dir.path().join(title);
+        std::fs::write(&path, saved_bytes).expect("seed original file bytes");
+        let buffer = model.buffers.active_buffer_mut();
+        buffer.title = (*title).to_owned();
+        buffer.file_path = Some(path.clone());
+        buffer.editor.set_text(*text);
+        buffer.editor.set_cursor(*cursor);
+        buffer.editor.restore_modified(true);
+        files.push((path, saved_bytes.to_vec()));
+    }
+    model.sync_editor_from_active_buffer();
+    let original_live_ids: Vec<_> = model
+        .buffers
+        .buffers
+        .iter()
+        .map(|buffer| buffer.id)
+        .collect();
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    let effects = update(&mut model, Message::Action(Action::RestoreSession));
+
+    assert!(effects.is_empty());
+    assert!(model.recovery_banner.is_none());
+    assert_eq!(model.buffers.count(), 4);
+    assert_eq!(
+        model.buffers.active_idx, 1,
+        "the journal selection is retained"
+    );
+    for (index, (title, text, cursor, _)) in drafts.iter().enumerate() {
+        let buffer = &model.buffers.buffers[index + 2];
+        assert_eq!(buffer.title, *title);
+        assert_eq!(
+            buffer.file_path.as_deref(),
+            Some(temp_dir.path().join(title).as_path())
+        );
+        assert_eq!(buffer.editor.text(), *text);
+        assert_eq!(buffer.editor.cursor(), *cursor);
+        assert!(buffer.editor.is_modified());
+        assert!(
+            !original_live_ids.contains(&buffer.id),
+            "live tabs get fresh identities"
+        );
+    }
+    assert_eq!(model.buffers.next_id, 5);
+    assert_eq!(model.editor.text(), model.buffers.active_editor().text());
+    for (path, saved_bytes) in files {
+        assert_eq!(
+            std::fs::read(path).expect("original file remains"),
+            saved_bytes
+        );
+    }
+    assert!(
+        !recovery_dir
+            .join(crate::recovery::RECOVERY_FILE_NAME)
+            .exists()
+    );
+}
+
+#[test]
+fn restore_refuses_when_preserving_in_flight_edits_would_exceed_the_tab_bound() {
+    use crate::buffer::{BufferManager, MAX_EDITOR_BUFFERS};
     use crate::recovery::RecoveryJournal;
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
@@ -11050,12 +11136,24 @@ fn restore_refuses_when_preserving_in_flight_edits_would_exceed_the_tab_bound() 
     journal.save_to_disk(&recovery_dir).expect("seed journal");
 
     let mut model = Model::new(100);
-    while model.buffers.count() < crate::buffer::MAX_EDITOR_BUFFERS {
-        model.buffers.new_buffer(Some("filler.sql".into()), None);
-    }
-    for buffer in &mut model.buffers.buffers {
-        buffer.editor.set_text("SELECT 'in flight';");
-        buffer.editor.insert(' ');
+    let mut files = Vec::new();
+    for index in 0..MAX_EDITOR_BUFFERS {
+        if index > 0 {
+            model
+                .buffers
+                .new_buffer(Some(format!("cleared-{index}.sql")), None);
+        }
+        let path = temp_dir.path().join(format!("cleared-{index}.sql"));
+        let saved_bytes = format!("saved source {index}").into_bytes();
+        std::fs::write(&path, &saved_bytes).expect("seed original file");
+        let buffer = model.buffers.active_buffer_mut();
+        buffer.title = format!("cleared-{index}.sql");
+        buffer.file_path = Some(path.clone());
+        let text = if index % 2 == 0 { "" } else { " \t\n " };
+        buffer.editor.set_text(text);
+        buffer.editor.set_cursor(text.len());
+        buffer.editor.restore_modified(true);
+        files.push((path, saved_bytes));
     }
     model.sync_editor_from_active_buffer();
     install_recovery_banner(&mut model, &recovery_dir, journal);
@@ -11074,6 +11172,12 @@ fn restore_refuses_when_preserving_in_flight_edits_would_exceed_the_tab_bound() 
             .exists(),
         "the journal is preserved for a later restore"
     );
+    for (path, saved_bytes) in files {
+        assert_eq!(
+            std::fs::read(path).expect("original file remains"),
+            saved_bytes
+        );
+    }
 }
 
 #[test]
@@ -11090,13 +11194,39 @@ fn restore_session_syncs_the_editor_even_when_nothing_could_be_restored() {
     journal.save_to_disk(&recovery_dir).expect("seed journal");
 
     let mut model = Model::new(100);
-    model.editor.set_text("STALE EDITOR TEXT");
+    let path = temp_dir.path().join("live-cleared.sql");
+    let saved_bytes = b"the previously saved query".to_vec();
+    std::fs::write(&path, &saved_bytes).expect("seed original file");
+    let live = model.buffers.active_buffer_mut();
+    live.title = "live-cleared.sql".to_owned();
+    live.file_path = Some(path.clone());
+    live.editor.set_text(" \t\n ");
+    live.editor.set_cursor(2);
+    live.editor.restore_modified(true);
+    model.editor.set_text("stale editor pane before restore");
     install_recovery_banner(&mut model, &recovery_dir, journal);
+    let live_before = model.buffers.clone();
 
     let effects = update(&mut model, Message::Action(Action::RestoreSession));
     assert!(effects.is_empty());
     assert!(model.recovery_banner.is_none());
-    assert_eq!(model.buffers.count(), 1);
+    assert_eq!(model.buffers.count(), 1, "the live tab is not duplicated");
+    assert_eq!(
+        model.buffers, live_before,
+        "zero recovery leaves workspace intact"
+    );
+    assert_eq!(model.buffers.active_buffer().title, "live-cleared.sql");
+    assert_eq!(
+        model.buffers.active_buffer().file_path.as_deref(),
+        Some(path.as_path())
+    );
+    assert_eq!(model.buffers.active_editor().text(), " \t\n ");
+    assert_eq!(model.buffers.active_editor().cursor(), 2);
+    assert!(model.buffers.active_editor().is_modified());
+    assert_eq!(
+        std::fs::read(path).expect("original file remains"),
+        saved_bytes
+    );
     assert_eq!(
         model.editor.text(),
         model.buffers.active_editor().text(),

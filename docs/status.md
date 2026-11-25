@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 87 - Keep drafts cleared while recovery is pending - 26 November 2026
+
+- **W10 / 043 T013.** Accepting a pending crash journal preserves a live
+  modified file-backed draft whose text is empty or only whitespace. The
+  same set of edits counts toward capacity and is appended to the recovered
+  tabs. If the two sets exceed the tab limit, the current workspace and the
+  journal remain available. [Feature 043 tasks](../specs/043-session-state-and-crash-recovery/tasks.md)
+- **Focused verification.** The baseline omitted cleared drafts and bypassed
+  capacity refusal. Both regressions passed with the fix, along with all 18
+  focused restore tests and nine recovery executable contracts.
+- **Owned macOS arm64 PTYs.** An earlier synthetic journal remained intact
+  while the recovery prompt was open. The baseline lost the cleared and
+  whitespace-only live drafts after `Ctrl+K r`. Both fixed trials retained
+  their exact text, path, cursor and modified state beside the recovered
+  tab. The saved file bytes were unchanged and all four PTYs exited zero.
+
 ## Wave 86 - Resolve reviewed edits on the query session - 26 November 2026
 
 - **W03 / 023 T022.** The query backend resolves reviewed edits using its own

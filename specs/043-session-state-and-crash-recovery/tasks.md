@@ -31,3 +31,9 @@ The checkpoint and status regressions failed on the base. The fix passed
 PTY confirmed startup offered the cleared draft, `Ctrl+K r` restored its
 empty text, path and dirty marker, and the original file was intact after a
 clean quit. [Wave 79](../../docs/status.md#wave-79---recover-cleared-file-backed-drafts---25-november-2026)
+
+- [x] T013 Preserve dirty blank file-backed tabs when accepting the crash
+  journal after additional edits. Prove safe capacity refusal, exact
+  draft and file state, and the ordinary interactive merge.
+
+[Focused tests and macOS PTY evidence](../../docs/status.md#wave-87---keep-drafts-cleared-while-recovery-is-pending---26-november-2026)

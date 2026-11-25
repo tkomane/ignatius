@@ -99,3 +99,16 @@ offers recovery, the restored editor's path and dirty state match the
 checkpoint, and the source file still holds its original bytes. Confirm the
 headless count and lossless export with the real binary. Run the local gate
 and the hosted PR and post-merge gates.
+
+## W10 preserve drafts edited while recovery is pending
+
+Use the existing recovery content rule for modified tabs in the current
+workspace. Count the same set that will be appended beside the restored
+tabs. Keep the workspace intact when the journal has no restorable tabs or
+the combined tabs would exceed capacity. Preserve fresh buffer identities
+and the restored active selection.
+
+Prove both empty and whitespace-only file-backed drafts keep their text,
+path and dirty marker without writing the source file. Exercise the tab
+limit and zero-restorable case in the reducer, then confirm the ordinary
+restore shortcut in an owned PTY. Run the local and hosted gates.
