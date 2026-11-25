@@ -98,6 +98,15 @@ secret values and confirmation boundaries visible. No constitution exception is
 needed. Primary-key-only and conservative-source refusal intentionally trade
 coverage for a reviewable first write path.
 
+## W03 resolution of an unqualified temporary table
+
+Include the session's own temporary namespace when resolving an unqualified
+relation. Its implicit search-path position takes precedence over the ordinary
+search path. An explicit entry keeps the position PostgreSQL reports. Verify a
+read and reviewed update on a temporary table with the default search path.
+Retain the existing coverage for an explicit temporary schema, relation kind,
+privileges and primary-key requirements.
+
 ## Implementation Phases
 
 1. Add the Feature 023 artifacts and active feature pointer.

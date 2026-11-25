@@ -163,7 +163,9 @@ generated update and verify exactly one row changes only after confirmation.
   shapes without guessing.
 - **FR-2305**: Relation discovery MUST resolve the source relation against the
   live PostgreSQL session and MUST return the resolved schema, relation kind,
-  read privilege, update privilege and primary-key membership.
+  read privilege, update privilege and primary-key membership. Unqualified
+  names include the current session's temporary schema at its effective
+  position in the relation search path.
 - **FR-2306**: The client MUST refuse non-table targets, unavailable update
   privilege, missing primary keys, missing projected key columns, NULL key
   values, duplicate mappings and primary-key cell edits.
