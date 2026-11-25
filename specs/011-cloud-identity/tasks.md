@@ -36,6 +36,16 @@ used a synthetic TLS-required target and a fresh account-free worker.
 Live RDS or Aurora IAM authentication requires its own controlled test.
 [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45705066295/job/139524815561)
 
-- [ ] T004 Verify the built-in direct Google Cloud CLI route and the packaged
+- [x] T004 Verify the built-in direct Google Cloud CLI route and the packaged
   Windows launcher with an account-free version check on the same verified
   archive. Record the exact source, archive and runner identity.
+
+On 26 November 2026, the opt-in dispatch at `0ec9ce1` passed on Windows
+Server 2025 x64 (`windows-2025-vs2026`, image `20261123.321.1`,
+OS build `10.0.26100.0`). It matched the bundled-Python archive `594.0.1`
+to SHA-256
+`9612ee5a32a13e917fda84a0dce8028264c3fec1e8ca2738d1d43c312c675332`.
+The stock direct route returned `missing-program` and the packaged
+`gcloud.cmd` version control returned `version-matched`. The full hosted
+CI run passed. A supported direct route and live Cloud SQL IAM remain open.
+[Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
