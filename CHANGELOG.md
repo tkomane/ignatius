@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: The generated UPDATE review shows the primary-key identity,
+  value-handling explanation and prior-SELECT notice at full body-text contrast.
 - Improved: Reframed Ignatius's product identity (`TAGLINE` and
   `IDENTITY_LINE`: `"the PostgreSQL workbench for your terminal"`) across
   `src/branding.rs`, CLI `--help`, `docs/product/vision.md`, and

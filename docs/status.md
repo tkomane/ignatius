@@ -4,6 +4,31 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 72 - Review readability and release authorization - 25 November 2026
+
+- **W09 J5 / 018 T041.** Generated UPDATE reviews show the primary-key
+  identity, value-handling explanation and prior-SELECT notice at full
+  body-text contrast. The buffer assertion failed on the old primary-key
+  style and passed with the fix. All 43 focused review, confirmation, privacy
+  and showcase checks passed. The Dark showcase's rendered foreground
+  contrast for those rows rose from 2.98:1 to 11.04:1. Comparing all 14
+  captured scenes and the regenerated raster confined the changes to those
+  three rows. Independent visual QA inspected the still. W08/J5 hand use in
+  native terminals remains open. [T041](../specs/018-clipboard-copy/tasks.md#w09-generated-update-review-readability-2026-11-25)
+  and [reviewed UPDATE still](assets/screenshots/reviewed-update.png).
+- **W11/W13.** The owner checklist gives the approved workflow certificate
+  identity and the GitHub OIDC issuer separate fields. It puts authorization
+  for the exact signing and attestation actions before generation and requires
+  independent verification and separate publication approval. Canonical
+  retention, exact trust identities and Feature 008 T033/T035 remain open.
+  [Owner checklist](operations/release.md#owner-release-decision-checklist-adr-0008)
+- **Local full verifier.** `cargo --locked xtask verify` passed on the working
+  copy based on `58860e7` with macOS 27.2.1 arm64, Homebrew Rust 1.100.0 and
+  disposable PostgreSQL 18.7 plain and verified TLS. The harness reported
+  2,371 passes across 54 summaries, including a semantic Unix-socket skip.
+  The base commit `58860e7` also passed [main CI](https://github.com/tkomane/ignatius/actions/runs/45647175285)
+  and [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45647175261).
+
 ## Wave 71 - Roadmap evidence and resource boundaries - 25 November 2026
 
 - **M19 / 065 T009.** [PR #147](https://github.com/tkomane/ignatius/pull/147)

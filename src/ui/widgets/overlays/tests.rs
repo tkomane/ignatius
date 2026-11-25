@@ -1383,6 +1383,22 @@ fn plan_header_detail_strip_and_review_modal_craft_across_depths() {
         nerd.theme.surface(Token::SurfaceAlt).bg.unwrap(),
         "review modal action rail must sit on SurfaceAlt"
     );
+    for disclosure in [
+        "Primary-key identity: id",
+        "The replacement is literal text data",
+        "The prior SELECT is a snapshot",
+    ] {
+        let start = find_word(disclosure);
+        let expected_fg = nerd.theme.color(Token::Text).unwrap();
+        for offset in 0..u16::try_from(disclosure.chars().count()).unwrap() {
+            let cell = &rbuf[(start.0 + offset, start.1)];
+            assert_eq!(cell.fg, expected_fg, "{disclosure} foreground");
+            assert!(
+                !cell.modifier.contains(ratatui::style::Modifier::DIM),
+                "{disclosure} must use undimmed body text"
+            );
+        }
+    }
 
     for depth in [ColorDepth::Basic16, ColorDepth::None] {
         let low = Presentation::new(

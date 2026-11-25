@@ -121,6 +121,15 @@ keep their existing behavior. This does not prove a person read the frame.
 | EXPLAIN ANALYZE | Execution, possible side effects, no automatic rollback, target, existing source preview with an indication when truncated, advisory classification/permissions and existing typed-name requirement. |
 | Named parameter | Full current name, position/count, literal-text/empty-text meaning, unchanged template/no value history. Keep the answer masked and separate from the body. |
 
+### Generated UPDATE disclosure contrast
+
+The primary-key identity, literal-data or structured-edit explanation, and
+notice that the prior SELECT stays a snapshot are required review text. Render
+these rows at full body-text contrast, without the DIM modifier, against the
+overlay surface. The wording must stay readable as the user scrolls the review,
+including in ASCII and no-colour presentation. Existing review geometry and
+confirmation admission apply.
+
 ## Privacy and proof
 
 Store navigation state only, never expanded SQL or answers in displayable model

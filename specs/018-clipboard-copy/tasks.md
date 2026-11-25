@@ -259,3 +259,17 @@ macOS 27.0.1 arm64/Homebrew Rust 1.99.1. The socket case remains a semantic
 skip; the inert W07 parent helper is not terminal proof. Latest-source Linux,
 pinned/MSRV, Windows, hosted, native visual/hand-use and different-family
 review remain separate gates. No real clipboard or production write was used.
+
+## W09 generated UPDATE review readability (2026-11-25)
+
+- [x] T041 Restore full body-text contrast to the primary-key identity,
+  value-handling explanation and prior-SELECT notice in the generated UPDATE
+  review. Prove the contrast regression in the rendered buffer, keep the
+  existing confirmation tests green, and regenerate and inspect the affected
+  showcase still. Record focused, full and hosted evidence separately from
+  W08 hand use. [Review viewport contract](contracts/review-viewport.md#generated-update-disclosure-contrast)
+
+The new assertion failed on the baseline's muted primary-key text. The fix
+passed 43 focused checks and the local full verifier. Visual QA confirmed that
+all three disclosures, bound SQL and the command rail are legible in the
+regenerated synthetic still. See the [Wave 72 evidence](../../docs/status.md#wave-72---review-readability-and-release-authorization---25-november-2026).
