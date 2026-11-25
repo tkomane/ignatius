@@ -82,25 +82,27 @@ pub struct ProviderPresentation {
 impl Provider {
     /// Builds safe, display-only facts for the connection details surface.
     ///
-    /// The command text is intentionally allowlisted for built-ins. A custom
-    /// provider may put arbitrary text in its arguments, so only its executable
-    /// name is shown and the rest stays behind the provider's own remedy.
+    /// A provider value has no registry provenance. It shows its executable
+    /// and extraction rule as configured facts and keeps its arguments hidden.
+    /// Use [`presentation_registry`] to retain the provenance of registry entries.
     #[must_use]
     pub fn presentation(&self) -> ProviderPresentation {
-        let name = self.name.clone();
-        let lower = self.name.to_ascii_lowercase();
-        let (display_name, invocation, lifetime) = match lower.as_str() {
-            "entra" => (
+        self.presentation_for_key(&self.name, false)
+    }
+
+    fn presentation_for_key(&self, name: &str, from_built_in: bool) -> ProviderPresentation {
+        let (display_name, invocation, lifetime) = match (from_built_in, name) {
+            (true, "entra") => (
                 "Microsoft Entra ID".to_owned(),
                 "az account get-access-token (OSS RDBMS resource)".to_owned(),
                 "short-lived OAuth 2.0 token, typically 5-60 minutes".to_owned(),
             ),
-            "aws" => (
+            (true, "aws") => (
                 "AWS IAM database authentication".to_owned(),
                 "aws rds generate-db-auth-token".to_owned(),
                 "short-lived signed token, valid for 15 minutes".to_owned(),
             ),
-            "gcp" => (
+            (true, "gcp") => (
                 "Google Cloud SQL IAM".to_owned(),
                 "gcloud sql generate-login-token".to_owned(),
                 "short-lived OAuth 2.0 token, valid for about 1 hour".to_owned(),
@@ -128,7 +130,7 @@ impl Provider {
         };
 
         ProviderPresentation {
-            name,
+            name: name.to_owned(),
             display_name,
             command_name,
             invocation,
@@ -219,6 +221,24 @@ pub fn registry(configured: &BTreeMap<String, Provider>) -> BTreeMap<String, Pro
         all.insert(name.clone(), provider.clone());
     }
     all
+}
+
+/// Projects the runtime registry into display-only facts.
+///
+/// The exact configured key supplies provenance even when its definition is
+/// identical to a built-in. Only entries supplied by the built-ins get vendor
+/// labels, invocation hints and lifetime claims.
+#[must_use]
+pub fn presentation_registry(
+    configured: &BTreeMap<String, Provider>,
+) -> BTreeMap<String, ProviderPresentation> {
+    registry(configured)
+        .into_iter()
+        .map(|(name, provider)| {
+            let view = provider.presentation_for_key(&name, !configured.contains_key(&name));
+            (name, view)
+        })
+        .collect()
 }
 
 /// Looks a provider up by name, refusing an unknown one with the list.

@@ -680,10 +680,12 @@ async fn event_loop(
     // built anywhere else, by tests or the showcase, stay still and render
     // settled. Reduced motion, colour and depth still decide per transition.
     model.motion.enable();
-    let configured_providers = crate::cli::auth_providers(&config).unwrap_or_default();
-    let providers = crate::connection::cloud::registry(&configured_providers);
+    // Invalid provider configuration supplies no facts about a usable route.
+    let provider_presentations = crate::cli::auth_providers(&config)
+        .map(|configured| crate::connection::cloud::presentation_registry(&configured))
+        .unwrap_or_default();
     model.connection_profiles =
-        crate::app::connection_picker::summaries(&config.profiles, &providers);
+        crate::app::connection_picker::summaries(&config.profiles, &provider_presentations);
     model.connection = match target.as_ref() {
         Some(target) => {
             let step = connecting_step_for(target.sslmode);
@@ -730,7 +732,7 @@ async fn event_loop(
         target
             .auth
             .as_deref()
-            .and_then(|name| providers.get(name).map(|provider| provider.presentation()))
+            .and_then(|name| provider_presentations.get(name).cloned())
     });
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();

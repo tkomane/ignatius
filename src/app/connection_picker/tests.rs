@@ -44,6 +44,8 @@ auth = "entra"
     assert!(production.detail().contains("environment production"));
     assert!(production.detail().contains("read-only"));
     assert!(production.detail().contains("description careful reads"));
+    assert_eq!(production.auth.as_deref(), Some("entra"));
+    assert!(production.provider_presentation.is_none());
 }
 
 #[test]
@@ -83,7 +85,7 @@ fn provider_summaries_keep_the_name_but_not_the_argument_vector() {
     };
     let providers = BTreeMap::from([(
         "custom".to_owned(),
-        Provider {
+        crate::connection::cloud::Provider {
             name: "custom".to_owned(),
             command: vec![
                 "secret-tool".to_owned(),
@@ -95,7 +97,9 @@ fn provider_summaries_keep_the_name_but_not_the_argument_vector() {
             remedy: "sign in again".to_owned(),
         },
     )]);
-    let summary = ConnectionProfileSummary::from_profile("custom-profile", &profile, &providers);
+    let presentations = crate::connection::cloud::presentation_registry(&providers);
+    let summary =
+        ConnectionProfileSummary::from_profile("custom-profile", &profile, &presentations);
 
     assert_eq!(summary.auth.as_deref(), Some("custom"));
     let presentation = summary
@@ -107,6 +111,42 @@ fn provider_summaries_keep_the_name_but_not_the_argument_vector() {
     let debug = format!("{summary:?}");
     assert!(!debug.contains("--token"));
     assert!(!debug.contains("hunter2"));
+}
+
+#[test]
+fn configured_override_summary_uses_the_selected_provider_definition() {
+    let config: crate::config::Config = toml::from_str(
+        r#"[auth.providers.entra]
+command = ["fixture-provider", "hidden-fixture-argument"]
+json-field = "fixtureToken"
+remedy = "open the fixture identity tool"
+"#,
+    )
+    .expect("auth provider configuration");
+    let configured = crate::cli::auth_providers(&config).expect("validated provider definitions");
+    let presentations = crate::connection::cloud::presentation_registry(&configured);
+    let profile = profile(r#"auth = "entra""#);
+    let summary = ConnectionProfileSummary::from_profile("override", &profile, &presentations);
+    let view = summary
+        .provider_presentation
+        .as_ref()
+        .expect("provider facts");
+
+    assert_eq!(summary.auth.as_deref(), Some("entra"));
+    assert_eq!(view.name, "entra");
+    assert_eq!(view.display_name, r#"Configured provider "entra""#);
+    assert_eq!(view.command_name, "fixture-provider");
+    assert_eq!(
+        view.invocation,
+        "configured provider command (arguments hidden)"
+    );
+    assert_eq!(view.extraction, r#"JSON field "fixtureToken""#);
+    assert_eq!(
+        view.lifetime,
+        "short-lived credential, lifetime defined by the provider"
+    );
+    assert_eq!(view.remedy, "open the fixture identity tool");
+    assert!(!format!("{summary:?}").contains("hidden-fixture-argument"));
 }
 
 #[test]
