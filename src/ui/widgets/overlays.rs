@@ -1,6 +1,6 @@
 use super::{
     action_key_label, hairline_rule, highlighted_sql_spans, input_cursor, inset_empty_area,
-    overlay_block, overlay_block_line, pane_block_line, syntax_token,
+    overlay_block, overlay_block_line, syntax_token,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -484,12 +484,16 @@ pub(crate) fn render_plan(
         } => ("  Plan failed", Token::Danger),
         crate::app::PlanStatus::Hidden => ("", Token::Muted),
     };
+    let focus_pulse = (focused && !model.reduced_motion && !presentation.reduced_motion)
+        .then(|| model.motion().focus_pulse())
+        .flatten();
+    let focus_style = super::focus_accent_style(theme, focus_pulse).add_modifier(Modifier::BOLD);
     let mut title_spans = Vec::new();
     if model.splits.zoomed && focused {
         title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
     let primary_style = if focused {
-        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+        focus_style
     } else {
         theme.style(Token::Header)
     };
@@ -501,17 +505,30 @@ pub(crate) fn render_plan(
         title_spans.push(Span::styled(status_label, theme.style(status_token)));
     }
     if focused {
-        title_spans.push(Span::styled(
-            "  [focused]",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ));
+        title_spans.push(Span::styled("  [focused]", focus_style));
     }
-    let block = pane_block_line(Line::from(title_spans), focused, presentation);
+    let block = super::pane_block_line_with_motion(
+        Line::from(title_spans),
+        focused,
+        focus_pulse,
+        presentation,
+    );
     let inner = block.inner(area);
     block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
+    render_plan_body(model, keymap, presentation, inner, buf);
+}
+
+fn render_plan_body(
+    model: &Model,
+    keymap: &Keymap,
+    presentation: &Presentation,
+    inner: Rect,
+    buf: &mut Buffer,
+) {
+    let theme = &presentation.theme;
 
     match &model.plan.status {
         crate::app::PlanStatus::Loading { analyzed, .. } => {

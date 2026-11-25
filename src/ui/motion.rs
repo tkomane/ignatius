@@ -115,16 +115,25 @@ pub enum TransitionKind {
     NoticeSettle,
     /// A clean benchmark completion settles toward its resting state.
     BenchSettle,
+    /// A pane focus change settles the active pane border and title accent.
+    FocusPulse,
+    /// Creating, switching, or closing an editor tab settles the active tab pill.
+    TabGlide,
+    /// A clean query plan load sweeps plan bottleneck micro-bars smoothly.
+    PlanSweep,
 }
 
 impl TransitionKind {
     /// Every kind, in [`TABLE`] order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 8] = [
         Self::ThemeCurtain,
         Self::ResultSettle,
         Self::FormatRipple,
         Self::NoticeSettle,
         Self::BenchSettle,
+        Self::FocusPulse,
+        Self::TabGlide,
+        Self::PlanSweep,
     ];
 
     /// How long this kind lasts, from the one duration table.
@@ -153,7 +162,7 @@ pub struct Timing {
 
 /// The one duration table. Every transition's length and curve live here and
 /// nowhere else, indexed by [`TransitionKind`].
-pub const TABLE: [Timing; 5] = [
+pub const TABLE: [Timing; 8] = [
     Timing {
         kind: TransitionKind::ThemeCurtain,
         duration: Duration::from_millis(320),
@@ -177,6 +186,21 @@ pub const TABLE: [Timing; 5] = [
     Timing {
         kind: TransitionKind::BenchSettle,
         duration: Duration::from_millis(480),
+        easing: Easing::OutCubic,
+    },
+    Timing {
+        kind: TransitionKind::FocusPulse,
+        duration: Duration::from_millis(240),
+        easing: Easing::OutCubic,
+    },
+    Timing {
+        kind: TransitionKind::TabGlide,
+        duration: Duration::from_millis(260),
+        easing: Easing::OutCubic,
+    },
+    Timing {
+        kind: TransitionKind::PlanSweep,
+        duration: Duration::from_millis(420),
         easing: Easing::OutCubic,
     },
 ];
@@ -242,6 +266,9 @@ pub struct Motion {
     format_ripple: Option<Transition>,
     notice: Option<Transition>,
     bench: Option<Transition>,
+    focus_pulse: Option<Transition>,
+    tab_glide: Option<Transition>,
+    plan_sweep: Option<Transition>,
 }
 
 impl Motion {
@@ -271,6 +298,9 @@ impl Motion {
             || self.format_ripple.is_some()
             || self.notice.is_some()
             || self.bench.is_some()
+            || self.focus_pulse.is_some()
+            || self.tab_glide.is_some()
+            || self.plan_sweep.is_some()
     }
 
     /// Eased progress of `kind`, or `None` when it is not active.
@@ -285,6 +315,9 @@ impl Motion {
             TransitionKind::FormatRipple => self.format_ripple,
             TransitionKind::NoticeSettle => self.notice,
             TransitionKind::BenchSettle => self.bench,
+            TransitionKind::FocusPulse => self.focus_pulse,
+            TransitionKind::TabGlide => self.tab_glide,
+            TransitionKind::PlanSweep => self.plan_sweep,
         }?;
         (!transition.is_settled(self.clock)).then(|| transition.progress(self.clock))
     }
@@ -324,6 +357,24 @@ impl Motion {
         self.progress(TransitionKind::BenchSettle)
     }
 
+    /// Eased progress of an active pane focus pulse.
+    #[must_use]
+    pub fn focus_pulse(&self) -> Option<f32> {
+        self.progress(TransitionKind::FocusPulse)
+    }
+
+    /// Eased progress of an active editor tab glide.
+    #[must_use]
+    pub fn tab_glide(&self) -> Option<f32> {
+        self.progress(TransitionKind::TabGlide)
+    }
+
+    /// Eased progress of an active query plan micro-bar sweep.
+    #[must_use]
+    pub fn plan_sweep(&self) -> Option<f32> {
+        self.progress(TransitionKind::PlanSweep)
+    }
+
     /// Advances the motion clock and drops every transition that has settled.
     pub fn advance(&mut self, elapsed: Duration) {
         self.clock = self.clock.saturating_add(elapsed);
@@ -347,6 +398,15 @@ impl Motion {
         if self.bench.is_some_and(|t| t.is_settled(now)) {
             self.bench = None;
         }
+        if self.focus_pulse.is_some_and(|t| t.is_settled(now)) {
+            self.focus_pulse = None;
+        }
+        if self.tab_glide.is_some_and(|t| t.is_settled(now)) {
+            self.tab_glide = None;
+        }
+        if self.plan_sweep.is_some_and(|t| t.is_settled(now)) {
+            self.plan_sweep = None;
+        }
     }
 
     /// Jumps every transition to its final frame.
@@ -356,6 +416,9 @@ impl Motion {
         self.format_ripple = None;
         self.notice = None;
         self.bench = None;
+        self.focus_pulse = None;
+        self.tab_glide = None;
+        self.plan_sweep = None;
     }
 
     /// Starts the theme curtain away from `outgoing`.
@@ -381,6 +444,21 @@ impl Motion {
     /// Starts the settle of a clean benchmark completion.
     pub const fn begin_bench_settle(&mut self) {
         self.bench = Some(self.start(TransitionKind::BenchSettle));
+    }
+
+    /// Starts the pane focus pulse settling the active border/title accent.
+    pub const fn begin_focus_pulse(&mut self) {
+        self.focus_pulse = Some(self.start(TransitionKind::FocusPulse));
+    }
+
+    /// Starts the editor tab glide settling the active tab pill accent.
+    pub const fn begin_tab_glide(&mut self) {
+        self.tab_glide = Some(self.start(TransitionKind::TabGlide));
+    }
+
+    /// Starts the query plan sweep for plan micro-bars.
+    pub const fn begin_plan_sweep(&mut self) {
+        self.plan_sweep = Some(self.start(TransitionKind::PlanSweep));
     }
 
     const fn start(&self, kind: TransitionKind) -> Transition {

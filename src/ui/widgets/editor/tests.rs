@@ -1199,3 +1199,83 @@ fn tab_bar_badges_and_split_dividers_follow_token_hierarchy() {
         .expect("horizontal split divider");
     check_style(&horizontal[(10, h_div_y)], pres.theme.style(Token::Border));
 }
+
+#[test]
+fn editor_title_shows_line_count_modified_pill_focus_pulse_and_tab_glide() {
+    use std::time::Duration;
+
+    let mut model = Model::new(10);
+    model.focus = crate::app::model::Focus::Editor;
+    model.editor.set_text("SELECT 1;\nSELECT 2;\nSELECT 3;");
+    model.editor.set_position(2, 4);
+    model
+        .buffers
+        .active_editor_mut()
+        .set_text("SELECT 1;\nSELECT 2;\nSELECT 3;");
+    model.buffers.new_buffer(
+        Some("two.sql".to_owned()),
+        Some("SELECT 1;\nSELECT 2;\nSELECT 3;".to_owned()),
+    );
+    model.editor.restore_modified(true);
+
+    let pres = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let keymap = crate::ui::keymap::Keymap::new();
+    let area = Rect::new(0, 0, 90, 12);
+
+    let mut resting = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut resting);
+    let top_row: String = (0..area.width).map(|x| resting[(x, 0)].symbol()).collect();
+    assert!(
+        top_row.contains("line 2, column 4 \u{00b7} 3 lines"),
+        "{top_row}"
+    );
+    assert!(top_row.contains("[modified]"), "{top_row}");
+    let mod_x = top_row[..top_row.find("[modified]").expect("modified pill")]
+        .chars()
+        .count() as u16;
+    let mod_pill = pres.theme.pill(Token::Warning);
+    assert_eq!(Some(resting[(mod_x, 0)].fg), mod_pill.fg);
+    assert_eq!(Some(resting[(mod_x, 0)].bg), mod_pill.bg);
+
+    model.motion.enable();
+    model.motion.begin_focus_pulse();
+    model.motion.begin_tab_glide();
+    let mut at_zero = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut at_zero);
+
+    let info_fg = pres.theme.color(Token::Info);
+    assert_eq!(
+        Some(at_zero[(0, 0)].fg),
+        info_fg,
+        "focused border starts in Info ink on FocusPulse"
+    );
+    let tab_y = buffer_to_string(&at_zero)
+        .lines()
+        .position(|line| line.contains("two.sql"))
+        .expect("tab bar row") as u16;
+    let tab_row: String = (0..area.width)
+        .map(|x| at_zero[(x, tab_y)].symbol())
+        .collect();
+    let tab_x = tab_row[..tab_row.find("two.sql").expect("active tab")]
+        .chars()
+        .count() as u16;
+    assert_eq!(
+        Some(at_zero[(tab_x, tab_y)].fg),
+        info_fg,
+        "active tab pill starts in Info ink on TabGlide"
+    );
+    assert_eq!(
+        Some(at_zero[(tab_x, tab_y)].bg),
+        pres.theme.active_tab(Token::Focus).bg,
+        "active tab keeps SurfaceAlt pill fill"
+    );
+
+    model.motion.advance(Duration::from_millis(300));
+    let mut settled = Buffer::empty(area);
+    super::render_editor(&model, &keymap, &pres, area, &mut settled);
+    assert_eq!(settled, resting, "settled frame matches resting frame");
+}

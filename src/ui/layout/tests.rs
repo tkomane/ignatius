@@ -4056,14 +4056,32 @@ fn curtain_paints_every_cell_wholly_in_one_theme_behind_a_hard_left_to_right_edg
                         "{layout}: the edge only moves right"
                     );
                     previous_front = front;
+                    let incoming_focus = model
+                        .presentation
+                        .theme
+                        .color(Token::Focus)
+                        .expect("focus color");
                     for row in 1..height - 1 {
                         for column in 0..width {
                             let cell = &frame[(column, row)];
                             let expected = if column < front { &new } else { &old };
-                            assert!(
-                                same_paint(cell, &expected[(column, row)]),
-                                "{layout} {depth:?} at {elapsed:?}: ({column}, {row}) is not wholly in one theme"
-                            );
+                            let is_seam = depth == ColorDepth::TrueColor
+                                && front > 0
+                                && front < width
+                                && column == front - 1
+                                && !cell.symbol().trim().is_empty();
+                            if is_seam {
+                                let exp = &expected[(column, row)];
+                                assert_eq!(cell.fg, incoming_focus);
+                                assert_eq!(cell.bg, exp.bg);
+                                assert_eq!(cell.modifier, exp.modifier);
+                                assert_eq!(cell.underline_color, exp.underline_color);
+                            } else {
+                                assert!(
+                                    same_paint(cell, &expected[(column, row)]),
+                                    "{layout} {depth:?} at {elapsed:?}: ({column}, {row}) is not wholly in one theme"
+                                );
+                            }
                         }
                     }
                 }
@@ -4505,22 +4523,47 @@ fn curtain_and_recession_compose_cell_for_cell() {
             let moment = at(&model, elapsed);
             let frame = live_frame(&moment);
             let progress = moment.motion().theme_curtain().map_or(1.0, |(_, p)| p);
+            let front = (0..CURTAIN_WIDTH)
+                .filter(|column| {
+                    crate::ui::motion::curtain_shows_incoming(*column, CURTAIN_WIDTH, progress)
+                })
+                .count() as u16;
+            let incoming_focus = model
+                .presentation
+                .theme
+                .color(Token::Focus)
+                .expect("focus color");
             for row in 1..CURTAIN_HEIGHT - 1 {
                 for column in 0..CURTAIN_WIDTH {
                     let incoming =
                         crate::ui::motion::curtain_shows_incoming(column, CURTAIN_WIDTH, progress);
                     let expected = if incoming { &new } else { &old };
-                    assert!(
-                        same_paint(&frame[(column, row)], &expected[(column, row)]),
-                        "{depth:?} at {elapsed:?}: ({column}, {row})"
-                    );
+                    let is_seam = depth == ColorDepth::TrueColor
+                        && front > 0
+                        && front < CURTAIN_WIDTH
+                        && column == front - 1
+                        && !frame[(column, row)].symbol().trim().is_empty();
+                    if is_seam {
+                        let cell = &frame[(column, row)];
+                        let exp = &expected[(column, row)];
+                        assert_eq!(cell.fg, incoming_focus);
+                        assert_eq!(cell.bg, exp.bg);
+                        assert_eq!(cell.modifier, exp.modifier);
+                    } else {
+                        assert!(
+                            same_paint(&frame[(column, row)], &expected[(column, row)]),
+                            "{depth:?} at {elapsed:?}: ({column}, {row})"
+                        );
+                    }
                 }
             }
             // Behind the overlay, the left edge of the body is receded in
             // whichever theme the curtain has reached there.
             let edge = &frame[(0, 1)];
             assert!(
-                edge.fg == old_ink || edge.fg == new_ink,
+                edge.fg == old_ink
+                    || edge.fg == new_ink
+                    || (depth == ColorDepth::TrueColor && front == 1 && edge.fg == incoming_focus),
                 "{depth:?} {elapsed:?}"
             );
             for column in 0..CURTAIN_WIDTH {
@@ -4568,5 +4611,80 @@ fn no_overlay_cell_is_ever_receded() {
             }
         }
         assert!(overlay_cells > 0, "{name}: the overlay drew something");
+    }
+}
+
+#[test]
+fn curtain_paints_luminous_focus_seam_only_at_truecolour() {
+    use crate::ui::theme::ColorDepth;
+
+    for depth in [
+        ColorDepth::TrueColor,
+        ColorDepth::Indexed256,
+        ColorDepth::Basic16,
+        ColorDepth::None,
+    ] {
+        let mut model = curtain_model(depth);
+        let (width, height) = model.size;
+        switch_theme(&mut model);
+        if depth == ColorDepth::Basic16 || depth == ColorDepth::None {
+            model
+                .motion
+                .begin_theme_curtain(Theme::new(ThemeChoice::Dark, true).with_depth(depth));
+        }
+        let mid = at(&model, Duration::from_millis(120));
+        let progress = mid.motion().theme_curtain().map_or(1.0, |(_, p)| p);
+        let front = (0..width)
+            .filter(|column| crate::ui::motion::curtain_shows_incoming(*column, width, progress))
+            .count() as u16;
+        assert!(front > 0 && front < width, "mid-sweep front {front}");
+
+        let frame = live_frame(&mid);
+        let new = still_frame(&model, &model.presentation.theme);
+        assert_eq!(
+            buffer_to_string(&frame),
+            buffer_to_string(&new),
+            "{depth:?}: symbols stay 100% identical"
+        );
+        for column in 0..width {
+            for row in [0, height - 1] {
+                assert!(
+                    same_paint(&frame[(column, row)], &new[(column, row)]),
+                    "{depth:?}: header/footer rail untouched at ({column}, {row})"
+                );
+            }
+        }
+
+        let seam_x = front - 1;
+        if depth == ColorDepth::TrueColor {
+            let incoming_focus = model
+                .presentation
+                .theme
+                .color(Token::Focus)
+                .expect("focus color");
+            let mut saw_non_space = false;
+            for row in 1..height - 1 {
+                let cell = &frame[(seam_x, row)];
+                let exp = &new[(seam_x, row)];
+                if cell.symbol().trim().is_empty() {
+                    assert!(
+                        same_paint(cell, exp),
+                        "space cell ({seam_x}, {row}) stays untouched"
+                    );
+                } else {
+                    saw_non_space = true;
+                    assert_eq!(cell.fg, incoming_focus);
+                    assert_eq!(cell.bg, exp.bg);
+                }
+            }
+            assert!(saw_non_space, "seam column covers border/rule/text cells");
+        } else {
+            for row in 1..height - 1 {
+                assert!(
+                    same_paint(&frame[(seam_x, row)], &new[(seam_x, row)]),
+                    "{depth:?}: no seam glow outside truecolour at ({seam_x}, {row})"
+                );
+            }
+        }
     }
 }

@@ -12801,6 +12801,140 @@ fn motion_bench_settle_fires_only_for_clean_non_regression_completion() {
     assert!(errored.motion().bench_settle().is_none());
 }
 
+#[test]
+fn motion_focus_pulse_tab_glide_and_plan_sweep_follow_rules_and_gates() {
+    use crate::app::message::{MouseButton, MouseKind, MouseModifiers};
+    use crate::ui::theme::ColorDepth;
+
+    // 1. FocusPulse starts on FocusNext when focus actually changes, settles on input,
+    // and respects mouse clicks to another pane.
+    let mut model = moving();
+    model.sidebar_visible = true;
+    model.size = (120, 40);
+    assert_eq!(model.focus, Focus::Editor);
+    update(&mut model, Message::Action(Action::FocusNext));
+    assert_eq!(model.focus, Focus::Results);
+    assert_eq!(model.motion().focus_pulse(), Some(0.0));
+
+    // Clicking the already-focused pane does not re-pulse; any key/click settles first.
+    let geom = crate::ui::layout::pane_geometry(&model, ratatui::layout::Rect::new(0, 0, 120, 40));
+    let editor_rect = geom.editor.expect("editor rect");
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Down(MouseButton::Left),
+            column: editor_rect.x + 2,
+            row: editor_rect.y + 1,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert_eq!(model.focus, Focus::Editor);
+    assert_eq!(model.motion().focus_pulse(), Some(0.0));
+
+    // Clicking inside the same focused pane settles without restarting FocusPulse.
+    update(
+        &mut model,
+        Message::Mouse {
+            kind: MouseKind::Down(MouseButton::Left),
+            column: editor_rect.x + 3,
+            row: editor_rect.y + 1,
+            modifiers: MouseModifiers::default(),
+        },
+    );
+    assert!(model.motion().focus_pulse().is_none());
+
+    // 2. TabGlide starts on NewEditorBuffer, NextEditorBuffer, PrevEditorBuffer, and CloseEditorBuffer (>1 tab).
+    update(&mut model, Message::Action(Action::NewEditorBuffer));
+    assert_eq!(model.buffers.count(), 2);
+    assert_eq!(model.motion().tab_glide(), Some(0.0));
+    update(&mut model, Message::Action(Action::NextEditorBuffer));
+    assert_eq!(model.motion().tab_glide(), Some(0.0));
+    update(&mut model, Message::Action(Action::PrevEditorBuffer));
+    assert_eq!(model.motion().tab_glide(), Some(0.0));
+    update(&mut model, Message::Action(Action::CloseEditorBuffer));
+    assert_eq!(model.buffers.count(), 1);
+    assert_eq!(model.motion().tab_glide(), Some(0.0));
+
+    // Switching with only 1 buffer or closing a lone buffer starts no TabGlide.
+    update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert!(model.motion().tab_glide().is_none());
+    update(&mut model, Message::Action(Action::NextEditorBuffer));
+    assert!(model.motion().tab_glide().is_none());
+    update(&mut model, Message::Action(Action::CloseEditorBuffer));
+    assert!(model.motion().tab_glide().is_none());
+
+    // 3. PlanSweep starts on clean PlanFinished with nodes, stays still on failure/connection loss.
+    let mut plan_model = moving();
+    plan_model.editor.set_text("SELECT 1;");
+    update(&mut plan_model, Message::Action(Action::ExplainPlan));
+    let job = plan_model.phase.job().expect("plan job");
+    update(
+        &mut plan_model,
+        Message::PlanFinished(plan_finished(job, false, Ok(plan_document(false)))),
+    );
+    assert_eq!(plan_model.motion().plan_sweep(), Some(0.0));
+
+    let mut failed_plan = moving();
+    failed_plan.editor.set_text("SELECT 1;");
+    update(&mut failed_plan, Message::Action(Action::ExplainPlan));
+    let job = failed_plan.phase.job().expect("plan job");
+    failed_plan.motion.settle();
+    update(
+        &mut failed_plan,
+        Message::PlanFinished(plan_finished(
+            job,
+            false,
+            Err(Diagnostic::new(
+                DiagnosticKind::Query,
+                "plan failed",
+                "explain",
+            )),
+        )),
+    );
+    assert!(failed_plan.motion().plan_sweep().is_none());
+
+    // 4. Reduced motion, ASCII, Basic16, and ColorDepth::None never start FocusPulse, TabGlide, or PlanSweep.
+    for still_pres in [
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+            true,
+        ),
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Ascii),
+            false,
+        ),
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, true)
+                .with_depth(ColorDepth::Basic16),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+            false,
+        ),
+        crate::ui::layout::Presentation::new(
+            crate::ui::theme::Theme::new(crate::config::ThemeChoice::Dark, false),
+            crate::ui::Glyphs::new(crate::ui::GlyphTier::Unicode),
+            false,
+        ),
+    ] {
+        let mut still = moving();
+        still.presentation = still_pres;
+        update(&mut still, Message::Action(Action::FocusNext));
+        update(&mut still, Message::Action(Action::NewEditorBuffer));
+        still.editor.set_text("SELECT 1;");
+        update(&mut still, Message::Action(Action::ExplainPlan));
+        let job = still.phase.job().expect("plan job");
+        update(
+            &mut still,
+            Message::PlanFinished(plan_finished(job, false, Ok(plan_document(false)))),
+        );
+        assert!(still.motion().focus_pulse().is_none());
+        assert!(still.motion().tab_glide().is_none());
+        assert!(still.motion().plan_sweep().is_none());
+        assert!(!still.is_in_motion());
+    }
+}
+
 fn bench_model(environment: Environment, read_only: bool, sql: &str) -> Model {
     let mut model = connected();
     let mut info = session();

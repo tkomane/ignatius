@@ -60,6 +60,12 @@ fn the_duration_table_is_indexed_by_kind_and_bounded() {
     assert_eq!(TransitionKind::NoticeSettle.easing(), Easing::OutCubic);
     assert_eq!(TransitionKind::BenchSettle.duration(), ms(480));
     assert_eq!(TransitionKind::BenchSettle.easing(), Easing::OutCubic);
+    assert_eq!(TransitionKind::FocusPulse.duration(), ms(240));
+    assert_eq!(TransitionKind::FocusPulse.easing(), Easing::OutCubic);
+    assert_eq!(TransitionKind::TabGlide.duration(), ms(260));
+    assert_eq!(TransitionKind::TabGlide.easing(), Easing::OutCubic);
+    assert_eq!(TransitionKind::PlanSweep.duration(), ms(420));
+    assert_eq!(TransitionKind::PlanSweep.easing(), Easing::OutCubic);
     assert_eq!(LONGEST, ms(800));
 }
 
@@ -116,6 +122,9 @@ fn a_fresh_motion_is_disabled_still_and_reports_nothing() {
     assert!(motion.format_ripple().is_none());
     assert!(motion.notice_settle().is_none());
     assert!(motion.bench_settle().is_none());
+    assert!(motion.focus_pulse().is_none());
+    assert!(motion.tab_glide().is_none());
+    assert!(motion.plan_sweep().is_none());
 }
 
 #[test]
@@ -128,6 +137,9 @@ fn each_kind_starts_at_the_current_clock_and_carries_its_detail() {
     motion.begin_format_ripple();
     motion.begin_notice_settle();
     motion.begin_bench_settle();
+    motion.begin_focus_pulse();
+    motion.begin_tab_glide();
+    motion.begin_plan_sweep();
     assert!(motion.is_active());
     for kind in TransitionKind::ALL {
         assert_eq!(motion.progress(kind), Some(0.0), "{kind:?}");
@@ -137,12 +149,17 @@ fn each_kind_starts_at_the_current_clock_and_carries_its_detail() {
     assert_eq!(motion.format_ripple(), Some(0.0));
     assert_eq!(motion.notice_settle(), Some(0.0));
     assert_eq!(motion.bench_settle(), Some(0.0));
+    assert_eq!(motion.focus_pulse(), Some(0.0));
+    assert_eq!(motion.tab_glide(), Some(0.0));
+    assert_eq!(motion.plan_sweep(), Some(0.0));
 
     motion.advance(ms(160));
     let curtain = motion.progress(TransitionKind::ThemeCurtain).unwrap();
     assert!(curtain > 0.5, "out-cubic is past half way at half time");
     assert!(motion.progress(TransitionKind::ResultSettle).unwrap() < curtain);
     assert!(motion.format_ripple().unwrap() > motion.notice_settle().unwrap());
+    assert!(motion.focus_pulse().unwrap() > motion.tab_glide().unwrap());
+    assert!(motion.tab_glide().unwrap() > motion.plan_sweep().unwrap());
 }
 
 #[test]
@@ -153,8 +170,19 @@ fn advancing_drops_each_transition_once_it_settles() {
     motion.begin_format_ripple();
     motion.begin_notice_settle();
     motion.begin_bench_settle();
+    motion.begin_focus_pulse();
+    motion.begin_tab_glide();
+    motion.begin_plan_sweep();
 
-    motion.advance(ms(319));
+    motion.advance(ms(239));
+    assert!(motion.focus_pulse().is_some());
+    motion.advance(ms(1));
+    assert!(motion.focus_pulse().is_none(), "focus pulse lasts 240 ms");
+    assert!(motion.tab_glide().is_some());
+    motion.advance(ms(20));
+    assert!(motion.tab_glide().is_none(), "tab glide lasts 260 ms");
+    assert!(motion.theme_curtain().is_some());
+    motion.advance(ms(59));
     assert!(motion.theme_curtain().is_some());
     motion.advance(ms(1));
     assert!(motion.theme_curtain().is_none(), "the curtain lasts 320 ms");
@@ -164,9 +192,12 @@ fn advancing_drops_each_transition_once_it_settles() {
         motion.format_ripple().is_none(),
         "format ripple lasts 360 ms"
     );
+    assert!(motion.plan_sweep().is_some());
+    motion.advance(ms(60));
+    assert!(motion.plan_sweep().is_none(), "plan sweep lasts 420 ms");
     assert!(motion.notice_settle().is_some());
     assert!(motion.bench_settle().is_some());
-    motion.advance(ms(120));
+    motion.advance(ms(60));
     assert!(
         motion.notice_settle().is_none(),
         "notice settle lasts 480 ms"
@@ -187,6 +218,9 @@ fn settling_jumps_every_transition_to_its_final_frame() {
     motion.begin_format_ripple();
     motion.begin_notice_settle();
     motion.begin_bench_settle();
+    motion.begin_focus_pulse();
+    motion.begin_tab_glide();
+    motion.begin_plan_sweep();
     motion.settle();
     assert!(!motion.is_active());
     for kind in TransitionKind::ALL {

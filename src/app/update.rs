@@ -1932,7 +1932,11 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::FocusNext => {
+            let previous = model.focus;
             model.focus = model.focus.next(model.sidebar_visible);
+            if model.focus != previous && model.allows_motion() {
+                model.motion.begin_focus_pulse();
+            }
             Vec::new()
         }
         Action::ShrinkPane | Action::GrowPane | Action::ZoomPane => {
@@ -1940,9 +1944,13 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::ToggleSidebar => {
+            let previous = model.focus;
             model.sidebar_visible = !model.sidebar_visible;
             if !model.sidebar_visible && model.focus == Focus::Objects {
                 model.focus = Focus::Editor;
+            }
+            if model.focus != previous && model.allows_motion() {
+                model.motion.begin_focus_pulse();
             }
             // The tree loads the first time it is shown, not at startup, so a
             // user who never opens it never pays for it.
@@ -1985,9 +1993,13 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::StartFilter => {
+            let previous = model.focus;
             model.focus = Focus::Objects;
             model.sidebar_visible = true;
             model.tree.filtering = true;
+            if model.focus != previous && model.allows_motion() {
+                model.motion.begin_focus_pulse();
+            }
             Vec::new()
         }
         Action::ReloadObjects => {
@@ -2067,27 +2079,49 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::DataSync => data_sync_open(model),
         Action::SyntheticSeed => synthetic_seed_open(model),
         Action::NewEditorBuffer => {
+            let previous_count = model.buffers.count();
+            let previous_focus = model.focus;
             model.sync_active_buffer_from_editor();
             model.buffers.new_buffer(None, None);
             model.sync_editor_from_active_buffer();
             model.focus = Focus::Editor;
+            if model.allows_motion() {
+                if model.buffers.count() > previous_count {
+                    model.motion.begin_tab_glide();
+                }
+                if model.focus != previous_focus {
+                    model.motion.begin_focus_pulse();
+                }
+            }
             Vec::new()
         }
         Action::CloseEditorBuffer => {
+            let previous_count = model.buffers.count();
             model.buffers.close_active();
             model.sync_editor_from_active_buffer();
+            if previous_count > 1 && model.allows_motion() {
+                model.motion.begin_tab_glide();
+            }
             Vec::new()
         }
         Action::NextEditorBuffer => {
+            let previous_idx = model.buffers.active_idx;
             model.sync_active_buffer_from_editor();
             model.buffers.next_buffer();
             model.sync_editor_from_active_buffer();
+            if model.buffers.active_idx != previous_idx && model.allows_motion() {
+                model.motion.begin_tab_glide();
+            }
             Vec::new()
         }
         Action::PrevEditorBuffer => {
+            let previous_idx = model.buffers.active_idx;
             model.sync_active_buffer_from_editor();
             model.buffers.prev_buffer();
             model.sync_editor_from_active_buffer();
+            if model.buffers.active_idx != previous_idx && model.allows_motion() {
+                model.motion.begin_tab_glide();
+            }
             Vec::new()
         }
         Action::ToggleEditorSplit => {
@@ -5417,11 +5451,21 @@ fn snippet_library_action(model: &mut Model, action: Action) -> Vec<Effect> {
             if let Some(snippet) = state.library.selected_snippet() {
                 let sql = snippet.sql.clone();
                 let title = format!("{}.sql", snippet.name);
+                let previous_count = model.buffers.count();
+                let previous_focus = model.focus;
                 model.sync_active_buffer_from_editor();
                 model.buffers.new_buffer(Some(title), Some(sql));
                 model.sync_editor_from_active_buffer();
                 model.snippet_library = None;
                 model.focus = Focus::Editor;
+                if model.allows_motion() {
+                    if model.buffers.count() > previous_count {
+                        model.motion.begin_tab_glide();
+                    }
+                    if model.focus != previous_focus {
+                        model.motion.begin_focus_pulse();
+                    }
+                }
                 return Vec::new();
             }
         }
@@ -5739,7 +5783,11 @@ fn handle_mouse(
             model.layout_notice = None;
             model.completion.menu = None;
             model.result_filtering = false;
+            let previous_focus = model.focus;
             model.focus = Focus::Objects;
+            if model.focus != previous_focus && model.allows_motion() {
+                model.motion.begin_focus_pulse();
+            }
             let max = model.tree.rows().len().saturating_sub(1);
             model.tree.selected = index.min(max);
             if is_double {
@@ -5757,7 +5805,11 @@ fn handle_mouse(
             model.completion.menu = None;
             model.tree.filtering = false;
             model.result_filtering = false;
+            let previous_focus = model.focus;
             model.focus = Focus::Editor;
+            if model.focus != previous_focus && model.allows_motion() {
+                model.motion.begin_focus_pulse();
+            }
             model.editor.set_position(line, text_col);
             Vec::new()
         }
@@ -5769,7 +5821,11 @@ fn handle_mouse(
             model.layout_notice = None;
             model.completion.menu = None;
             model.tree.filtering = false;
+            let previous_focus = model.focus;
             model.focus = Focus::Results;
+            if model.focus != previous_focus && model.allows_motion() {
+                model.motion.begin_focus_pulse();
+            }
             let max_row = model.displayed_rows().len().saturating_sub(1);
             model.selected_row = cell_row.min(max_row);
             if let Some(set) = model.visible_result() {
@@ -5854,7 +5910,11 @@ fn handle_mouse(
                 if pane != Focus::Results {
                     model.result_filtering = false;
                 }
+                let previous_focus = model.focus;
                 model.focus = pane;
+                if model.focus != previous_focus && model.allows_motion() {
+                    model.motion.begin_focus_pulse();
+                }
             }
             Vec::new()
         }
@@ -7075,7 +7135,11 @@ fn start_plan(
     model.refresh_pending = false;
     model.running_editor_revision = None;
     model.running_source = None;
+    let previous_focus = model.focus;
     model.focus = Focus::Results;
+    if model.focus != previous_focus && model.allows_motion() {
+        model.motion.begin_focus_pulse();
+    }
     model.phase = QueryPhase::Running { job, statements: 1 };
     model.running_for = Some(std::time::Duration::ZERO);
     model.error = None;
@@ -7112,7 +7176,13 @@ fn finish_plan(model: &mut Model, execution: crate::app::PlanExecution) -> Vec<E
     }
 
     match execution.result {
-        Ok(document) => model.plan.ready(document),
+        Ok(document) => {
+            let has_nodes = document.node_count > 0;
+            model.plan.ready(document);
+            if has_nodes && model.allows_motion() {
+                model.motion.begin_plan_sweep();
+            }
+        }
         Err(error) => model.plan.failed(
             execution.analyzed,
             error.headline,

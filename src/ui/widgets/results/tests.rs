@@ -1109,7 +1109,11 @@ fn a_narrow_toolbar_drops_whole_segments_instead_of_cutting_words() {
                     !line.contains('\u{2026}') && !line.contains("..."),
                     "width {width}, sorted {sorted}: a segment was cut: {line:?}"
                 );
-                for segment in line.split(" | ").filter(|s| !s.is_empty()) {
+                let stripped = line
+                    .strip_suffix("1/2 \u{00b7} amount")
+                    .map(str::trim_end)
+                    .unwrap_or(line.as_str());
+                for segment in stripped.split(" | ").filter(|s| !s.is_empty()) {
                     assert!(
                         [
                             "rows 1-2 of 2 retained",
@@ -1482,10 +1486,11 @@ fn a_settle_fades_only_the_status_word_ink_into_its_exact_resting_frame() {
                 let (cell, rest) = (&frame[(x, y)], &resting[(x, y)]);
                 assert_eq!(cell.bg, rest.bg, "{at:?} ({x},{y}): never a background");
                 assert_eq!(cell.modifier, rest.modifier, "{at:?} ({x},{y}): no pop");
-                if y > 0 && y != rule_y {
+                let is_row_gutter = y > rule_y && (1..=2).contains(&x);
+                if y > 0 && y != rule_y && !is_row_gutter {
                     assert_eq!(
                         cell.fg, rest.fg,
-                        "{at:?} ({x},{y}): only the title and header rule move"
+                        "{at:?} ({x},{y}): only the title, header rule, and row gutter move"
                     );
                 } else if y == rule_y && (x == 0 || x + 1 == area.width) {
                     assert_eq!(
@@ -1705,18 +1710,18 @@ fn the_heartbeat_is_a_comet_with_a_fading_tail_at_truecolour() {
         .collect();
     assert_eq!(
         heads,
-        vec![7, 8, 9, 10],
-        "a head and a three-cell tail behind it"
+        vec![5, 6, 7, 8, 9, 10],
+        "a head and a five-cell phosphor tail behind it"
     );
     assert_eq!(Some(cells[10].fg), theme.color(Token::Info));
-    let tail: Vec<_> = [9, 8, 7].iter().map(|&i| cells[i].fg).collect();
+    let tail: Vec<_> = [9, 8, 7, 6, 5].iter().map(|&i| cells[i].fg).collect();
     assert_eq!(
         tail,
-        [0.25, 0.5, 0.75]
+        [1.0 / 6.0, 2.0 / 6.0, 3.0 / 6.0, 4.0 / 6.0, 5.0 / 6.0]
             .iter()
             .map(|amount| theme.mix(Token::Info, Token::Border, *amount).expect("ink"))
             .collect::<Vec<_>>(),
-        "the tail fades from the head into the track"
+        "the tail fades smoothly from the head into the track"
     );
     for cell in cells.iter().skip(11) {
         assert_eq!(cell.symbol(), "\u{2500}");
@@ -1724,11 +1729,11 @@ fn the_heartbeat_is_a_comet_with_a_fading_tail_at_truecolour() {
     }
 
     // Moving left, the tail trails to the right of the head.
-    let frame = super::HEARTBEAT_TRACK as u64 + 3;
+    let frame = super::HEARTBEAT_TRACK as u64 + 6;
     let (head, rightward) = super::heartbeat_head(frame, super::HEARTBEAT_TRACK);
     assert!(!rightward);
     let cells = heartbeat_cells(&render(&running(frame, false), &presentation, area));
-    for distance in 1..=3 {
+    for distance in 1..=5 {
         assert_eq!(cells[head + distance].symbol(), "\u{2501}");
     }
     assert_eq!(cells[head - 1].symbol(), "\u{2500}");
@@ -2049,4 +2054,85 @@ fn running_surface_is_inset_and_uses_focus_keycap_for_cancel() {
     assert_eq!(Some(keycap_cell.fg), expected_keycap.fg);
     assert_eq!(Some(keycap_cell.bg), expected_keycap.bg);
     assert_eq!(keycap_cell.modifier, expected_keycap.add_modifier);
+}
+
+#[test]
+fn result_settle_waves_row_gutter_numbers_with_contrast_guard() {
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let theme = &presentation.theme;
+    let area = Rect::new(0, 0, 80, 14);
+    let mut base = model_with(&["id"], &text_rows(5));
+    base.focus = Focus::Editor;
+    let resting = render(&base, &presentation, area);
+
+    let rule_y = (1..area.height)
+        .find(|&y| resting[(1, y)].symbol() == "\u{2500}")
+        .expect("header rule row");
+
+    let mut at_zero_model = base.clone();
+    at_zero_model.motion.enable();
+    at_zero_model.motion.begin_result_settle(JobId(1));
+    let at_zero = render(&at_zero_model, &presentation, area);
+    assert_eq!(
+        Some(at_zero[(2, rule_y + 1)].fg),
+        theme.color(Token::Success),
+        "row 0 gutter starts in Success ink"
+    );
+    assert_eq!(
+        at_zero[(2, rule_y + 5)].fg,
+        resting[(2, rule_y + 5)].fg,
+        "bottom row waits for the vertical wave"
+    );
+
+    let mut mid_model = at_zero_model.clone();
+    mid_model.motion.advance(Duration::from_millis(60));
+    let at_mid = render(&mid_model, &presentation, area);
+    assert_ne!(
+        at_mid[(2, rule_y + 3)].fg,
+        resting[(2, rule_y + 3)].fg,
+        "mid-settle wave reaches middle row gutter"
+    );
+
+    // Custom low-contrast Success ink skips the gutter shimmer.
+    use crate::ui::theme::{Rgb, ThemeDefinition, ThemeSelection, ValidatedThemes};
+    let faint = Rgb(0x30, 0x8c, 0x50);
+    let definition = ThemeDefinition::new(ThemeChoice::Dark).with_override(Token::Success, faint);
+    let custom_theme = ValidatedThemes::resolve(ThemeSelection::Custom, Some(&definition))
+        .expect("custom palette")
+        .selected_theme(true, ColorDepth::TrueColor);
+    let custom_pres = Presentation::new(custom_theme, Glyphs::new(GlyphTier::Unicode), false);
+    assert_eq!(
+        render(&at_zero_model, &custom_pres, area),
+        render(&base, &custom_pres, area)
+    );
+}
+
+#[test]
+fn results_toolbar_renders_right_aligned_coordinate_cue_when_width_allows() {
+    let mut model = sortable_model();
+    model.selected_row = 1;
+    model.selected_column = 1;
+    let presentation = presentation_at(ColorDepth::TrueColor);
+    let wide = Rect::new(0, 0, 120, 12);
+    let buf = render(&model, &presentation, wide);
+    let (order, _) = toolbar_lines(&buf, wide);
+    assert!(
+        order.ends_with("2/2 \u{00b7} amount"),
+        "expected right-aligned coordinate cue: {order:?}"
+    );
+    let row_str: String = (0..wide.width).map(|x| buf[(x, 1)].symbol()).collect();
+    let coord_x = row_str[..row_str.find("2/2").expect("coord")]
+        .chars()
+        .count() as u16;
+    let col_x = row_str[..row_str.rfind("amount").expect("col name")]
+        .chars()
+        .count() as u16;
+    assert_eq!(
+        Some(buf[(coord_x, 1)].fg),
+        presentation.theme.color(Token::Muted)
+    );
+    assert_eq!(
+        Some(buf[(col_x, 1)].fg),
+        presentation.theme.color(Token::Info)
+    );
 }
