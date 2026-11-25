@@ -1708,7 +1708,7 @@ fn split_plan_page_uses_tree_capacity_and_zoom_title() {
         &mut model,
         Message::Action(Action::MovePage(Direction::Down)),
     );
-    assert_eq!(model.plan.selected_path, vec![13]);
+    assert_eq!(model.plan.selected_path, vec![12]);
     split_key(&mut model, 'z');
     let frame = split_frame(&model);
     assert!(frame.contains("Plan") && frame.contains("(zoomed)"));

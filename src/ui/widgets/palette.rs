@@ -2,11 +2,13 @@ use super::{
     hairline_rule, highlighted_sql_spans, input_cursor, overlay_block, overlay_block_line,
 };
 use crate::app::model::Model;
+use crate::app::palette::theme_family_label;
+use crate::config::ThemeChoice;
 use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::layout::Presentation;
 use crate::ui::layout::{OverlayAnchor, overlay_box};
-use crate::ui::theme::{Theme, Token};
+use crate::ui::theme::{ColorDepth, Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -728,7 +730,14 @@ pub(crate) fn render_palette(
         .style(theme.surface(Token::SurfaceOverlay))
         .render(list_area, buf);
 
-    if let Some(preview_raw) = palette.selected_preview() {
+    if let Some(choice) = palette
+        .selected_entry()
+        .filter(|_| !matches.is_empty())
+        .and_then(|entry| entry.theme_choice())
+    {
+        let preview_area = Rect::new(preview_x, content_y, preview_w, content_height);
+        render_theme_preview(choice, presentation, preview_area, buf);
+    } else if let Some(preview_raw) = palette.selected_preview() {
         let mut in_sql_block = false;
         let mut preview_lines: Vec<Line<'static>> = Vec::with_capacity(preview_raw.len());
         for raw_line in preview_raw {
@@ -797,6 +806,282 @@ pub(crate) fn render_palette(
             .wrap(Wrap { trim: false })
             .render(preview_area, buf);
     }
+}
+
+fn pad_line_to_width(mut spans: Vec<Span<'static>>, width: usize, fill: Style) -> Line<'static> {
+    let used: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+    if used < width {
+        spans.push(Span::styled(" ".repeat(width - used), fill));
+    }
+    Line::from(spans).style(fill)
+}
+
+fn push_wrapped_surface_sql_lines(
+    preview_lines: &mut Vec<Line<'static>>,
+    spans: Vec<Span<'static>>,
+    preview_w: usize,
+    surface_style: Style,
+) {
+    if preview_w == 0 {
+        preview_lines.push(Line::from(spans).style(surface_style));
+        return;
+    }
+
+    let mut cells: Vec<(char, Style, usize)> = Vec::new();
+    for span in spans {
+        let patched = span.style.patch(surface_style);
+        for ch in span.content.chars() {
+            let mut buf = [0u8; 4];
+            let w = display_width(ch.encode_utf8(&mut buf));
+            cells.push((ch, patched, w));
+        }
+    }
+    if cells.is_empty() {
+        preview_lines.push(
+            Line::from(Span::styled(" ".repeat(preview_w), surface_style)).style(surface_style),
+        );
+        return;
+    }
+
+    let emit_slice = |out: &mut Vec<Line<'static>>, slice: &[(char, Style, usize)]| {
+        let mut line_spans = Vec::new();
+        let mut run = String::new();
+        let mut run_style: Option<Style> = None;
+        let mut used = 0usize;
+        for &(ch, style, w) in slice {
+            if run_style != Some(style) {
+                if let Some(prev) = run_style {
+                    line_spans.push(Span::styled(std::mem::take(&mut run), prev));
+                }
+                run_style = Some(style);
+            }
+            run.push(ch);
+            used += w;
+        }
+        if let Some(prev) = run_style {
+            line_spans.push(Span::styled(run, prev));
+        }
+        if used < preview_w {
+            line_spans.push(Span::styled(" ".repeat(preview_w - used), surface_style));
+        }
+        out.push(Line::from(line_spans).style(surface_style));
+    };
+
+    let mut start = 0usize;
+    while start < cells.len() {
+        let mut width_acc = 0usize;
+        let mut end = start;
+        let mut last_space = None;
+        let mut seen_non_space = false;
+        while end < cells.len() {
+            let (ch, _, w) = cells[end];
+            if width_acc + w > preview_w && end > start {
+                break;
+            }
+            if ch.is_whitespace() {
+                if seen_non_space {
+                    last_space = Some(end);
+                }
+            } else {
+                seen_non_space = true;
+            }
+            width_acc += w;
+            end += 1;
+        }
+        if end < cells.len()
+            && let Some(space_idx) = last_space
+            && space_idx > start
+        {
+            emit_slice(preview_lines, &cells[start..space_idx]);
+            start = space_idx + 1;
+        } else {
+            emit_slice(preview_lines, &cells[start..end]);
+            start = end;
+        }
+    }
+}
+
+fn render_theme_preview(
+    choice: ThemeChoice,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let active_theme = &presentation.theme;
+    let preview_theme = Theme::from_choice(choice, active_theme.color, active_theme.depth);
+    let family = theme_family_label(choice);
+    let plain_fallback = !preview_theme.color
+        || preview_theme.depth == ColorDepth::None
+        || presentation.glyphs.is_ascii();
+
+    if plain_fallback {
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("Theme: ", active_theme.style(Token::Header)),
+                Span::styled(choice.label(), active_theme.style(Token::Focus)),
+                Span::styled(format!(" ({family})"), active_theme.style(Token::Muted)),
+            ]),
+            Line::from(Span::styled(
+                hairline_rule(presentation).repeat(usize::from(area.width).min(44)),
+                active_theme.style(Token::Border),
+            )),
+            Line::from(Span::styled(
+                "Header: Ignatius: demo  [PROD]",
+                active_theme.style(Token::Text),
+            )),
+            Line::from(Span::styled(
+                "SQL: SELECT id, total FROM orders WHERE status = 'paid';",
+                active_theme.style(Token::Text),
+            )),
+            Line::from(Span::styled(
+                "Row 1: paid | 14500",
+                active_theme.style(Token::Text),
+            )),
+            Line::from(Span::styled(
+                "Row 2: [null] | 7350",
+                active_theme.style(Token::Muted),
+            )),
+            Line::from(Span::styled(
+                "Swatches: Focus Info Success Warning Danger SyntaxKeyword",
+                active_theme.style(Token::Muted),
+            )),
+        ];
+        Paragraph::new(lines)
+            .style(active_theme.surface(Token::SurfaceOverlay))
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+        return;
+    }
+
+    let w = usize::from(area.width);
+    let overlay_surface = preview_theme.surface(Token::SurfaceOverlay);
+    let pane_surface = preview_theme.surface(Token::SurfacePane);
+    let stripe_surface = preview_theme.stripe();
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(10);
+
+    // 1. Theme name + luminance family pill (`Dark` / `Light` / `High contrast`).
+    lines.push(pad_line_to_width(
+        vec![
+            Span::styled("Theme: ", preview_theme.style(Token::Muted)),
+            Span::styled(
+                choice.label(),
+                preview_theme
+                    .style(Token::Header)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!(" {family} "),
+                preview_theme.recessed_pill(Token::Info),
+            ),
+        ],
+        w,
+        overlay_surface,
+    ));
+
+    // 2. Hairline divider.
+    lines.push(pad_line_to_width(
+        vec![Span::styled(
+            hairline_rule(presentation).repeat(w.min(44)),
+            preview_theme.style(Token::Border),
+        )],
+        w,
+        overlay_surface,
+    ));
+
+    // 3. Mini header strip (`Ignatius: demo  [PROD]`).
+    lines.push(pad_line_to_width(
+        vec![
+            Span::styled(" Ignatius: ", preview_theme.keycap(Token::Header)),
+            Span::styled("demo ", preview_theme.on_stripe(Token::Header)),
+            Span::styled(
+                " [PROD] ",
+                preview_theme.capsule(Token::EnvironmentProduction),
+            ),
+        ],
+        w,
+        stripe_surface,
+    ));
+
+    // 4. Mini highlighted SQL snippet on SurfacePane.
+    let sql = "SELECT id, total FROM orders WHERE status = 'paid';";
+    let mut sql_spans = vec![Span::styled(" ", pane_surface)];
+    sql_spans.extend(highlighted_sql_spans(sql, &preview_theme, false));
+    push_wrapped_surface_sql_lines(&mut lines, sql_spans, w, pane_surface);
+
+    // 5. Mini 2-row result preview (`paid | 14500`, `[null] | 7350`).
+    lines.push(pad_line_to_width(
+        vec![
+            Span::styled(
+                " paid ",
+                preview_theme.style(Token::Text).patch(pane_surface),
+            ),
+            Span::styled("|", preview_theme.style(Token::Border).patch(pane_surface)),
+            Span::styled(
+                " 14500",
+                preview_theme.style(Token::SyntaxNumber).patch(pane_surface),
+            ),
+        ],
+        w,
+        pane_surface,
+    ));
+    lines.push(pad_line_to_width(
+        vec![
+            Span::styled(" ", stripe_surface),
+            Span::styled("[null]", preview_theme.on_stripe(Token::NullValue)),
+            Span::styled(" ", stripe_surface),
+            Span::styled("|", preview_theme.on_stripe(Token::Border)),
+            Span::styled(" 7350", preview_theme.on_stripe(Token::SyntaxNumber)),
+        ],
+        w,
+        stripe_surface,
+    ));
+
+    // 6. Hairline + 6-token semantic colour swatch bar.
+    lines.push(pad_line_to_width(
+        vec![Span::styled(
+            hairline_rule(presentation).repeat(w.min(44)),
+            preview_theme.style(Token::Border),
+        )],
+        w,
+        overlay_surface,
+    ));
+    let mut swatch_spans = vec![Span::styled(
+        "Swatches: ",
+        preview_theme.style(Token::Muted),
+    )];
+    for token in [
+        Token::Focus,
+        Token::Info,
+        Token::Success,
+        Token::Warning,
+        Token::Danger,
+        Token::SyntaxKeyword,
+    ] {
+        swatch_spans.push(Span::styled(
+            "\u{2588}\u{2588}",
+            preview_theme.style(token).patch(overlay_surface),
+        ));
+        swatch_spans.push(Span::styled(" ", overlay_surface));
+    }
+    lines.push(pad_line_to_width(swatch_spans, w, overlay_surface));
+    if lines.len() < usize::from(area.height) {
+        lines.push(pad_line_to_width(
+            vec![Span::styled(
+                truncate_to_width("Focus  Info  Success  Warning  Danger  Keyword", w, true),
+                preview_theme.style(Token::Muted),
+            )],
+            w,
+            overlay_surface,
+        ));
+    }
+
+    Paragraph::new(lines)
+        .style(overlay_surface)
+        .render(area, buf);
 }
 
 // ------------------------------------------------------ connection details

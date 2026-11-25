@@ -434,3 +434,38 @@ fn moving_selection_updates_selected_preview_synchronously_with_zero_side_effect
             .contains("query_alpha")
     );
 }
+
+#[test]
+fn commands_palette_supports_preview_only_when_theme_entries_match() {
+    use crate::config::ThemeChoice;
+
+    let palette_with_themes = Palette::over_commands(
+        vec![
+            PaletteEntry {
+                label: "Format buffer".into(),
+                detail: "Format SQL".into(),
+                group: "Editor",
+                command: PaletteCommand::Run(Action::FormatBuffer),
+            },
+            PaletteEntry {
+                label: "Theme: atelier".into(),
+                detail: "Dark editorial palette".into(),
+                group: "Theme",
+                command: PaletteCommand::SelectTheme(ThemeChoice::Atelier),
+            },
+        ],
+        "Context note",
+    );
+
+    assert!(palette_with_themes.supports_preview());
+    assert_eq!(
+        palette_with_themes.entries[1].theme_choice(),
+        Some(ThemeChoice::Atelier)
+    );
+    assert_eq!(palette_with_themes.entries[0].theme_choice(), None);
+
+    let mut filtered_to_command = palette_with_themes;
+    filtered_to_command.query = "Format".into();
+    assert!(!filtered_to_command.supports_preview());
+    assert!(filtered_to_command.selected_preview().is_none());
+}

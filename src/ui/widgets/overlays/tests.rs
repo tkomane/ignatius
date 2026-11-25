@@ -2327,3 +2327,424 @@ fn layout_wires_bench_settle_progress_into_benchmark_overlay_footer() {
             .unwrap()
     );
 }
+
+#[test]
+fn plan_explorer_renders_surface_alt_kpi_strip_and_scales_micro_bars_with_sweep() {
+    use crate::app::model::{Focus, Model};
+    use crate::query::plan::PlanDocument;
+
+    let json = r#"[
+      {
+        "Plan": {
+          "Node Type": "Merge Join",
+          "Startup Cost": 10.0,
+          "Total Cost": 40.0,
+          "Plan Rows": 100,
+          "Actual Startup Time": 1.0,
+          "Actual Total Time": 10.0,
+          "Actual Rows": 100,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              "Startup Cost": 0.0,
+              "Total Cost": 20.0,
+              "Plan Rows": 10,
+              "Actual Startup Time": 0.1,
+              "Actual Total Time": 8.0,
+              "Actual Rows": 100,
+              "Actual Loops": 1
+            }
+          ]
+        },
+        "Planning Time": 0.42,
+        "Execution Time": 10.5
+      }
+    ]"#;
+    let doc = PlanDocument::parse(json, true).expect("valid analyzed plan");
+    let mut model = Model::new(100);
+    model.focus = Focus::Results;
+    model.plan.ready(doc.clone());
+    let keymap = crate::ui::keymap::Keymap::new();
+    let pres = presentation(ColorDepth::TrueColor);
+    let stripe_bg = pres.theme.surface(Token::SurfaceAlt).bg.unwrap();
+
+    // Full height (>= 10 inner): shows recessed SurfaceAlt KPI strip with Nodes, Planning, Execution, Hotspot.
+    let wide = Rect::new(0, 0, 96, 18);
+    let mut buf = Buffer::empty(wide);
+    render_plan(&model, &keymap, &pres, wide, &mut buf);
+    let kpi_cell = cell_at(&buf, "Nodes");
+    assert_eq!(kpi_cell.bg, stripe_bg, "KPI strip must sit on SurfaceAlt");
+    let text = buffer_to_string(&buf);
+    for needle in [
+        "Nodes 2",
+        "Planning 0.42 ms",
+        "Execution 10.50 ms",
+        "Hotspot Seq Scan",
+    ] {
+        assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+    }
+    assert!(
+        text.contains("Attention: Seq Scan (measured time)"),
+        "{text}"
+    );
+
+    // Narrow height (< 10 inner): omits KPI strip without breaking Attention or tree rows.
+    let narrow_h = Rect::new(0, 0, 96, 10);
+    let mut nbuf = Buffer::empty(narrow_h);
+    render_plan(&model, &keymap, &pres, narrow_h, &mut nbuf);
+    let ntext = buffer_to_string(&nbuf);
+    assert!(!ntext.contains("Hotspot"), "{ntext}");
+    assert!(ntext.contains("Attention:"), "{ntext}");
+
+    // Sweep hook scales micro-bar fill proportionally when < 1.0.
+    let tree_area = Rect::new(0, 0, 120, 4);
+    let mut full_tree = Buffer::empty(tree_area);
+    let mut half_tree = Buffer::empty(tree_area);
+    super::render_plan_tree_with_sweep(&doc, &model.plan, &pres, 1.0, tree_area, &mut full_tree);
+    super::render_plan_tree_with_sweep(&doc, &model.plan, &pres, 0.25, tree_area, &mut half_tree);
+    let full_fills: usize = (0..tree_area.width)
+        .filter(|&x| full_tree[(x, 1)].symbol() == "\u{2501}")
+        .count();
+    let half_fills: usize = (0..tree_area.width)
+        .filter(|&x| half_tree[(x, 1)].symbol() == "\u{2501}")
+        .count();
+    assert!(
+        full_fills > half_fills,
+        "full={full_fills} half={half_fills}"
+    );
+
+    // Live model.motion().plan_sweep() drives render_plan and settles to 1.0 under reduced_motion.
+    let mut wide_model = Model::new(100);
+    wide_model.focus = Focus::Results;
+    wide_model.presentation = pres.clone();
+    wide_model.plan.ready(doc);
+    wide_model.motion.enable();
+    wide_model.motion.begin_plan_sweep();
+    wide_model
+        .motion
+        .advance(std::time::Duration::from_millis(80));
+    let wide_120 = Rect::new(0, 0, 120, 18);
+    let mut anim_buf = Buffer::empty(wide_120);
+    render_plan(&wide_model, &keymap, &pres, wide_120, &mut anim_buf);
+    let anim_fills: usize = (0..wide_120.height)
+        .flat_map(|y| (0..wide_120.width).map(move |x| (x, y)))
+        .filter(|&(x, y)| anim_buf[(x, y)].symbol() == "\u{2501}")
+        .count();
+
+    let mut reduced_pres = pres;
+    reduced_pres.reduced_motion = true;
+    let mut red_buf = Buffer::empty(wide_120);
+    render_plan(&wide_model, &keymap, &reduced_pres, wide_120, &mut red_buf);
+    let red_fills: usize = (0..wide_120.height)
+        .flat_map(|y| (0..wide_120.width).map(move |x| (x, y)))
+        .filter(|&(x, y)| red_buf[(x, y)].symbol() == "\u{2501}")
+        .count();
+    assert!(
+        red_fills > anim_fills,
+        "reduced_motion={red_fills} must render full bars while active plan_sweep={anim_fills}"
+    );
+}
+
+#[test]
+fn schema_diagram_renders_summary_pills_surface_alt_table_headers_and_key_indicators() {
+    use crate::app::model::SchemaDiagramState;
+    use crate::diagram::{Cardinality, DiagramColumn, DiagramTable, ForeignKeyEdge, SchemaGraph};
+
+    let graph = SchemaGraph {
+        tables: vec![
+            DiagramTable {
+                schema: "public".into(),
+                name: "customers".into(),
+                columns: vec![DiagramColumn {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    is_primary_key: true,
+                    is_foreign_key: false,
+                    is_unique: true,
+                    nullable: false,
+                }],
+            },
+            DiagramTable {
+                schema: "public".into(),
+                name: "orders".into(),
+                columns: vec![
+                    DiagramColumn {
+                        name: "id".into(),
+                        data_type: "integer".into(),
+                        is_primary_key: true,
+                        is_foreign_key: false,
+                        is_unique: true,
+                        nullable: false,
+                    },
+                    DiagramColumn {
+                        name: "customer_id".into(),
+                        data_type: "integer".into(),
+                        is_primary_key: false,
+                        is_foreign_key: true,
+                        is_unique: false,
+                        nullable: false,
+                    },
+                ],
+            },
+        ],
+        edges: vec![ForeignKeyEdge {
+            constraint_name: "orders_customer_fk".into(),
+            source_schema: "public".into(),
+            source_table: "orders".into(),
+            source_columns: vec!["customer_id".into()],
+            target_schema: "public".into(),
+            target_table: "customers".into(),
+            target_columns: vec!["id".into()],
+            cardinality: Cardinality::OneToMany,
+            nullable: false,
+        }],
+        truncated_from: None,
+    };
+    let state = SchemaDiagramState::new(graph, true);
+    let area = Rect::new(0, 0, 120, 32);
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    super::render_schema_diagram(&state, &pres, area, &mut buf);
+
+    let text = buffer_to_string(&buf);
+    for needle in [
+        "TABLES: 2",
+        "EDGES: 1",
+        "DEPTH: all tables",
+        "FORMAT: Unicode",
+    ] {
+        assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+    }
+
+    // Table header inside entity card sits on SurfaceAlt with Header ink.
+    let stripe_bg = pres.theme.surface(Token::SurfaceAlt).bg.unwrap();
+    let header_y = (0..area.height)
+        .find(|&y| {
+            let line: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            line.contains("public.customers") && line.contains('\u{2502}') && !line.contains("> ")
+        })
+        .expect("entity card table header row");
+    let header_line: String = (0..area.width)
+        .map(|x| buf[(x, header_y)].symbol())
+        .collect();
+    let card_hdr_x = header_line[..header_line.find("public.customers").unwrap()]
+        .chars()
+        .count() as u16;
+    assert_eq!(buf[(card_hdr_x, header_y)].bg, stripe_bg);
+    assert_eq!(
+        buf[(card_hdr_x, header_y)].fg,
+        pres.theme.color(Token::Header).unwrap()
+    );
+
+    // PK uses Focus and FK uses Info.
+    let pk_cell = cell_at(&buf, "PK ");
+    assert_eq!(pk_cell.fg, pres.theme.color(Token::Focus).unwrap());
+    let fk_cell = cell_at(&buf, "FK ");
+    assert_eq!(fk_cell.fg, pres.theme.color(Token::Info).unwrap());
+
+    // ASCII / None mode keeps output pure ASCII and backgrounds Reset.
+    let ascii = ascii_presentation();
+    let ascii_state = SchemaDiagramState::new(state.graph, false);
+    let mut abuf = Buffer::empty(area);
+    super::render_schema_diagram(&ascii_state, &ascii, area, &mut abuf);
+    let atext = buffer_to_string(&abuf);
+    assert!(atext.is_ascii(), "{atext}");
+    assert!(abuf.content.iter().all(|c| c.bg == Color::Reset));
+}
+
+#[test]
+fn server_activity_renders_kpi_summary_pills_and_proportional_session_state_bar() {
+    use crate::activity::{BackendProcess, DatabaseHealthMetrics, ServerActivitySnapshot};
+    use crate::app::model::ServerActivityState;
+
+    let snapshot = ServerActivitySnapshot {
+        metrics: DatabaseHealthMetrics {
+            database: "ignatius_demo".into(),
+            active_connections: 4,
+            xact_commit: 420,
+            xact_rollback: 1,
+            cache_hit_bps: 9950,
+            deadlocks: 0,
+            temp_bytes: 0,
+        },
+        backends: vec![
+            BackendProcess {
+                pid: 101,
+                database: "ignatius_demo".into(),
+                username: "app".into(),
+                application_name: "api".into(),
+                client_addr: "127.0.0.1".into(),
+                state: "active".into(),
+                wait_event_type: None,
+                wait_event: None,
+                query_age_ms: 400,
+                xact_age_ms: Some(400),
+                query: "SELECT 1".into(),
+                blocked_by: Vec::new(),
+                lock_summary: None,
+                is_self: false,
+            },
+            BackendProcess {
+                pid: 102,
+                database: "ignatius_demo".into(),
+                username: "worker".into(),
+                application_name: "jobs".into(),
+                client_addr: "127.0.0.1".into(),
+                state: "active".into(),
+                wait_event_type: Some("Lock".into()),
+                wait_event: Some("relation".into()),
+                query_age_ms: 2500,
+                xact_age_ms: Some(2500),
+                query: "UPDATE orders SET status = 'paid'".into(),
+                blocked_by: vec![101],
+                lock_summary: Some("ExclusiveLock on orders".into()),
+                is_self: false,
+            },
+            BackendProcess {
+                pid: 103,
+                database: "ignatius_demo".into(),
+                username: "analyst".into(),
+                application_name: "ignatius".into(),
+                client_addr: "127.0.0.1".into(),
+                state: "idle".into(),
+                wait_event_type: Some("Client".into()),
+                wait_event: Some("ClientRead".into()),
+                query_age_ms: 100,
+                xact_age_ms: None,
+                query: "SELECT 2".into(),
+                blocked_by: Vec::new(),
+                lock_summary: None,
+                is_self: true,
+            },
+        ],
+        truncated_from: None,
+    };
+
+    let state = ServerActivityState::new(snapshot.clone(), true);
+    let area = Rect::new(0, 0, 120, 32);
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    super::render_server_activity(&state, &pres, area, &mut buf);
+
+    let text = buffer_to_string(&buf);
+    for needle in [
+        "Active: 2",
+        "Idle: 1",
+        "Blocked: 1",
+        "Waiting: 1",
+        "State mix:",
+    ] {
+        assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+    }
+
+    let mix_y = row_of(&buf, "State mix:");
+    let mix_row: String = (0..area.width).map(|x| buf[(x, mix_y)].symbol()).collect();
+    assert!(
+        mix_row.contains('\u{2588}'),
+        "active bar segment: {mix_row}"
+    );
+    assert!(
+        mix_row.contains('\u{2593}'),
+        "waiting/blocked segment: {mix_row}"
+    );
+    assert!(mix_row.contains('\u{2591}'), "idle segment: {mix_row}");
+
+    let active_x = mix_row[..mix_row.find('\u{2588}').unwrap()].chars().count() as u16;
+    assert_eq!(
+        buf[(active_x, mix_y)].fg,
+        pres.theme.color(Token::Success).unwrap()
+    );
+    let blocked_x = mix_row[..mix_row.find('\u{2593}').unwrap()].chars().count() as u16;
+    assert_eq!(
+        buf[(blocked_x, mix_y)].fg,
+        pres.theme.color(Token::Danger).unwrap()
+    );
+
+    let ascii = ascii_presentation();
+    let ascii_state = ServerActivityState::new(snapshot, false);
+    let mut abuf = Buffer::empty(area);
+    super::render_server_activity(&ascii_state, &ascii, area, &mut abuf);
+    let atext = buffer_to_string(&abuf);
+    assert!(atext.is_ascii(), "{atext}");
+    assert!(abuf.content.iter().all(|c| c.bg == Color::Reset));
+}
+
+#[test]
+fn result_analytics_tab_two_renders_fractional_unicode_and_ascii_meters() {
+    use crate::query::result::ResultSet;
+    use crate::query::value::Cell;
+
+    let mut set = ResultSet::with_column_types(
+        vec!["bucket".to_owned()],
+        vec![Some("int4".to_owned())],
+        100,
+    );
+    // 10 occurrences of "1", 3 occurrences of "50", 1 occurrence of "100" -> exercises fractional eighth blocks.
+    for _ in 0..10 {
+        set.push(vec![Cell::Text("1".to_owned())]);
+    }
+    for _ in 0..3 {
+        set.push(vec![Cell::Text("50".to_owned())]);
+    }
+    set.push(vec![Cell::Text("100".to_owned())]);
+
+    let mut state = crate::app::model::ResultAnalyticsState::from_result(&set);
+    state.set_tab(1);
+    let area = Rect::new(0, 0, 130, 32);
+
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut ubuf = Buffer::empty(area);
+    render_result_analytics(&state, &pres, area, &mut ubuf);
+    let utext = buffer_to_string(&ubuf);
+
+    let top_row_y = row_of(&ubuf, "#2 ");
+    let top_row: String = (0..area.width)
+        .map(|x| ubuf[(x, top_row_y)].symbol())
+        .collect();
+    let has_unicode_meter = top_row
+        .chars()
+        .any(|ch| ('\u{2588}'..='\u{258f}').contains(&ch));
+    assert!(
+        has_unicode_meter,
+        "expected fractional bar meter on top value row: {top_row}\n{utext}"
+    );
+    let meter_x = top_row
+        .char_indices()
+        .find(|(_, ch)| ('\u{2588}'..='\u{258f}').contains(ch))
+        .map(|(b, _)| top_row[..b].chars().count() as u16)
+        .unwrap();
+    assert_eq!(
+        ubuf[(meter_x, top_row_y)].fg,
+        pres.theme.color(Token::Info).unwrap()
+    );
+
+    let hist_y = row_of(&ubuf, "B1:");
+    let hist_row: String = (0..area.width)
+        .map(|x| ubuf[(x, hist_y)].symbol())
+        .collect();
+    let hist_x = hist_row
+        .char_indices()
+        .find(|(_, ch)| ('\u{2588}'..='\u{258f}').contains(ch))
+        .map(|(b, _)| hist_row[..b].chars().count() as u16)
+        .unwrap();
+    assert_eq!(
+        ubuf[(hist_x, hist_y)].fg,
+        pres.theme.color(Token::Focus).unwrap()
+    );
+
+    let ascii = ascii_presentation();
+    let mut abuf = Buffer::empty(area);
+    render_result_analytics(&state, &ascii, area, &mut abuf);
+    let atext = buffer_to_string(&abuf);
+    assert!(atext.is_ascii(), "{atext}");
+    let ascii_top_y = row_of(&abuf, "#1 ");
+    let ascii_top: String = (0..area.width)
+        .map(|x| abuf[(x, ascii_top_y)].symbol())
+        .collect();
+    assert!(
+        ascii_top.contains("###"),
+        "ASCII top value meter: {ascii_top}"
+    );
+}
