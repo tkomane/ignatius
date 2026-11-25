@@ -30,7 +30,19 @@ foreach ($directory in (Split-Path -Parent $binary), $system, $env:WINDIR) {
     }
 }
 
-function Invoke-VersionWorker([Diagnostics.ProcessStartInfo] $start, [IO.DirectoryInfo] $state) {
+function Assert-GCloudVersion([string] $output, [string] $route) {
+    try {
+        $info = ConvertFrom-Json -InputObject $output -AsHashtable -NoEnumerate
+    } catch {
+        throw "The Google Cloud CLI $route returned invalid version JSON."
+    }
+    if ($info -isnot [Collections.IDictionary] -or $info['Google Cloud SDK'] -isnot [string] -or
+        $info['Google Cloud SDK'] -cne $version) {
+        throw "The Google Cloud CLI $route version differs from the pinned archive."
+    }
+}
+
+function Invoke-VersionWorker([Diagnostics.ProcessStartInfo] $start, [IO.DirectoryInfo] $state, [switch] $BundledPython) {
     $profileDir = $state.CreateSubdirectory('profile').FullName
     $tmp = $state.CreateSubdirectory('tmp').FullName
     $start.UseShellExecute = $false
@@ -62,6 +74,10 @@ function Invoke-VersionWorker([Diagnostics.ProcessStartInfo] $start, [IO.Directo
         HTTPS_PROXY = $proxy
         ALL_PROXY = $proxy
         IGNATIUS_TEST_GCLOUD_VERSION = $version
+    }
+    if ($BundledPython) {
+        $settings['PATH'] = "$(Join-Path $sdk 'bin/sdk');$($settings['PATH'])"
+        $settings['CLOUDSDK_ROOT_DIR'] = $sdk
     }
     foreach ($key in $settings.Keys) { $start.Environment[$key] = $settings[$key] }
     $worker = [Diagnostics.Process]::Start($start)
@@ -118,15 +134,20 @@ try {
     $wrapper.WorkingDirectory = $bin
     $wrapper.Arguments = '/d /c gcloud.cmd version --format=json'
     $output = Invoke-VersionWorker $wrapper ($work.CreateSubdirectory('wrapper'))
-    try {
-        $info = ConvertFrom-Json -InputObject $output -AsHashtable -NoEnumerate
-    } catch {
-        throw 'The Google Cloud CLI vendor wrapper returned invalid version JSON.'
+    Assert-GCloudVersion $output 'wrapper'
+
+    # This mirrors the verified wrapper's fixed Python launch without invoking
+    # its batch file, and keeps the verified archive root and worker state.
+    $bundledState = $work.CreateSubdirectory('bundled-python')
+    $gcloudScript = Join-Path $sdk 'lib/gcloud.py'
+    if (-not [IO.File]::Exists($gcloudScript)) { throw 'The verified archive is missing lib/gcloud.py.' }
+    $bundled = [Diagnostics.ProcessStartInfo]::new($python)
+    $bundled.WorkingDirectory = $bundledState.FullName
+    foreach ($arg in '-S', $gcloudScript, 'version', '--format=json') {
+        $bundled.ArgumentList.Add($arg)
     }
-    if ($info -isnot [Collections.IDictionary] -or $info['Google Cloud SDK'] -isnot [string] -or
-        $info['Google Cloud SDK'] -cne $version) {
-        throw 'The Google Cloud CLI wrapper version differs from the pinned archive.'
-    }
+    $bundledOutput = Invoke-VersionWorker $bundled $bundledState -BundledPython
+    Assert-GCloudVersion $bundledOutput 'bundled Python'
 
     $state = $work.CreateSubdirectory('bare')
     $test = [Diagnostics.ProcessStartInfo]::new($binary)
@@ -142,7 +163,7 @@ try {
     if (($bare -ceq 'version-matched') -ne $nativePresent) {
         throw 'The bare-name result disagrees with the presence of gcloud.exe in the verified archive bin.'
     }
-    Write-Host "Google Cloud CLI x64 archive=$version sha256=$digest image=$image os=$([Environment]::OSVersion.Version) bare-gcp=$bare wrapper=version-matched"
+    Write-Host "Google Cloud CLI x64 archive=$version sha256=$digest image=$image os=$([Environment]::OSVersion.Version) bare-gcp=$bare wrapper=version-matched bundled-python=version-matched"
 } finally {
     $socket.Dispose()
     $work.Delete($true)

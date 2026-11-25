@@ -49,3 +49,7 @@ The stock direct route returned `missing-program` and the packaged
 `gcloud.cmd` version control returned `version-matched`. The full hosted
 CI run passed. A supported direct route and live Cloud SQL IAM remain open.
 [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
+
+- [ ] T005 Verify the checksum-pinned Windows archive's bundled interpreter
+  with a shell-free version-only control. Bind the result to the archive,
+  exact source, runner and existing account-free worker.

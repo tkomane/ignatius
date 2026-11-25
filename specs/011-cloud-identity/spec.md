@@ -267,6 +267,12 @@ control. The control must report the exact SDK version. Record the direct
 launch outcome, archive identity and runner build. Live Cloud SQL IAM is
 covered by the separate live provider scenario.
 
+A shell-free version control may launch the verified archive's interpreter
+and Python entrypoint with fixed arguments in a fresh account-free profile.
+Verify the exact pinned version. This evidence applies to the tested archive.
+An automatic provider route requires trusted package discovery and a
+supportable launch contract.
+
 ## Assumptions
 
 - The cloud's own command-line tool is a reasonable prerequisite for the person
