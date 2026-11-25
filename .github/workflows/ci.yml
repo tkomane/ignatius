@@ -17,6 +17,10 @@ on:
         description: Check account-free Azure CLI x64 MSI launch routes on Windows
         type: boolean
         default: false
+      check_windows_aws_cli:
+        description: Check the account-free AWS CLI v2 native launcher on Windows x64
+        type: boolean
+        default: false
   schedule:
     # Ecosystem advisories and supported PostgreSQL images can change without
     # a source commit. Recheck them weekly at 05:17 Africa/Johannesburg.
@@ -188,6 +192,11 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: ./scripts/check-windows-azure-msi.ps1
+      - name: Check installed AWS CLI v2 native launcher
+        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.check_windows_aws_cli
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/check-windows-aws-cli.ps1
 
   # Run plain and TLS contracts for every supported major before merge,
   # including revisions to reviewed fixture digests for intermediate majors.

@@ -246,6 +246,16 @@ missing-program diagnostic. No account, token or database is needed. This
 evidence applies to the tested Windows x64 MSI layout. Keep Windows 11 desktop,
 other packages and live Azure PostgreSQL acceptance as separate gates.
 
+## Windows x64 AWS CLI launch evidence
+
+Run `aws --version` through the built-in AWS provider's direct launch and raw
+output path on the Windows Server x64 runner. Resolve the executable on the
+MSI package's isolated PATH and compare its version with independent local
+machine installer metadata. Use a synthetic TLS-required target and a fresh
+process and profile without account configuration. This proves installed
+command launch. Live RDS authentication requires the separate live provider
+scenario.
+
 ## Assumptions
 
 - The cloud's own command-line tool is a reasonable prerequisite for the person

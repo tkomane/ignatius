@@ -23,3 +23,7 @@ ran on Windows Server 2025 x64, image `windows-2025-vs2026` version
 `version-matched` and the production built-in resolver reported
 `resolved-entra=version-matched`. The Windows junction and zero-timeout
 configured-provider tests passed. [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45695897697/job/139493085072)
+
+- [ ] T003 Verify the built-in direct AWS CLI launch on hosted Windows x64
+  against the installed MSI version using an account-free version probe.
+  Record the runner identity, source and observed launch result.

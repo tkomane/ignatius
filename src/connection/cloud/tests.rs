@@ -939,3 +939,37 @@ async fn installed_windows_azure_msi_version() {
     // An explicit receipt prevents a misspelled libtest filter from passing CI.
     std::fs::write("probe-result", outcome).expect("write the version-probe result");
 }
+
+/// The opt-in helper identifies the registered machine MSI and pins the
+/// worker's PATH to its directory. The provider requests only its version.
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[tokio::test]
+#[ignore = "requires scripts/check-windows-aws-cli.ps1 and the AWS CLI v2 x64 MSI"]
+async fn installed_windows_aws_cli_version() {
+    use secrecy::ExposeSecret;
+
+    let expected = std::env::var("IGNATIUS_TEST_AWS_VERSION").expect("registered AWS CLI version");
+    let mut target = target(SslMode::VerifyFull);
+    target.auth = Some("aws".to_owned());
+    let (mut provider, launch) =
+        resolve_provider("aws", &BTreeMap::new()).expect("built-in AWS provider");
+    assert_eq!(launch, Launch::Direct);
+    assert_eq!(provider.command.first().map(String::as_str), Some("aws"));
+    assert_eq!(provider.extract, Extract::Raw);
+    provider.command.truncate(1);
+    provider.command.push("--version".to_owned());
+
+    let version = fetch_selected(&provider, &target, launch)
+        .await
+        .unwrap_or_else(|error| panic!("AWS CLI version probe failed ({:?})", error.kind));
+    let cli_version = version
+        .expose_secret()
+        .split_ascii_whitespace()
+        .next()
+        .and_then(|word| word.strip_prefix("aws-cli/"));
+    assert!(
+        cli_version == Some(expected.as_str()),
+        "AWS CLI version differs from the registered MSI"
+    );
+    std::fs::write("probe-result", "version-matched").expect("write the AWS version receipt");
+}
