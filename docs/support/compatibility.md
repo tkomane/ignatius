@@ -105,6 +105,13 @@ The account-free `--version` result `2.40.3` matched registered MSI
 `2.40.3.0`. Live RDS or Aurora IAM authentication requires a controlled
 database test. [Hosted Windows AWS launch probe](https://github.com/tkomane/ignatius/actions/runs/45705066295/job/139524815561)
 
+On Windows Server 2025 x64 image `20261123.321.1`, the built-in `gcp`
+direct launch returned a missing-program diagnostic on Google's verified
+bundled-Python archive `594.0.1`. Its packaged `gcloud.cmd` reported
+`594.0.1` in the independent account-free version control. A supported
+direct route for this archive and live Cloud SQL IAM authentication remain
+open. [Hosted Windows Google Cloud CLI probe](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
+
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and
 none was found, both the full-screen client and plain mode ask for one, without

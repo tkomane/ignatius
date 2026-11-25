@@ -256,6 +256,17 @@ process and profile without account configuration. This proves installed
 command launch. Live RDS authentication requires the separate live provider
 scenario.
 
+## Windows x64 Google Cloud CLI archive launch evidence
+
+Use a fixed, versioned Windows x64 Google Cloud CLI archive with bundled
+Python. Match the downloaded bytes to Google's published SHA-256 before
+extracting or running a package component. The account-free probe must
+observe the built-in `gcp` provider's direct launch with fixed version-only
+arguments and run the packaged Windows launcher as an independent version
+control. The control must report the exact SDK version. Record the direct
+launch outcome, archive identity and runner build. Live Cloud SQL IAM is
+covered by the separate live provider scenario.
+
 ## Assumptions
 
 - The cloud's own command-line tool is a reasonable prerequisite for the person

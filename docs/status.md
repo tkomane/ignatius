@@ -1,8 +1,29 @@
 # Status
 
-**Updated: 2026-11-25.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-26.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 83 - Verify Google Cloud CLI archive launch on Windows x64 - 26 November 2026
+
+- **W06 / 011 T004.** The fresh Windows Server 2025 x64 dispatch at
+  `0ec9ce1` tested Google's bundled-Python archive `594.0.1` after verifying
+  its published SHA-256. On `windows-2025-vs2026` image `20261123.321.1`
+  and OS build `10.0.26100.0`, the built-in direct route reported
+  `missing-program`. The separate packaged `gcloud.cmd` control reported
+  the exact pinned version. Both used fresh account-free profiles and fixed
+  version commands.
+  [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
+  [Google's archive and checksum table](https://docs.cloud.google.com/sdk/docs/downloads-versioned-archives)
+  [Feature 011 tasks](../specs/011-cloud-identity/tasks.md)
+- **Verification.** The initial dispatch was canceled while the standard
+  Windows tests were stalled before the probe. The retry ran the probe
+  immediately after compilation and passed all 17 CI jobs, including the
+  full Windows test suite. The scheduled fixture-drift job skipped.
+  [Initial dispatch](https://github.com/tkomane/ignatius/actions/runs/45708716852)
+  [Successful retry](https://github.com/tkomane/ignatius/actions/runs/45711578601)
+- **Provider acceptance.** A supported direct GCP launch for this Windows
+  archive and controlled live Cloud SQL IAM authentication remain open.
 
 ## Wave 82 - Resolve temporary tables for reviewed cell edits - 25 November 2026
 
@@ -16,6 +37,10 @@ before trusting anything else.
   physical temporary schema, read the original value after preparing
   the update, executed the reviewed statement once, and verified a
   one-row outcome and the new value.
+- **Merged at `bd03b4b`.** Hosted CI and CodeQL passed before and after merge.
+  [PR #159](https://github.com/tkomane/ignatius/pull/159)
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45710961381)
+  [Main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45710961498)
 
 ## Wave 81 - Verify the installed Windows AWS CLI launch - 25 November 2026
 
@@ -31,8 +56,12 @@ before trusting anything else.
   PowerShell parsing passed. The exact hosted dispatch passed all 17 CI
   jobs and the opt-in Windows step. The scheduled fixture-drift job skipped.
   [Hosted CI run](https://github.com/tkomane/ignatius/actions/runs/45705066295)
-- **Remaining provider evidence.** The Google Cloud CLI Windows launch and
-  controlled live Entra, AWS and GCP authentication remain open.
+- **Provider acceptance.** Controlled live Entra, AWS and GCP authentication
+  remains open. [Google Cloud CLI archive evidence](#wave-83---verify-google-cloud-cli-archive-launch-on-windows-x64---26-november-2026)
+- **Merged at `221d704`.** Hosted CI and CodeQL passed before and after merge.
+  [PR #158](https://github.com/tkomane/ignatius/pull/158)
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45709347024)
+  [Main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45709346886)
 
 ## Wave 80 - Retire watch state on profile switch - 25 November 2026
 
@@ -51,6 +80,10 @@ before trusting anything else.
   the observation periods on the second. The workbench refused bare
   `\watch` before a query on the new profile. A new query then ran on that
   profile and bare watch repeated that SQL. `Ctrl+Q` exited zero.
+- **Merged at `67ddcc7`.** Hosted CI and CodeQL passed before and after merge.
+  [PR #157](https://github.com/tkomane/ignatius/pull/157)
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45707533497)
+  [Main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45707533545)
 
 ## Wave 79 - Recover cleared file-backed drafts - 25 November 2026
 
@@ -71,6 +104,10 @@ before trusting anything else.
   exact JSON; its next launch offered recovery, and `Ctrl+K r` restored the
   editor with the original path, empty text and cursor at zero, still
   modified. `Ctrl+Q` exited zero. The saved file held its original byte.
+- **Merged at `fbe0c68`.** Hosted CI and CodeQL passed before and after merge.
+  [PR #156](https://github.com/tkomane/ignatius/pull/156)
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45705550168)
+  [Main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45705550348)
 
 ## Wave 78 - Launch the built-in Entra provider through the Windows MSI - 25 November 2026
 
@@ -4532,9 +4569,12 @@ These are real and none of them is hidden anywhere else:
    databases. [Provider support](support/compatibility.md#cloud-identity-providers)
 5b. **Windows CLI launch.** The account-free probes verified the Azure CLI
    x64 MSI fallback and the direct AWS CLI v2 MSI launch on hosted Windows
-   Server 2025 x64. W06 still needs Google Cloud CLI Windows package evidence.
+   Server 2025 x64. The direct GCP launch reported a missing program on
+   the verified Google Cloud CLI archive. A supported direct route for
+   that package remains open.
    [Azure launch](#wave-78---launch-the-built-in-entra-provider-through-the-windows-msi---25-november-2026)
    [AWS launch](#wave-81---verify-the-installed-windows-aws-cli-launch---25-november-2026)
+   [Google Cloud CLI launch](#wave-83---verify-google-cloud-cli-archive-launch-on-windows-x64---26-november-2026)
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has
