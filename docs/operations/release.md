@@ -110,8 +110,8 @@ Before any tag, signing, attestation, or public release operation can proceed:
    SLSA attestation generation in the authorized workflow and independently
    verify `<archive>.sigstore.json` and `<archive>.intoto.jsonl` with `cosign
    verify-blob` and `gh attestation verify` / `slsa-verifier verify-artifact`.
-5. **Remaining platform and governance closures.** Complete human hand use on
-   signed Warp (`macOS`), Windows 11 Terminal (`001 T051`), Linux desktop
+5. **Remaining platform and governance closures.** Complete human hand use in
+   installed Warp (`macOS`), Windows 11 Terminal (`001 T051`), Linux desktop
    (`001 T052`), and human VoiceOver/NVDA auditory review (`007 T032`/`T033`),
    plus trademark/domain confirmation and `SECURITY.md` reporting test.
 6. **Explicit publication authorization.** Record owner approval naming exact

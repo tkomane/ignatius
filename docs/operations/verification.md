@@ -65,7 +65,7 @@ scripts, which Dependabot does not track, so their digests are refreshed by hand
 
 ## Installed Warp acceptance, PR 121 and ADR-0008 - 21 November 2026
 
-An isolated macOS 27.2.1 (`26B131`, arm64) run exercised the signed
+An isolated macOS 27.2.1 (`26B131`, arm64) run exercised the checksum-verified
 `ci/44721590021-1` archive (`ignatius-0.1.0-aarch64-apple-darwin.tar.gz`,
 `5,875,883` bytes, SHA-256
 `368bfa594f01567c1daa63ab464f83a2f55ef4d311f94d76157124026a641e2f`; extracted
@@ -117,7 +117,7 @@ after the run; macOS `AXIsProcessTrusted` and
   characters), verifying `rendering_cases` (`escape_attack` escaped as
   printable `\x1B[2J...`), `42P01`, `57014` cancellation, and `ROLLBACK`
   recovery. Human VoiceOver/NVDA auditory review, human interactive keyboard/mouse
-  visual hand use in signed Warp, Windows 11 Terminal hand use (`001 T051`),
+  visual hand use in installed Warp, Windows 11 Terminal hand use (`001 T051`),
   and Linux desktop/WSL hand use (`001 T052`, `007 T032`/`T033`) remain open.
 - **Local receipts (sanitized, outside repository):**
   - Combined Warp and `--plain` audit receipt SHA-256:
