@@ -68,14 +68,13 @@ requested, because a bearer token is usable by whoever sees it.
 | `gcp` | `gcloud sql generate-login-token` | Proven | None yet |
 | Your own | Whatever `[auth.providers]` says | Proven | Not applicable |
 
-"Mechanism proven" and "live evidence" are separate columns on purpose. The
-route - run a program, read a token, present it as the password over TLS - is
-tested end to end against a real PostgreSQL server with TLS, using a provider
-defined in configuration. It is only tested with TLS because it refuses to run
-without it. What has **not** happened is anyone running each built-in against
-that cloud's own database. Until that is done and dated here, the built-in
-commands are transcriptions of vendor documentation checked on 2026-08-16, and
-no more than that.
+The mechanism covers launching a provider, reading its token and presenting
+it over required TLS. A configured provider exercised that route end to end
+on a disposable PostgreSQL server. The live column records authentication
+against each vendor's own PostgreSQL service, which requires controlled
+accounts and databases. The built-in commands follow vendor documentation
+checked on 2026-08-16. The installed-launch checks below cover the specified
+Windows packages and runner.
 
 The `aws` provider needs a region, which its own tool resolves from the
 environment and from AWS configuration. When it cannot, the failure says so.
@@ -99,6 +98,12 @@ automatic launcher reported the registered Azure CLI MSI version `2.93.0`
 with `version --output json`. Bare `az` reported a missing program on the
 same MSI search path. Other Windows package layouts and live Entra PostgreSQL
 authentication remain unverified. [Hosted Windows fallback probe](https://github.com/tkomane/ignatius/actions/runs/45695897697/job/139493085072)
+
+On Windows Server 2025 x64 image `20261116.315.1`, the built-in `aws`
+provider directly launched the standard AWS CLI v2 MSI's `aws.exe`.
+The account-free `--version` result `2.40.3` matched registered MSI
+`2.40.3.0`. Live RDS or Aurora IAM authentication requires a controlled
+database test. [Hosted Windows AWS launch probe](https://github.com/tkomane/ignatius/actions/runs/45705066295/job/139524815561)
 
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and

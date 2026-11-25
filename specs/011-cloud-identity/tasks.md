@@ -24,6 +24,14 @@ ran on Windows Server 2025 x64, image `windows-2025-vs2026` version
 `resolved-entra=version-matched`. The Windows junction and zero-timeout
 configured-provider tests passed. [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45695897697/job/139493085072)
 
-- [ ] T003 Verify the built-in direct AWS CLI launch on hosted Windows x64
+- [x] T003 Verify the built-in direct AWS CLI launch on hosted Windows x64
   against the installed MSI version using an account-free version probe.
   Record the runner identity, source and observed launch result.
+
+The opt-in CI dispatch at `732a882` passed on Windows Server 2025 x64
+(`windows-2025-vs2026`, image `20261116.315.1`, OS build `10.0.26100.0`).
+The built-in direct launch of `aws.exe --version` reported AWS CLI v2
+`2.40.3`, matching the registered MSI `2.40.3.0`. The fixed-argument probe
+used a synthetic TLS-required target and a fresh account-free worker.
+Live RDS or Aurora IAM authentication requires its own controlled test.
+[Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45705066295/job/139524815561)
