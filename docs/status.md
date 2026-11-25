@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 77 - Verify the Windows Azure CLI MSI launch - 25 November 2026
+
+- **W06 / 011 T001.** The opt-in CI dispatch at `620e6e2` ran the existing
+  provider subprocess with a synthetic TLS-required target and version-only
+  commands. On Windows Server 2025 x64 (`windows-2025-vs2026`, image
+  `20261116.315.1`), bare `az` on the MSI path gave the missing-program
+  diagnostic. The packaged interpreter reported the installed MSI version
+  `2.93.0`. [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45691294548/job/139477135355)
+  and [Feature 011 tasks](../specs/011-cloud-identity/tasks.md).
+- **Local check.** All 24 workflow contracts and the workflow and PowerShell
+  syntax checks passed. Reviewed synthetic controls covered both receipts,
+  wrong versions, an unexpected launcher, empty test selection and worker
+  cleanup. The selected [hosted CI run](https://github.com/tkomane/ignatius/actions/runs/45691294548)
+  passed 17 jobs, including the opt-in step in the Windows job. The
+  scheduled fixture-drift job skipped.
+
 ## Wave 76 - Make sending-review disclosures readable - 25 November 2026
 
 - **W09 / 018 T042.** Clipboard destination, write-only behavior and
@@ -27,6 +43,9 @@ before trusting anything else.
   decoded payload matched the visible result. The result was absent from the
   active debug log and history. `Ctrl+Q` exited zero. The PTY combined stdout
   and stderr.
+- [PR #153](https://github.com/tkomane/ignatius/pull/153) merged at `205ef7b`.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45690637476) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45690637524) passed.
 
 ## Wave 75 - Reconcile M16 and M18 merge evidence - 25 November 2026
 
@@ -41,6 +60,9 @@ before trusting anything else.
   commit passed CI and all three CodeQL analyses, with hosted socket,
   repository secret and dependency checks executed. Both historical main runs
   skipped the scheduled fixture-drift comparison. [Feature 064 tasks](../specs/064-tactile-craft-motion-and-devsecops/tasks.md)
+- [PR #152](https://github.com/tkomane/ignatius/pull/152) merged at `8a0a1a1`.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45688530082) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45688530054) passed.
 
 ## Wave 74 - Describe the configured authentication provider - 25 November 2026
 
@@ -57,8 +79,11 @@ before trusting anything else.
   switch to the configured `aws` used standard output. Both displayed the
   configured label and extraction rule. Reopening details left the call
   count at two. The synthetic credential and private argument marker were
-  absent from the capture, and `Ctrl+Q` exited zero. Vendor CLI and live
-  cloud account evidence remain open.
+  absent from the capture, and `Ctrl+Q` exited zero. Live cloud account
+  evidence remains open.
+- [PR #151](https://github.com/tkomane/ignatius/pull/151) merged at `114c3b6`.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45686477095) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45686477149) passed.
 
 ## Wave 73 - Restore the active editor draft - 25 November 2026
 
@@ -77,6 +102,9 @@ before trusting anything else.
   [CI](https://github.com/tkomane/ignatius/actions/runs/45675384844) and
   [CodeQL](https://github.com/tkomane/ignatius/actions/runs/45675384922) before
   this work began.
+- [PR #150](https://github.com/tkomane/ignatius/pull/150) merged at `74fc853`.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45684278277) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45684278181) passed.
 
 ## Wave 72 - Review readability and release authorization - 25 November 2026
 

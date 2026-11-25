@@ -5,9 +5,9 @@
 **Created**: 2026-08-16
 
 **Status**: Mechanism implemented and verified against synthetic TLS PostgreSQL.
-Live Entra/AWS/GCP accounts and native Windows provider-launch evidence remain
-open in `docs/support/compatibility.md`; synthetic provider evidence does not
-close those rows.
+The Azure CLI x64 MSI launch result is recorded in
+[compatibility](../../docs/support/compatibility.md#cloud-identity-providers).
+Other native Windows launcher rows and live Entra/AWS/GCP acceptance remain open.
 
 **Input**: The owner's requirement of 2026-08-16 - connect to a production
 application's Azure Database for PostgreSQL, which authenticates with Microsoft
