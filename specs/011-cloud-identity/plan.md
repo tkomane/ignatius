@@ -27,7 +27,9 @@ Match the installed `wbin` lexically on PATH, then verify the fixed package
 locations and reject path redirection within them. Use the bundled `python.exe`
 with `-IBm azure.cli`, the existing argument elements and child-only
 `AZ_INSTALLER=MSI`. Both launch choices share the existing timeout, output
-extraction and redaction paths.
+extraction and redaction paths. Native spawn and fixed local metadata reads
+are synchronous OS calls. Their elapsed time counts toward the deadline and
+the resolver rechecks it before starting the fallback.
 
 Retain the Windows evidence from T001 as the failing baseline. Exercise
 native success, spawn refusal, absent and invalid package layout, configured

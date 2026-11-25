@@ -5,7 +5,8 @@
 **Created**: 2026-08-16
 
 **Status**: Mechanism implemented and verified against synthetic TLS PostgreSQL.
-The Azure CLI x64 MSI launch result is recorded in
+The Windows x64 automatic Azure CLI MSI launch is verified with a hosted
+version-only probe and recorded in
 [compatibility](../../docs/support/compatibility.md#cloud-identity-providers).
 Other native Windows launcher rows and live Entra/AWS/GCP acceptance remain open.
 
