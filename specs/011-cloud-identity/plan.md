@@ -49,3 +49,18 @@ directory, metadata disabled and the installed executable directory on PATH.
 Check the exact workflow step and match the CLI version to the MSI version.
 Record the source, runner image, architecture and direct launch result.
 The regular PR and main CI and CodeQL checks remain the integration gates.
+
+## Windows x64 Google Cloud CLI archive probe
+
+Add the default-off `check_windows_gcloud_archive` dispatch to the existing
+Windows job. Fetch the exact bundled-Python ZIP and verify Google's published
+SHA-256 before extraction. Keep the archive and test profiles in fresh worker
+directories. Supply both workers with bounded environments, timeouts and
+isolated profiles. Disable credential use, telemetry, update checks and prompts.
+
+Resolve the built-in `gcp` direct route for a synthetic TLS-required target.
+Use only the fixed version command and read its version JSON if it starts.
+In a separate control, use Google's packaged Windows launcher with that same
+fixed command. Compare the version with the archive pin and record both
+outcomes, the archive digest, runner image and OS build.
+[Google's versioned archives and SHA-256 checksums](https://docs.cloud.google.com/sdk/docs/downloads-versioned-archives)

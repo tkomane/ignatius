@@ -973,3 +973,47 @@ async fn installed_windows_aws_cli_version() {
     );
     std::fs::write("probe-result", "version-matched").expect("write the AWS version receipt");
 }
+
+/// The opt-in Windows archive probe measures the stock bare-name launch with
+/// a harmless version command. The separate vendor control runs in its harness.
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[tokio::test]
+#[ignore = "requires scripts/check-windows-gcloud-archive.ps1 and the pinned x64 archive"]
+async fn windows_gcloud_archive_version() {
+    use secrecy::ExposeSecret;
+
+    let expected = std::env::var("IGNATIUS_TEST_GCLOUD_VERSION").expect("pinned archive version");
+    let mut target = target(SslMode::VerifyFull);
+    target.auth = Some("gcp".to_owned());
+    let (mut provider, launch) =
+        resolve_provider("gcp", &BTreeMap::new()).expect("built-in GCP provider");
+    assert_eq!(launch, Launch::Direct);
+    assert_eq!(provider.command.first().map(String::as_str), Some("gcloud"));
+    assert_eq!(provider.extract, Extract::Raw);
+    provider.command.truncate(1);
+    provider
+        .command
+        .extend(["version", "--format=json"].map(str::to_owned));
+    provider.extract = Extract::JsonField("Google Cloud SDK".to_owned());
+
+    let receipt = match fetch_selected(&provider, &target, launch).await {
+        Ok(version) => {
+            assert!(
+                version.expose_secret() == expected,
+                "GCP version differs from the pinned archive"
+            );
+            "version-matched"
+        }
+        Err(error)
+            if error.kind == DiagnosticKind::Config
+                && error.headline == "gcloud is not installed, or is not on the path" =>
+        {
+            "missing-program"
+        }
+        Err(error) => panic!(
+            "unexpected GCP version command diagnostic ({:?})",
+            error.kind
+        ),
+    };
+    std::fs::write("probe-result", receipt).expect("write the GCP version receipt");
+}

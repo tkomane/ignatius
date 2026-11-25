@@ -35,3 +35,7 @@ The built-in direct launch of `aws.exe --version` reported AWS CLI v2
 used a synthetic TLS-required target and a fresh account-free worker.
 Live RDS or Aurora IAM authentication requires its own controlled test.
 [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45705066295/job/139524815561)
+
+- [ ] T004 Verify the built-in direct Google Cloud CLI route and the packaged
+  Windows launcher with an account-free version check on the same verified
+  archive. Record the exact source, archive and runner identity.

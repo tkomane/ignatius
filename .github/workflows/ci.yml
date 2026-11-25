@@ -21,6 +21,10 @@ on:
         description: Check the account-free AWS CLI v2 native launcher on Windows x64
         type: boolean
         default: false
+      check_windows_gcloud_archive:
+        description: Check account-free Google Cloud CLI archive launch routes on Windows x64
+        type: boolean
+        default: false
   schedule:
     # Ecosystem advisories and supported PostgreSQL images can change without
     # a source commit. Recheck them weekly at 05:17 Africa/Johannesburg.
@@ -197,6 +201,11 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: ./scripts/check-windows-aws-cli.ps1
+      - name: Check pinned Google Cloud CLI x64 archive launch routes
+        if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.check_windows_gcloud_archive
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/check-windows-gcloud-archive.ps1
 
   # Run plain and TLS contracts for every supported major before merge,
   # including revisions to reviewed fixture digests for intermediate majors.
