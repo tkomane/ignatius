@@ -64,3 +64,10 @@ In a separate control, use Google's packaged Windows launcher with that same
 fixed command. Compare the version with the archive pin and record both
 outcomes, the archive digest, runner image and OS build.
 [Google's versioned archives and SHA-256 checksums](https://docs.cloud.google.com/sdk/docs/downloads-versioned-archives)
+
+Add a separate control within the same opt-in job after the archive hash has
+been verified. Start its bundled `python.exe` with the verified script
+path, `-S` and the fixed `version --format=json` command. Reuse the worker's
+bounded capture, isolated configuration and account-free environment. Require
+the same pinned version and retain the observed stock and vendor-launcher
+outcomes.

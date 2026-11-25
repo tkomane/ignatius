@@ -49,3 +49,16 @@ The stock direct route returned `missing-program` and the packaged
 `gcloud.cmd` version control returned `version-matched`. The full hosted
 CI run passed. A supported direct route and live Cloud SQL IAM remain open.
 [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
+
+- [x] T005 Verify the checksum-pinned Windows archive's bundled interpreter
+  with a shell-free version-only control. Bind the result to the archive,
+  exact source, runner and existing account-free worker.
+
+On 26 November 2026, the exact dispatch at `ac53497` passed all 17 CI jobs.
+The verified `594.0.1` bundled interpreter and Python entrypoint returned
+`bundled-python=version-matched` on Windows Server 2025 x64
+(`windows-2025-vs2026`, image `20261116.315.1`, OS build `10.0.26100.0`).
+The receipt also recorded `bare-gcp=missing-program` and
+`wrapper=version-matched`. Trusted package discovery and a supportable
+startup contract remain prerequisites for an automatic provider route.
+[Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45716059236/job/139562288603)

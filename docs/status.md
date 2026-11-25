@@ -4,6 +4,27 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 84 - Check the bundled Google Cloud CLI interpreter directly - 26 November 2026
+
+- **W06 / 011 T005.** The account-free dispatch at `ac53497` ran the
+  checksum-verified Google Cloud CLI `594.0.1` Windows x64 archive's
+  bundled interpreter with `-S`, its verified `lib/gcloud.py` and fixed
+  version arguments. It reported `bundled-python=version-matched` on
+  Windows Server 2025 x64, `windows-2025-vs2026` image `20261116.315.1`
+  and OS build `10.0.26100.0`. The same run observed the stock
+  `missing-program` result and the packaged wrapper's matching version.
+  [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45716059236/job/139562288603)
+  [Feature 011 tasks](../specs/011-cloud-identity/tasks.md)
+- **Verification.** PowerShell parsing and synthetic checks for the worker
+  environment, argument boundaries and version JSON passed. The exact
+  hosted dispatch passed all 17 CI jobs, including the Windows probe
+  and standard tests. The scheduled fixture-drift job skipped.
+  [Hosted CI run](https://github.com/tkomane/ignatius/actions/runs/45716059236)
+- **Provider acceptance.** The receipt covers the pinned archive's fixed
+  version command. An automatic Windows GCP route still needs trusted
+  package discovery and a supportable startup contract. Live Cloud SQL
+  IAM requires a controlled database test.
+
 ## Wave 83 - Verify Google Cloud CLI archive launch on Windows x64 - 26 November 2026
 
 - **W06 / 011 T004.** The fresh Windows Server 2025 x64 dispatch at
@@ -24,6 +45,10 @@ before trusting anything else.
   [Successful retry](https://github.com/tkomane/ignatius/actions/runs/45711578601)
 - **Provider acceptance.** A supported direct GCP launch for this Windows
   archive and controlled live Cloud SQL IAM authentication remain open.
+- **Merged at `8dce1ff`.** Hosted CI and CodeQL passed before and after merge.
+  [PR #160](https://github.com/tkomane/ignatius/pull/160)
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45715569046)
+  [Main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45715569093)
 
 ## Wave 82 - Resolve temporary tables for reviewed cell edits - 25 November 2026
 
@@ -4569,12 +4594,14 @@ These are real and none of them is hidden anywhere else:
    databases. [Provider support](support/compatibility.md#cloud-identity-providers)
 5b. **Windows CLI launch.** The account-free probes verified the Azure CLI
    x64 MSI fallback and the direct AWS CLI v2 MSI launch on hosted Windows
-   Server 2025 x64. The direct GCP launch reported a missing program on
-   the verified Google Cloud CLI archive. A supported direct route for
-   that package remains open.
+   Server 2025 x64. The stock GCP launch reported a missing program with the
+   verified archive. Its bundled interpreter passed the shell-free version
+   check. An automatic GCP route needs trusted discovery and a supportable
+   startup contract.
    [Azure launch](#wave-78---launch-the-built-in-entra-provider-through-the-windows-msi---25-november-2026)
    [AWS launch](#wave-81---verify-the-installed-windows-aws-cli-launch---25-november-2026)
    [Google Cloud CLI launch](#wave-83---verify-google-cloud-cli-archive-launch-on-windows-x64---26-november-2026)
+   [Bundled interpreter](#wave-84---check-the-bundled-google-cloud-cli-interpreter-directly---26-november-2026)
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has

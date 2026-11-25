@@ -108,9 +108,15 @@ database test. [Hosted Windows AWS launch probe](https://github.com/tkomane/igna
 On Windows Server 2025 x64 image `20261123.321.1`, the built-in `gcp`
 direct launch returned a missing-program diagnostic on Google's verified
 bundled-Python archive `594.0.1`. Its packaged `gcloud.cmd` reported
-`594.0.1` in the independent account-free version control. A supported
-direct route for this archive and live Cloud SQL IAM authentication remain
-open. [Hosted Windows Google Cloud CLI probe](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
+`594.0.1` in the independent account-free version check.
+[Hosted Windows Google Cloud CLI probe](https://github.com/tkomane/ignatius/actions/runs/45711578601/job/139549559128)
+
+On image `20261116.315.1`, the verified archive's bundled interpreter
+directly launched `lib/gcloud.py` with fixed version arguments and reported
+`594.0.1`. An automatic built-in route requires trusted package discovery
+and a supportable startup contract. Live Cloud SQL IAM requires its own
+controlled database test.
+[Hosted bundled-interpreter check](https://github.com/tkomane/ignatius/actions/runs/45716059236/job/139562288603)
 
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and
