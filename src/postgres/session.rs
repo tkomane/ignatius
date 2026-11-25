@@ -326,6 +326,26 @@ impl Session {
         crate::postgres::metadata::update_relation(&self.client, schema, relation).await
     }
 
+    /// Serialize the workbench lookup with user SQL. Read the transaction
+    /// state on failure so an open transaction that aborted is shown accurately.
+    pub(crate) async fn update_relation_for_workbench(
+        &self,
+        schema: Option<&str>,
+        relation: &str,
+    ) -> (
+        Result<crate::postgres::metadata::UpdateRelation, Diagnostic>,
+        Option<crate::query::result::TransactionState>,
+    ) {
+        let _gate = self.user_sql_gate.lock().await;
+        let result = self.update_relation(schema, relation).await;
+        let transaction = if result.is_err() {
+            Some(self.transaction_state().await)
+        } else {
+            None
+        };
+        (result, transaction)
+    }
+
     /// Reads the one catalogue snapshot used for local completion.
     pub async fn completion_catalog(
         &self,

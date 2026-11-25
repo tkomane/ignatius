@@ -16,9 +16,11 @@ unsupported shape and never returns a partial target.
 ## Relation discovery
 
 `LoadUpdateTarget` carries only a request identity and a parsed relation
-reference. The runtime reads the relation using bound PostgreSQL catalogue
-parameters. `UpdateTargetLoaded` carries only resolved relation names, object
-kind, privileges and column metadata.
+reference. The runtime reads the relation on the query session using bound
+PostgreSQL catalogue parameters. The session's `pg_temp` alias resolves to
+its physical schema. A successful `UpdateTargetLoaded` carries resolved
+relation names, object kind, privileges and column metadata. On failure it
+carries a diagnostic and the observed transaction state when available.
 
 The reducer accepts the answer only when the request, result job, source row,
 selected column and retained source SQL still match.

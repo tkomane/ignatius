@@ -583,6 +583,8 @@ pub enum Message {
         request: u64,
         /// The resolved relation, or why it could not be read.
         result: Box<Result<crate::postgres::metadata::UpdateRelation, Diagnostic>>,
+        /// The query backend's transaction state, observed after a lookup error.
+        transaction: Option<TransactionState>,
     },
     /// The saved queries were listed.
     QueriesListed(Vec<crate::queries::SavedQuery>),

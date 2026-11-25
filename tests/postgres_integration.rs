@@ -284,6 +284,43 @@ fn a_result_cell_plan_updates_the_selected_primary_key_row_only_when_executed() 
     );
 }
 
+#[test]
+fn cell_update_resolves_the_qualified_pg_temp_alias_on_the_query_session() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE cell_update_qualified_probe (id integer PRIMARY KEY, note text); \
+         INSERT INTO cell_update_qualified_probe VALUES (1, 'before')",
+        10,
+        JobId(9400),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let sql = "SELECT id, note FROM pg_temp.cell_update_qualified_probe";
+    let selected = fx.block_on(fx.session.execute(sql, 10, JobId(9401)));
+    assert_eq!(selected.status, ExecutionStatus::Succeeded, "{selected:?}");
+    let set = selected.statements[0]
+        .result_set
+        .as_ref()
+        .expect("source rows");
+    assert_eq!(set.rows[0][1], Cell::Text("before".into()));
+    let source = ignatius::query::parse_update_source(sql, &set.columns, 1)
+        .expect("qualified direct source");
+    assert_eq!(source.relation.schema.as_deref(), Some("pg_temp"));
+
+    let relation = fx
+        .block_on(
+            fx.session
+                .update_relation(source.relation.schema.as_deref(), &source.relation.relation),
+        )
+        .expect("the qualified pg_temp alias resolves on the query session");
+    assert!(relation.schema.starts_with("pg_temp_"));
+    assert_eq!(relation.relation, "cell_update_qualified_probe");
+    assert!(relation.readable && relation.writable);
+    assert_eq!(relation.columns[0].name, "id");
+    assert!(relation.columns[0].primary_key);
+}
+
 /// Reads one retained source, then resolves live metadata and plans the same
 /// conservative update the interactive reducer would, using only the public
 /// helpers. Live tests can therefore execute the exact reviewed statement.
@@ -3487,7 +3524,8 @@ fn stage_structured_edit(
             &mut model,
             Message::UpdateTargetLoaded {
                 request: *request,
-                result: Box::new(metadata)
+                result: Box::new(metadata),
+                transaction: None,
             },
         )
         .is_empty()

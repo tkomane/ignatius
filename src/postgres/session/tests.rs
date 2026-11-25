@@ -193,6 +193,40 @@ fn semantics_bindings(value: &str) -> crate::query::ParameterBindings {
 }
 
 #[tokio::test]
+async fn cell_update_metadata_errors_report_the_query_transaction_state() {
+    use crate::query::result::TransactionState;
+
+    let Some(session) = live_session(None).await else {
+        return;
+    };
+    session.client.simple_query("BEGIN").await.unwrap();
+    let (result, transaction) = session
+        .update_relation_for_workbench(Some("pg_temp"), "cell_update_absent_probe")
+        .await;
+    assert!(result.is_err(), "the temporary relation does not exist");
+    assert_eq!(transaction, Some(TransactionState::Open));
+
+    session
+        .client
+        .simple_query("SELECT 1 / 0")
+        .await
+        .unwrap_err();
+    let (result, transaction) = session
+        .update_relation_for_workbench(Some("pg_temp"), "cell_update_absent_probe")
+        .await;
+    assert!(
+        result.is_err(),
+        "the failed transaction cannot read metadata"
+    );
+    assert_eq!(transaction, Some(TransactionState::Failed));
+    session.client.simple_query("ROLLBACK").await.unwrap();
+    assert_eq!(
+        session.transaction_state().await,
+        TransactionState::Autocommit
+    );
+}
+
+#[tokio::test]
 async fn parameter_semantics_off_at_start_is_refused_before_the_first_parameterized_send() {
     let Some(session) = live_session(Some("off")).await else {
         return;

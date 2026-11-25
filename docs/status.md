@@ -4,6 +4,26 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 86 - Resolve reviewed edits on the query session - 26 November 2026
+
+- **W03 / 023 T022.** The query backend resolves reviewed edits using its own
+  search path and temporary schema. `pg_temp` resolves to its physical schema.
+  The lookup serializes with user SQL and reports the transaction state if
+  discovery fails. The object tree keeps its independent read connection.
+  [Feature 023 tasks](../specs/023-cell-update/tasks.md)
+- **Focused verification.** Eleven workbench checks passed, including stale
+  lookup rejection, the single execution effect and transaction reporting.
+  On disposable PostgreSQL 18.7, the direct `pg_temp` regression failed
+  to resolve its relation on `2ee0040` and passed with the fix. A separate
+  server-backed check confirmed open and failed transaction states on
+  lookup errors and verified explicit rollback restored autocommit.
+- **Owned macOS arm64 PTYs with PostgreSQL 18.7.** On the baseline both
+  temporary-table spellings refused discovery with separate query and tree
+  backend PIDs. Each fixed trial displayed the physical schema and complete
+  bound SQL. After confirmation the retained result showed the previous value
+  and a write counter of zero. An explicit requery showed the replacement
+  value and a trigger-maintained write count of one. Both PTYs exited zero.
+
 ## Wave 85 - Keep refresh errors on the retained query - 26 November 2026
 
 - **W02 / 024 T022.** A position-bearing F6 failure identifies the retained

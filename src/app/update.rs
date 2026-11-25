@@ -599,9 +599,11 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
-        Message::UpdateTargetLoaded { request, result } => {
-            finish_update_target(model, request, *result)
-        }
+        Message::UpdateTargetLoaded {
+            request,
+            result,
+            transaction,
+        } => finish_update_target(model, request, *result, transaction),
         Message::QueriesListed(queries) => {
             model.palette = Some(crate::app::palette::Palette::over_saved_queries(
                 queries
@@ -6991,6 +6993,7 @@ fn finish_update_target(
     model: &mut Model,
     request: u64,
     result: Result<crate::postgres::metadata::UpdateRelation, crate::diagnostics::Diagnostic>,
+    transaction: Option<crate::query::result::TransactionState>,
 ) -> Vec<Effect> {
     if model
         .update_lookup
@@ -7003,6 +7006,9 @@ fn finish_update_target(
         .update_lookup
         .take()
         .expect("checked update lookup identity");
+    if let Some(transaction) = transaction {
+        model.transaction = transaction;
+    }
     if update_lookup_has_newer_owner(model) {
         model.cell_update_notice = Some(
             "Cell update metadata was discarded because another input or review is active. Finish or cancel it, then regenerate the cell update; nothing was sent."

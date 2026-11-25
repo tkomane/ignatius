@@ -88,6 +88,13 @@ temporary schema, preserves the row through review, and changes exactly one
 row on explicit execution.
 [Wave 82](../../docs/status.md#wave-82---resolve-temporary-tables-for-reviewed-cell-edits---25-november-2026)
 
+- [x] T022 Resolve reviewed cell-edit targets on the query session. Prove the
+  unqualified and `pg_temp` forms in the workbench with an independent
+  object-tree backend and verify the physical schema, one confirmed update,
+  retained snapshot and deliberate readback.
+
+[macOS PTY, PostgreSQL 18.7 and focused evidence](../../docs/status.md#wave-86---resolve-reviewed-edits-on-the-query-session---26-november-2026)
+
 ## Dependencies and execution order
 
 - T001 precedes all implementation.
