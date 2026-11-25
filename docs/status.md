@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 81 - Verify the installed Windows AWS CLI launch - 25 November 2026
+
+- **W06 / 011 T003.** The opt-in Windows Server 2025 x64 dispatch at
+  `732a882` used the built-in AWS provider's direct launch and raw output
+  with `aws.exe --version`. AWS CLI `2.40.3` matched installed MSI
+  `2.40.3.0` on `windows-2025-vs2026` image `20261116.315.1`
+  and OS build `10.0.26100.0`. The probe used a fresh account-free worker
+  and a synthetic TLS-required target.
+  [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45705066295/job/139524815561)
+  [Feature 011 tasks](../specs/011-cloud-identity/tasks.md)
+- **Verification.** All 24 local workflow contracts, workflow lint and
+  PowerShell parsing passed. The exact hosted dispatch passed all 17 CI
+  jobs and the opt-in Windows step. The scheduled fixture-drift job skipped.
+  [Hosted CI run](https://github.com/tkomane/ignatius/actions/runs/45705066295)
+- **Remaining provider evidence.** The Google Cloud CLI Windows launch and
+  controlled live Entra, AWS and GCP authentication remain open.
+
 ## Wave 80 - Retire watch state on profile switch - 25 November 2026
 
 - **W02 / 050 T009.** Accepting a connection switch clears the active
@@ -4496,37 +4513,15 @@ These are real and none of them is hidden anywhere else:
 5. **No OS credential store, by decision.** ADR-0011 is rejected. The routes are
    a password file, the environment, the connection string and the prompt, and
    `.pgpass` is shared with `psql`.
-5a. **Cloud identity is implemented, and no cloud has been connected to.** The
-   mechanism is proven against a real PostgreSQL server; `entra`, `aws` and
-   `gcp` are transcriptions of vendor documentation checked on 2026-08-16 and
-   nobody has run any of them against that cloud's own database. Treat the
-   built-in commands as unverified until a dated row says otherwise.
-5b. **The cloud provider tests are Unix-only.** They name real programs by
-   absolute path. The feature is not Unix-only; the coverage is.
-5c. **`--auth entra` is suspected not to work on Windows-native**, and this is
-   the first thing to check there. The Azure CLI installs as `az.cmd`;
-   `CreateProcessW` does no `PATHEXT` appending and Rust's `Command` appends
-   only `.exe` when searching the path, so `Command::new("az")` will probably
-   report the program as missing on a machine that has it - a legible message
-   that is false, which is the worst kind. `gcloud` has the same shape; `aws`
-   ships a real `.exe` and should be fine. Confirmed from the Rust
-   documentation on 2026-08-16, not yet confirmed against a Windows machine.
-
-   Not fixed tonight on purpose: the fix is Windows-only, untested, and
-   collides with FR-1108's "no shell is involved at any point", which is a
-   security property rather than a style rule. A workaround exists today and
-   needs no release, because providers are data:
-
-   ```toml
-   [auth.providers.entra]
-   command = ["cmd", "/C", "az", "account", "get-access-token",
-              "--resource-type", "oss-rdbms", "--output", "json"]
-   json-field = "accessToken"
-   ```
-
-   If Windows confirms it, the fix is a `cfg(windows)` built-in plus an explicit
-   carve-out in the spec - safe for `entra` and `gcp` in particular because
-   neither command carries a substituted argument.
+5a. **Live cloud authentication.** A configured provider exercised the
+   token-over-TLS mechanism with disposable PostgreSQL. Live `entra`,
+   `aws` and `gcp` acceptance requires controlled vendor accounts and
+   databases. [Provider support](support/compatibility.md#cloud-identity-providers)
+5b. **Windows CLI launch.** The account-free probes verified the Azure CLI
+   x64 MSI fallback and the direct AWS CLI v2 MSI launch on hosted Windows
+   Server 2025 x64. W06 still needs Google Cloud CLI Windows package evidence.
+   [Azure launch](#wave-78---launch-the-built-in-entra-provider-through-the-windows-msi---25-november-2026)
+   [AWS launch](#wave-81---verify-the-installed-windows-aws-cli-launch---25-november-2026)
 6. **No screen reader has been used with this.** `--plain` is built and proven
    to emit no escape sequences under `TERM=dumb`, which is the mechanical part.
    Whether it is pleasant with VoiceOver or NVDA is unknown, because neither has

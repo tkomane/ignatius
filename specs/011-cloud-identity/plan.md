@@ -36,3 +36,16 @@ native success, spawn refusal, absent and invalid package layout, configured
 overrides, and a started child that fails. Run the opt-in hosted version probe
 through the runtime's fallback policy on the registered x64 MSI. Record both
 the selected route and its installed version match on the exact source.
+
+## Windows x64 direct AWS CLI launch
+
+Add the default-off `check_windows_aws_cli` dispatch to the existing Windows
+job. Check the native AWS CLI v2 MSI executable and installation record. Keep
+the built-in provider's program and raw extraction. Replace its argument tail
+with `--version` and supply the synthetic TLS-required target. Launch the test
+in a fresh allowlisted process environment with a private profile and working
+directory, metadata disabled and the installed executable directory on PATH.
+
+Check the exact workflow step and match the CLI version to the MSI version.
+Record the source, runner image, architecture and direct launch result.
+The regular PR and main CI and CodeQL checks remain the integration gates.
