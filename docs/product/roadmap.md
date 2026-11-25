@@ -256,7 +256,7 @@ M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
   M18 delivered running benchmark cancellation in PR #139.
 
 M18 (`064-tactile-craft-motion-and-devsecops`) is delivered in source as of
-2026-11-24 (#138, #139, #140, #141, #142, and Wave 2 showcase PR):
+2026-11-24 (#138-#143):
 
 - [064 Tactile Craft, Truthful Motion, and DevSecOps Hardening](../../specs/064-tactile-craft-motion-and-devsecops/spec.md)
   delivers the reproducible `cargo xtask security` local gate and workflow

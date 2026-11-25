@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/064-showcase-and-editorial-readme` (integration/showcase) following PRs #138-#142
 **Created**: 2026-11-24
-**Status**: Delivered in source (#138, #139, #140, #141, #142, and Wave 2 PR 5)
+**Status**: Delivered in source (#138-#143)
 **Milestone**: M18 - Tactile Craft, Truthful Motion & DevSecOps
 
 ## Problem Statement
