@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 80 - Retire watch state on profile switch - 25 November 2026
+
+- **W02 / 050 T009.** Accepting a connection switch clears the active
+  `\watch` and the previous result's SQL with the rest of that session's
+  state. The next timer has no old work to run. Bare `\watch` can use SQL
+  once an execution completes on the current connection.
+  [Feature 050 tasks](../specs/050-psql-metacommands-and-watch-mode/tasks.md)
+- **Focused checks.** On `e8fd6ff`, a synthetic old timer and a fresh bare
+  watch each emitted the previous profile's SQL. That run contacted no
+  database. All three regressions passed with the fix, including the busy
+  picker refusal that preserves the current watch.
+- **Owned PTY on macOS arm64.** Two read-only profiles pointed to different
+  databases in the disposable PostgreSQL 18.7 local fixture. PostgreSQL
+  activity confirmed two runs on the first profile and no old runs over
+  the observation periods on the second. The workbench refused bare
+  `\watch` before a query on the new profile. A new query then ran on that
+  profile and bare watch repeated that SQL. `Ctrl+Q` exited zero.
+
 ## Wave 79 - Recover cleared file-backed drafts - 25 November 2026
 
 - **W10 / 043 T012.** An empty or whitespace-only file-backed draft now

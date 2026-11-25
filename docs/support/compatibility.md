@@ -224,6 +224,8 @@ Deliberate differences:
   `\conninfo`, `\timing`, `\x`, `\watch`, `\format`, `\?`) cover daily
   inspection and watch loops; full `psql` scripting parity (`\if`, `\gset`,
   arbitrary shell `\!`) remains intentionally out of scope.
+  Switching connections stops a running watch. After a switch, bare `\watch`
+  needs a completed query from the current connection.
 
 ## SQL buffer formatting
 

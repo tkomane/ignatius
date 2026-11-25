@@ -37,6 +37,10 @@ and executes the buffer. Ignatius runs the SQL once immediately and schedules a
 bounded watch loop every 5 seconds (up to `MAX_WATCH_ITERATIONS`), stopping
 when the user runs `\watch stop`, `\watch off`, or cancels execution.
 
+A watch belongs to the connection that supplied its SQL. An accepted profile
+switch stops the old watch. After the switch, standalone `\watch` requires
+SQL from a completed execution on the current connection.
+
 ### Scenario 3: Refusing shell escapes and unsafe intervals truthfully
 
 An operator enters `\! rm -rf /` or `\watch 0`. Ignatius refuses the input
@@ -78,6 +82,11 @@ it was refused and pointing to `\?`, `ignatius query -f`, or `ignatius import`.
 - FR-5010: Refuse nonsensical trailing tokens, invalid boolean arguments,
   unclosed double quotes, and invalid `\watch` intervals (`0`, negative,
   overflow, non-integer) with `DiagnosticKind::Usage`.
+
+- FR-5011: An accepted connection switch MUST retire the watch timer and the
+  previous result's reusable SQL together. A pending tick MUST emit no work
+  from the retired watch. Opening or dismissing the picker leaves the watch
+  available on the current connection.
 
 ## 4. Non-Functional Requirements
 
