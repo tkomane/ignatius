@@ -83,3 +83,19 @@ another retained draft after it. Cover omitted or out-of-range active
 positions and a retained empty file-backed tab. Exercise the ordinary
 interactive restore action with synthetic content and run the local verifier,
 hosted PR checks and post-merge CI and CodeQL.
+
+## W10 recover a cleared file-backed draft
+
+Use the same file-association or nonblank-text decision when the checkpoint
+looks for restorable state, startup decides whether to offer recovery, status
+counts recoverable buffers and restore selects tabs. Keep the lone untouched
+starter rule and the existing checkpoint schedule and version 1 schema.
+The SQL export keeps its existing treatment of blank text. On an empty SQL
+export, its status guides the operator to the lossless JSON representation.
+
+Clear a preloaded synthetic file-backed tab in an owned PTY, wait for the
+normal checkpoint and terminate only that process. Verify the next startup
+offers recovery, the restored editor's path and dirty state match the
+checkpoint, and the source file still holds its original bytes. Confirm the
+headless count and lossless export with the real binary. Run the local gate
+and the hosted PR and post-merge gates.

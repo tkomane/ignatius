@@ -21,3 +21,13 @@ Both selection regressions failed on the base implementation. The fixed build
 passed 27 focused unit checks and eight recovery binary contracts. An owned
 macOS PTY confirmed `Ctrl+K r` reopened draft A from `[empty, A, B]` and quit
 cleanly. [Wave 73](../../docs/status.md#wave-73---restore-the-active-editor-draft---25-november-2026)
+
+- [x] T012 Preserve cleared file-backed drafts across the checkpoint, startup
+  decision, status and restore paths. Prove the saved file remains intact and
+  an empty SQL export points to the lossless JSON route.
+
+The checkpoint and status regressions failed on the base. The fix passed
+1,896 library tests and nine recovery binary contracts. An owned macOS arm64
+PTY confirmed startup offered the cleared draft, `Ctrl+K r` restored its
+empty text, path and dirty marker, and the original file was intact after a
+clean quit. [Wave 79](../../docs/status.md#wave-79---recover-cleared-file-backed-drafts---25-november-2026)

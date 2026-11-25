@@ -6221,7 +6221,7 @@ fn run_recovery(
                         .map_err(io_diagnostic)?;
                         writeln!(
                             out,
-                            "{} buffer(s), {} unsaved, {} truncated.",
+                            "{} buffer(s), {} unsaved scratch, {} truncated.",
                             journal.recoverable_buffer_count(),
                             journal.unsaved_buffer_count(),
                             journal.truncated_buffer_count()
@@ -6267,10 +6267,12 @@ fn run_recovery(
                     writeln!(out, "{json}").map_err(io_diagnostic)?;
                 }
                 CliRecoveryRestoreFormat::Sql => {
+                    let mut emitted = false;
                     for (index, buffer) in journal.buffers.iter().enumerate() {
                         if buffer.sql.trim().is_empty() {
                             continue;
                         }
+                        emitted = true;
                         let location = buffer
                             .file_path
                             .as_ref()
@@ -6293,16 +6295,25 @@ fn run_recovery(
                         }
                         writeln!(out, "{}", buffer.sql).map_err(io_diagnostic)?;
                     }
-                    writeln!(
-                        err,
-                        "Recovered SQL was written to standard output. The journal is still on disk;"
-                    )
-                    .map_err(io_diagnostic)?;
-                    writeln!(
-                        err,
-                        "run `ignatius recovery discard` after saving what you need."
-                    )
-                    .map_err(io_diagnostic)?;
+                    if emitted {
+                        writeln!(
+                            err,
+                            "Recovered SQL was written to standard output. The journal is still on disk;"
+                        )
+                        .map_err(io_diagnostic)?;
+                        writeln!(
+                            err,
+                            "run `ignatius recovery discard` after saving what you need."
+                        )
+                        .map_err(io_diagnostic)?;
+                    } else {
+                        writeln!(
+                            err,
+                            "No SQL buffers were emitted. Use `ignatius recovery restore --format json` to preserve blank file-backed tabs."
+                        )
+                        .map_err(io_diagnostic)?;
+                        writeln!(err, "The journal is still on disk.").map_err(io_diagnostic)?;
+                    }
                 }
             }
         }

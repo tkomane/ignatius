@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Crash recovery retains a file-backed draft after its text was
+  cleared, including its path and modified marker.
 - Fixed: The Windows x64 built-in Entra provider can launch the standard
   Azure CLI MSI when the native `az` executable is missing and the installed
   `wbin` directory is on PATH.

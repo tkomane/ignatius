@@ -31,6 +31,13 @@ pub const MAX_RECOVERED_BUFFER_BYTES: usize = 1024 * 1024;
 /// Largest journal accepted from disk. A larger file is refused, not parsed.
 pub const MAX_JOURNAL_BYTES: u64 = 24 * 1024 * 1024;
 
+/// Whether a captured buffer carries state worth retaining across a crash.
+/// File-backed tabs preserve their exact editor contents, including empty and
+/// whitespace-only buffers; scratch tabs need nonblank SQL to qualify.
+fn has_recovery_content(file_path: Option<&Path>, sql: &str) -> bool {
+    file_path.is_some() || !sql.trim().is_empty()
+}
+
 /// State of an individual recovered SQL editor buffer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveredBuffer {
@@ -146,33 +153,26 @@ impl RecoveryJournal {
         )
     }
 
-    /// Returns true if this journal represents an unrecovered crash session with unsaved content.
+    /// Returns true if startup should offer to restore this journal.
     ///
     /// A lone untouched starter buffer is not a crash worth interrupting the
     /// operator for. Multiple open tabs, a loaded file, or an edited buffer
     /// are.
     #[must_use]
     pub fn has_recoverable_content(&self) -> bool {
-        if self.clean_exit {
-            return false;
-        }
-        let has_content = self.buffers.iter().any(|b| !b.sql.trim().is_empty());
-        if !has_content {
-            return false;
-        }
-        self.buffers.len() > 1
-            || self
-                .buffers
-                .iter()
-                .any(|b| !b.sql.trim().is_empty() && (b.dirty || b.file_path.is_some()))
+        !self.clean_exit
+            && self.buffers.iter().any(|b| {
+                has_recovery_content(b.file_path.as_deref(), &b.sql)
+                    && (self.buffers.len() > 1 || b.dirty || b.file_path.is_some())
+            })
     }
 
-    /// Number of buffers that held content at capture time.
+    /// Number of buffers retained if this journal is restored.
     #[must_use]
     pub fn recoverable_buffer_count(&self) -> usize {
         self.buffers
             .iter()
-            .filter(|b| !b.sql.trim().is_empty())
+            .filter(|b| has_recovery_content(b.file_path.as_deref(), &b.sql))
             .count()
     }
 
@@ -200,7 +200,7 @@ impl RecoveryJournal {
             .buffers
             .iter()
             .enumerate()
-            .filter(|(_, b)| !b.sql.trim().is_empty() || b.file_path.is_some())
+            .filter(|(_, b)| has_recovery_content(b.file_path.as_deref(), &b.sql))
             .collect();
 
         if valid_buffers.is_empty() {

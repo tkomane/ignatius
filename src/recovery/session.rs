@@ -4,7 +4,7 @@
 //! and the decision to write, so the interactive runtime only has to say "look
 //! at the current buffers" and "the session is ending".
 
-use super::{RecoveryJournal, content_signature, structure_signature};
+use super::{RecoveryJournal, content_signature, has_recovery_content, structure_signature};
 use crate::buffer::BufferManager;
 use crate::diagnostics::Diagnostic;
 use std::path::{Path, PathBuf};
@@ -121,10 +121,9 @@ impl RecoverySession {
             return Ok(false);
         }
         let has_content = self.dir.join(super::RECOVERY_FILE_NAME).exists()
-            || buffers
-                .buffers
-                .iter()
-                .any(|buffer| !buffer.editor.text().trim().is_empty());
+            || buffers.buffers.iter().any(|buffer| {
+                has_recovery_content(buffer.file_path.as_deref(), buffer.editor.text())
+            });
         if !has_content {
             return Ok(false);
         }
