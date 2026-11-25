@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 196" width="760" height="169" role="img" aria-labelledby="ignatius-light-title ignatius-light-desc">
-  <title id="ignatius-light-title">Ignatius, a quiet instrument for PostgreSQL (light)</title>
-  <desc id="ignatius-light-desc">Ignatius studio wordmark on archival paper: a quiet instrument for PostgreSQL. Local-first engine, adaptive palettes, 56 chorded actions, safe transactions. PostgreSQL 14 to 18, no telemetry.</desc>
+  <title id="ignatius-light-title">Ignatius, the PostgreSQL workbench for your terminal (light)</title>
+  <desc id="ignatius-light-desc">Ignatius studio wordmark on archival paper: the PostgreSQL workbench for your terminal. 16 split SQL tabs, EXPLAIN and A/B benchmarks, 56 chorded tools, 7 adaptive themes. PostgreSQL 14 to 18, no telemetry.</desc>
   <defs>
     <linearGradient id="card-bg-light" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#F9F5EC" />
@@ -85,7 +85,7 @@
     <text x="2" y="105"
           font-family="'New York', 'Iowan Old Style', Baskerville, Georgia, 'Times New Roman', serif"
           font-style="italic" font-size="16" letter-spacing="0.2" fill="#4B443C">
-      A quiet instrument for PostgreSQL.
+      The PostgreSQL workbench for your terminal.
     </text>
   </g>
 
@@ -106,32 +106,32 @@
       <circle cx="12" cy="12.5" r="2.8" fill="#18593B" />
       <text x="21" y="15.6"
             font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
-            font-size="8.6" letter-spacing="0.45" fill="#1E1B18">
-        LOCAL-FIRST ENGINE
+            font-size="8.4" letter-spacing="0.35" fill="#1E1B18">
+        16 SPLIT SQL TABS
       </text>
 
       <rect x="151" y="0" width="143" height="25" rx="6" fill="#FFFFFF" fill-opacity="0.78" stroke="#C5BBA9" stroke-width="1" />
       <circle cx="163" cy="12.5" r="2.8" fill="#9A3115" />
       <text x="172" y="15.6"
             font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
-            font-size="8.6" letter-spacing="0.45" fill="#1E1B18">
-        ADAPTIVE PALETTES
+            font-size="8.4" letter-spacing="0.35" fill="#1E1B18">
+        EXPLAIN + A/B BENCH
       </text>
 
       <rect x="0" y="31" width="143" height="25" rx="6" fill="#FFFFFF" fill-opacity="0.78" stroke="#C5BBA9" stroke-width="1" />
       <circle cx="12" cy="43.5" r="2.8" fill="#714304" />
       <text x="21" y="46.6"
             font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
-            font-size="8.6" letter-spacing="0.45" fill="#1E1B18">
-        56 CHORDED ACTIONS
+            font-size="8.4" letter-spacing="0.35" fill="#1E1B18">
+        56 CHORDED TOOLS
       </text>
 
       <rect x="151" y="31" width="143" height="25" rx="6" fill="#FFFFFF" fill-opacity="0.78" stroke="#C5BBA9" stroke-width="1" />
       <circle cx="163" cy="43.5" r="2.8" fill="#144F63" />
       <text x="172" y="46.6"
             font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
-            font-size="8.6" letter-spacing="0.45" fill="#1E1B18">
-        SAFE TRANSACTIONS
+            font-size="8.4" letter-spacing="0.35" fill="#1E1B18">
+        7 ADAPTIVE THEMES
       </text>
     </g>
 

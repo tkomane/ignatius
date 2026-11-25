@@ -1,8 +1,62 @@
 # Status
 
-**Updated: 2026-11-24.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-25.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 70 - Product identity, kinetic motion, live theme previews and showcase - 25 November 2026
+
+Feature 065 (`065-terminal-workbench-identity-and-kinetic-ux`, milestone M19)
+reframed Ignatius's product identity around a fast, full-powered terminal
+PostgreSQL workbench and added kinetic transitions, live palette theme previews,
+floating modal shadows, and an expanded animated showcase across PRs #144-#146
+plus Wave 2 PR 4:
+
+- **PR #144, reframed product identity and gleaming boot reveal.** Updated
+  `TAGLINE` and `IDENTITY_LINE` (`"the PostgreSQL workbench for your terminal"`)
+  in `src/branding.rs`, CLI `--help`, `docs/product/vision.md`, and
+  `docs/product/personas-and-jobs.md`; added the 2-cell gleaming `Token::Focus`
+  crest (`is_gleam_col`) and progressive tagline reveal in
+  `src/ui/widgets/banner.rs`.
+- **PR #145, kinetic transitions, luminous curtain seam, and workbench polish.**
+  Added `FocusPulse` (`240 ms`), `TabGlide` (`260 ms`), and `PlanSweep`
+  (`420 ms`) `OutCubic` transitions in `src/ui/motion.rs` and `src/app/update.rs`,
+  a luminous `Token::Focus` truecolour leading seam on `ThemeCurtain` in
+  `src/ui/layout.rs`, an Objects tree overflow hairline scrollbar and
+  highlighted filter matches (`src/ui/widgets/objects.rs`), a 5-cell phosphor
+  heartbeat tail, Results row-gutter settle shimmer, and right-aligned
+  `row/total · col_name` coordinate readout (`src/ui/widgets/results.rs`), and
+  Editor line-count titles with `[modified]`/`[focused]` badges
+  (`src/ui/widgets/editor.rs`).
+- **PR #146, live palette theme previews, floating modal shadows, and Plan KPI
+  strip.** Added `PaletteCommand::SelectTheme` and live mini-workbench
+  previews (`render_theme_preview`) for `Theme: ...` entries in `Ctrl+P`
+  (`src/app/palette.rs`, `src/ui/widgets/palette.rs`), 1-cell architectural
+  drop shadows (`paint_overlay_shadow`) clamped inside body bounds for floating
+  overlays (`src/ui/layout.rs`), and a top summary KPI strip (`Nodes`,
+  `Planning`, `Execution`, `Hotspot`) in `src/ui/widgets/overlays.rs`.
+- **Wave 2 showcase, 6 animated APNGs, hero SVGs, and README rewrite (PR 4).**
+  Updated `src/ui/acceptance/tests.rs` so the Objects tree overflows with its
+  hairline scrollbar and verified assertions for Editor line counts, Results
+  coordinate cues, and Plan KPI strip; added `motion_format_and_plan()` and
+  `motion_palette_themes()`; re-rendered and visually inspected all 14 2x
+  showcase stills (`docs/assets/screenshots/*.png`) and all 6 looping APNGs +
+  `-still.png` posters (`boot-reveal`, `run-and-settle`, `cancel-honestly`,
+  `theme-curtain`, `format-and-plan`, `palette-themes`); updated
+  `docs/assets/banner-dark.svg` and `banner-light.svg` (`The PostgreSQL
+  workbench for your terminal.` + 2x2 capability pills, Quick Look inspected);
+  rewrote `README.md` with plain, punchy workbench framing and all 6 motion
+  `<picture>` blocks; and added Feature 065 `spec.md`, `plan.md`, `tasks.md`,
+  `CHANGELOG.md`, and `docs/product/roadmap.md` records.
+- **Evidence boundaries and open gates.** Local verification runs on macOS
+  arm64 against disposable PostgreSQL 18.7 plain (`127.0.0.1:55432`) and
+  verified-TLS (`localhost:55433`) fixtures, with Unix socket tests skipped
+  when `IGNATIUS_TEST_PG_SOCKET_URI` is unset, `cargo-deny` skipped if absent
+  from `PATH`, and `gitleaks` Docker container skips noted in linked worktrees
+  whose `.git` directory lives outside `/repo`. Hosted CI covers Linux, macOS,
+  Windows, MSRV `1.90.0`, and PostgreSQL 14-18. Open Wave 64 human Warp,
+  VoiceOver/NVDA, Windows 11, Linux desktop, live cloud-provider, and ADR-0008
+  owner release signing/provenance/ruleset gates remain unchanged and open.
 
 ## Wave 69 - Tactile craft, cancellable benchmarks, DevSecOps gate and showcase - 24 November 2026
 

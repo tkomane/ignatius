@@ -1510,12 +1510,31 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
         environment: Environment::Production,
     }));
 
+    let extra_tables = [
+        ("audit_log", Some("append-only trail")),
+        ("billing_cycles", None),
+        ("carts", None),
+        ("discounts", None),
+        ("invoices", Some("settled ledger")),
+        ("line_items", None),
+        ("payments", None),
+        ("payouts", None),
+        ("refunds", None),
+        ("sessions", None),
+        ("shipments", None),
+        ("subscriptions", None),
+        ("tax_rates", None),
+        ("transactions", None),
+        ("user_roles", None),
+        ("warehouses", None),
+        ("webhooks", None),
+    ];
     let schemas = vec![
         SchemaSummary {
             name: "public".into(),
             usable: true,
             counts: BTreeMap::from([
-                (ObjectKind::Table, 4),
+                (ObjectKind::Table, 4 + extra_tables.len() as i64),
                 (ObjectKind::View, 1),
                 (ObjectKind::Function, 2),
             ]),
@@ -1540,15 +1559,19 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
         readable: true,
         detail: comment.map(str::to_owned),
     };
+    let mut table_summaries = vec![
+        table("customers", None),
+        table("orders", Some("sales ledger")),
+        table("rendering_cases", None),
+        table("type_coverage", None),
+    ];
+    for (name, comment) in extra_tables {
+        table_summaries.push(table(name, comment));
+    }
     model.tree.apply(
         req,
         &path,
-        crate::app::tree::MetadataPayload::Objects(vec![
-            table("customers", None),
-            table("orders", Some("sales ledger")),
-            table("rendering_cases", None),
-            table("type_coverage", None),
-        ]),
+        crate::app::tree::MetadataPayload::Objects(table_summaries),
     );
 
     // Expand the orders table ([0, 0, 1]): its columns and its index.
@@ -1955,6 +1978,87 @@ fn showcase_runbook_scene(writer: Option<&mut impl Write>) {
     );
 }
 
+fn showcase_plan_document() -> PlanDocument {
+    let plan_json = r#"[
+  {
+    "Plan": {
+      "Node Type": "Merge Join",
+      "Join Type": "Inner",
+      "Merge Cond": "(o.customer = c.name)",
+      "Startup Cost": 42.1,
+      "Total Cost": 68.4,
+      "Plan Rows": 420,
+      "Plan Width": 64,
+      "Actual Startup Time": 9.8,
+      "Actual Total Time": 12.4,
+      "Actual Rows": 420,
+      "Actual Loops": 1,
+      "Plans": [
+        {
+          "Node Type": "Sort",
+          "Sort Key": ["o.customer"],
+          "Startup Cost": 28.4,
+          "Total Cost": 29.45,
+          "Plan Rows": 420,
+          "Plan Width": 48,
+          "Actual Startup Time": 6.1,
+          "Actual Total Time": 8.2,
+          "Actual Rows": 420,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              "Alias": "o",
+              "Startup Cost": 0.0,
+              "Total Cost": 25.5,
+              "Plan Rows": 10,
+              "Plan Width": 48,
+              "Actual Startup Time": 0.01,
+              "Actual Total Time": 1.4,
+              "Actual Rows": 420,
+              "Actual Loops": 1,
+              "Filter": "(status = 'paid'::text)",
+              "Rows Removed by Filter": 180
+            }
+          ]
+        },
+        {
+          "Node Type": "Sort",
+          "Sort Key": ["c.name"],
+          "Startup Cost": 13.7,
+          "Total Cost": 13.9,
+          "Plan Rows": 40,
+          "Plan Width": 32,
+          "Actual Startup Time": 2.6,
+          "Actual Total Time": 3.1,
+          "Actual Rows": 40,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "customers",
+              "Alias": "c",
+              "Startup Cost": 0.0,
+              "Total Cost": 12.4,
+              "Plan Rows": 40,
+              "Plan Width": 32,
+              "Actual Startup Time": 0.01,
+              "Actual Total Time": 2.3,
+              "Actual Rows": 40,
+              "Actual Loops": 1
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.38,
+    "Execution Time": 12.9
+  }
+]"#;
+    PlanDocument::parse(plan_json, true).expect("valid plan")
+}
+
 #[test]
 fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     use crate::app::palette::{Palette, PaletteCommand, PaletteEntry};
@@ -1990,6 +2094,18 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     assert!(
         text.contains("sorted by amount_cents descending"),
         "overview contains sorted by amount_cents descending"
+    );
+    assert!(
+        text.contains("5 lines") && text.contains("[focused]"),
+        "overview editor title shows line count and focused badge:\n{text}"
+    );
+    assert!(
+        text.contains("1/14 \u{00b7} amount_cents"),
+        "overview results toolbar shows coordinate cue:\n{text}"
+    );
+    assert!(
+        text.contains('\u{2503}'),
+        "overview renders hairline scrollbar thumb:\n{text}"
     );
     if let Some(ref mut w) = writer {
         capture_showcase_scene(
@@ -2289,84 +2405,7 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     );
     model.editor.set_cursor(50);
     model.focus = Focus::Results;
-    let plan_json = r#"[
-  {
-    "Plan": {
-      "Node Type": "Merge Join",
-      "Join Type": "Inner",
-      "Merge Cond": "(o.customer = c.name)",
-      "Startup Cost": 42.1,
-      "Total Cost": 68.4,
-      "Plan Rows": 420,
-      "Plan Width": 64,
-      "Actual Startup Time": 9.8,
-      "Actual Total Time": 12.4,
-      "Actual Rows": 420,
-      "Actual Loops": 1,
-      "Plans": [
-        {
-          "Node Type": "Sort",
-          "Sort Key": ["o.customer"],
-          "Startup Cost": 28.4,
-          "Total Cost": 29.45,
-          "Plan Rows": 420,
-          "Plan Width": 48,
-          "Actual Startup Time": 6.1,
-          "Actual Total Time": 8.2,
-          "Actual Rows": 420,
-          "Actual Loops": 1,
-          "Plans": [
-            {
-              "Node Type": "Seq Scan",
-              "Relation Name": "orders",
-              "Alias": "o",
-              "Startup Cost": 0.0,
-              "Total Cost": 25.5,
-              "Plan Rows": 10,
-              "Plan Width": 48,
-              "Actual Startup Time": 0.01,
-              "Actual Total Time": 1.4,
-              "Actual Rows": 420,
-              "Actual Loops": 1,
-              "Filter": "(status = 'paid'::text)",
-              "Rows Removed by Filter": 180
-            }
-          ]
-        },
-        {
-          "Node Type": "Sort",
-          "Sort Key": ["c.name"],
-          "Startup Cost": 13.7,
-          "Total Cost": 13.9,
-          "Plan Rows": 40,
-          "Plan Width": 32,
-          "Actual Startup Time": 2.6,
-          "Actual Total Time": 3.1,
-          "Actual Rows": 40,
-          "Actual Loops": 1,
-          "Plans": [
-            {
-              "Node Type": "Seq Scan",
-              "Relation Name": "customers",
-              "Alias": "c",
-              "Startup Cost": 0.0,
-              "Total Cost": 12.4,
-              "Plan Rows": 40,
-              "Plan Width": 32,
-              "Actual Startup Time": 0.01,
-              "Actual Total Time": 2.3,
-              "Actual Rows": 40,
-              "Actual Loops": 1
-            }
-          ]
-        }
-      ]
-    },
-    "Planning Time": 0.38,
-    "Execution Time": 12.9
-  }
-]"#;
-    let doc = PlanDocument::parse(plan_json, true).expect("valid plan");
+    let doc = showcase_plan_document();
     model.plan.ready(doc);
     model.plan.selected_path = vec![0, 0];
     let buf = render_showcase(&model);
@@ -2374,6 +2413,13 @@ fn workbench_showcase_scenes_preserve_elevated_chrome_and_overlays() {
     assert!(
         text.contains("EXPLAIN ANALYZE"),
         "plan explorer contains EXPLAIN ANALYZE"
+    );
+    assert!(
+        text.contains("Nodes")
+            && text.contains("Planning")
+            && text.contains("Execution")
+            && text.contains("Hotspot"),
+        "plan explorer shows KPI strip:\n{text}"
     );
     assert!(
         text.contains("Attention: Sort (measured time)"),
@@ -3209,6 +3255,243 @@ fn motion_boot_reveal() -> MotionSequence {
     sequence
 }
 
+/// Format ripple down the editor statement gutter, followed by EXPLAIN ANALYZE plan micro-bar sweep.
+fn motion_format_and_plan() -> MotionSequence {
+    let mut sequence = MotionSequence::new(
+        "format-and-plan",
+        "atelier",
+        "Format & plan",
+        "Formatting ripples down the editor statement gutter, then EXPLAIN ANALYZE sweeps plan micro-bars",
+    );
+    let mut model = showcase_development_model(ThemeChoice::Atelier);
+    enable_showcase_tabs(&mut model);
+    model.focus = Focus::Editor;
+    model.motion.enable();
+    let unformatted = [
+        "-- Paid orders with customer region",
+        "select o.id, c.name, c.region, o.amount_cents from public.orders o join public.customers c on c.name = o.customer where o.status in ('paid', 'pending') order by o.amount_cents desc;",
+    ]
+    .join("\n");
+    model.editor.set_text(&unformatted);
+    model.editor.set_cursor(unformatted.len());
+    sequence.push(&model, 550);
+
+    // 1. Format the SQL buffer via the reducer and capture the gutter FormatRipple.
+    assert!(update(&mut model, Message::Action(Action::FormatBuffer)).is_empty());
+    assert!(
+        model.motion().format_ripple().is_some(),
+        "formatting changed SQL starts FormatRipple"
+    );
+    let mut ripple_frames = 0;
+    while model.motion().is_active() {
+        sequence.push(&model, 33);
+        ripple_frames += 1;
+        update(
+            &mut model,
+            Message::MotionFrame {
+                elapsed: crate::ui::motion::FRAME_INTERVAL,
+            },
+        );
+    }
+    assert!(
+        ripple_frames >= 8,
+        "format ripple has {ripple_frames} frames"
+    );
+    let formatted_buf = sequence.push(&model, 500);
+    let formatted_text = buffer_to_string(&formatted_buf);
+    assert!(
+        formatted_text.contains("select o.id")
+            && formatted_text.contains("Formatted SQL: 2 lines to 10"),
+        "formatted SQL appears in editor:\n{formatted_text}"
+    );
+
+    // 2. Load an EXPLAIN ANALYZE plan through the reducer and capture PlanSweep.
+    let _ = update(&mut model, Message::Action(Action::AnalyzePlan));
+    assert!(model.pending_plan.is_some());
+    // Type the database name to confirm analyzed plan execution on the dev target.
+    for ch in "ignatius_demo".chars() {
+        update(&mut model, Message::Action(Action::Insert(ch)));
+    }
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    let [Effect::Explain { job, analyze, .. }] = effects.as_slice() else {
+        panic!("expected Effect::Explain, got {effects:?}");
+    };
+    let (job, analyzed) = (*job, *analyze);
+    update(
+        &mut model,
+        Message::PlanFinished(Box::new(crate::app::PlanExecution {
+            job,
+            analyzed,
+            elapsed: Duration::from_millis(13),
+            transaction: TransactionState::Autocommit,
+            result: Ok(showcase_plan_document()),
+            connection_lost: false,
+            notice_report: NoticeReport::default(),
+        })),
+    );
+    model.plan.selected_path = vec![0, 0];
+    assert!(
+        model.motion().plan_sweep().is_some(),
+        "clean plan load starts PlanSweep"
+    );
+    let mut sweep_frames = Vec::new();
+    while model.motion().is_active() {
+        sweep_frames.push(sequence.push(&model, 33));
+        update(
+            &mut model,
+            Message::MotionFrame {
+                elapsed: crate::ui::motion::FRAME_INTERVAL,
+            },
+        );
+    }
+    assert!(
+        sweep_frames.len() >= 8,
+        "plan sweep has {} frames",
+        sweep_frames.len()
+    );
+    let settled = sequence.push(&model, 1_800);
+    sequence.mark_poster();
+    let settled_text = buffer_to_string(&settled);
+    assert!(
+        settled_text.contains("Attention: Sort (measured time)")
+            && settled_text.contains("Nodes")
+            && settled_text.contains('\u{2501}'),
+        "settled plan explorer shows KPI strip, bottleneck, and micro-bars:\n{settled_text}"
+    );
+    sequence
+}
+
+/// Browsing Theme entries in the floating Spotlight palette previews each palette live before switching.
+fn motion_palette_themes() -> MotionSequence {
+    use crate::app::message::Direction;
+
+    let mut sequence = MotionSequence::new(
+        "palette-themes",
+        "atelier",
+        "Theme previews",
+        "Browsing Theme entries in the Spotlight palette previews each palette live before switching",
+    );
+    let mut model = showcase_base_model(ThemeChoice::Atelier);
+    enable_showcase_tabs(&mut model);
+    model.motion.enable();
+    let surface = |buf: &Buffer| buf[(0, 1)].bg;
+
+    let first = sequence.push(&model, 450);
+
+    // Open the Spotlight palette and filter to "Theme: ".
+    assert!(update(&mut model, Message::Action(Action::OpenPalette)).is_empty());
+    for ch in "Theme: ".chars() {
+        assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+        sequence.push(&model, 60);
+    }
+
+    let move_to_theme = |model: &mut Model, target: &str| {
+        let palette = model.palette.as_ref().expect("palette open");
+        let target_idx = palette
+            .matches()
+            .iter()
+            .position(|entry| entry.label == target)
+            .unwrap_or_else(|| panic!("theme entry {target:?} not found in palette"));
+        let current = palette.selected;
+        if target_idx > current {
+            for _ in 0..(target_idx - current) {
+                update(model, Message::Action(Action::Move(Direction::Down)));
+            }
+        } else {
+            for _ in 0..(current - target_idx) {
+                update(model, Message::Action(Action::Move(Direction::Up)));
+            }
+        }
+    };
+
+    // Browse field-industrial -> material -> atelier -> paper live previews.
+    move_to_theme(&mut model, "Theme: field-industrial");
+    let field_preview = sequence.push(&model, 420);
+    assert!(buffer_to_string(&field_preview).contains("Theme: field-industrial"));
+
+    move_to_theme(&mut model, "Theme: material");
+    let material_preview = sequence.push(&model, 420);
+    assert!(buffer_to_string(&material_preview).contains("Theme: material"));
+
+    move_to_theme(&mut model, "Theme: atelier");
+    let atelier_preview = sequence.push(&model, 420);
+    assert!(buffer_to_string(&atelier_preview).contains("Theme: atelier"));
+
+    move_to_theme(&mut model, "Theme: paper");
+    let paper_preview = sequence.push(&model, 650);
+    sequence.mark_poster();
+    let paper_preview_text = buffer_to_string(&paper_preview);
+    assert!(
+        paper_preview_text.contains("Theme: paper") && paper_preview_text.contains("Swatches:"),
+        "palette shows live mini-workbench preview for paper:\n{paper_preview_text}"
+    );
+
+    // Confirm Theme: paper to trigger a live ThemeCurtain transition.
+    let outgoing_buf = render_showcase(&model);
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    let mut settled_paper = model.clone();
+    settled_paper.motion.settle();
+    let incoming_paper_buf = render_showcase(&settled_paper);
+    let mut curtain_frames = 0;
+    while let Some((_, progress)) = model.motion().theme_curtain() {
+        let column = (0..SHOWCASE_AREA.width)
+            .filter(|col| {
+                crate::ui::motion::curtain_shows_incoming(*col, SHOWCASE_AREA.width, progress)
+            })
+            .count() as u16;
+        let curtain = (column < SHOWCASE_AREA.width).then(|| CurtainPadding {
+            column,
+            incoming: surface(&incoming_paper_buf),
+            outgoing: surface(&outgoing_buf),
+        });
+        sequence.push_curtain(&model, 33, curtain);
+        curtain_frames += 1;
+        update(
+            &mut model,
+            Message::MotionFrame {
+                elapsed: crate::ui::motion::FRAME_INTERVAL,
+            },
+        );
+    }
+    assert!(curtain_frames >= 8, "curtain has {curtain_frames} frames");
+    sequence.push(&model, 800);
+
+    // Switch back to atelier via palette + ThemeCurtain so the loop closes cleanly.
+    assert!(update(&mut model, Message::Action(Action::OpenPalette)).is_empty());
+    for ch in "Theme: atelier".chars() {
+        assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+    }
+    let outgoing_paper = render_showcase(&model);
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    while let Some((_, progress)) = model.motion().theme_curtain() {
+        let column = (0..SHOWCASE_AREA.width)
+            .filter(|col| {
+                crate::ui::motion::curtain_shows_incoming(*col, SHOWCASE_AREA.width, progress)
+            })
+            .count() as u16;
+        let curtain = (column < SHOWCASE_AREA.width).then(|| CurtainPadding {
+            column,
+            incoming: surface(&first),
+            outgoing: surface(&outgoing_paper),
+        });
+        sequence.push_curtain(&model, 33, curtain);
+        update(
+            &mut model,
+            Message::MotionFrame {
+                elapsed: crate::ui::motion::FRAME_INTERVAL,
+            },
+        );
+    }
+    assert_eq!(
+        render_showcase(&model),
+        first,
+        "palette-themes loop closes cleanly"
+    );
+    sequence.push(&model, 450);
+
+    sequence
+}
+
 #[test]
 fn motion_showcase_sequences_are_real_buffers_at_fixed_motion_times() {
     let sequences = [
@@ -3216,6 +3499,8 @@ fn motion_showcase_sequences_are_real_buffers_at_fixed_motion_times() {
         motion_run_and_settle(),
         motion_cancel_honestly(),
         motion_theme_curtain(),
+        motion_format_and_plan(),
+        motion_palette_themes(),
     ];
     for sequence in &sequences {
         sequence.check_bounds();
