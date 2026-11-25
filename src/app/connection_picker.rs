@@ -7,7 +7,7 @@
 //! the real target through the existing connection boundary.
 
 use crate::config::schema::Profile;
-use crate::connection::cloud::{Provider, ProviderPresentation};
+use crate::connection::cloud::ProviderPresentation;
 use std::collections::BTreeMap;
 
 /// Maximum number of Unicode scalar values in one row's derived detail.
@@ -46,19 +46,19 @@ pub struct ConnectionProfileSummary {
 }
 
 impl ConnectionProfileSummary {
-    /// Builds a safe summary from one profile and the already-known providers.
+    /// Builds a safe summary from one profile and resolved provider presentation facts.
     #[must_use]
     pub fn from_profile(
         name: &str,
         profile: &Profile,
-        providers: &BTreeMap<String, Provider>,
+        provider_presentations: &BTreeMap<String, ProviderPresentation>,
     ) -> Self {
         let validation = profile.validate(name).err().map(|error| error.headline);
         let auth = profile.auth.clone();
         let provider_presentation = auth
             .as_deref()
-            .and_then(|provider| providers.get(provider))
-            .map(Provider::presentation);
+            .and_then(|provider| provider_presentations.get(provider))
+            .cloned();
 
         Self {
             // The name is also the resolver key, so preserve it exactly. The
@@ -121,11 +121,13 @@ impl ConnectionProfileSummary {
 #[must_use]
 pub fn summaries(
     profiles: &BTreeMap<String, Profile>,
-    providers: &BTreeMap<String, Provider>,
+    provider_presentations: &BTreeMap<String, ProviderPresentation>,
 ) -> Vec<ConnectionProfileSummary> {
     profiles
         .iter()
-        .map(|(name, profile)| ConnectionProfileSummary::from_profile(name, profile, providers))
+        .map(|(name, profile)| {
+            ConnectionProfileSummary::from_profile(name, profile, provider_presentations)
+        })
         .collect()
 }
 

@@ -95,8 +95,11 @@ and keyboard behavior.
 
 ### Edge Cases
 
-- The provider name is custom or replaced in configuration; the panel shows
-  the configured name and command without pretending it is a built-in cloud.
+- Provider metadata follows the resolved definition. A configured replacement
+  shows its exact configured name, executable, extraction rule and remedy with
+  a provider-defined lifetime. This includes definitions that copy a built-in.
+  Built-in entries retain their vendor label, safe invocation hint and lifetime.
+  Invalid provider configuration leaves those details unavailable.
 - The session is connecting, disconnected, or lost; the panel states what is
   known and labels unknown facts rather than filling them with defaults.
 - A provider command contains hostile display text; it is escaped before it is

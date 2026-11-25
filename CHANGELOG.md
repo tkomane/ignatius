@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Connection details identify configured authentication providers by
+  their actual definition, including overrides of `entra`, `aws` and `gcp`.
 - Fixed: Crash recovery restores the active editor draft when empty scratch
   tabs appeared before it in the journal.
 - Fixed: The generated UPDATE review shows the primary-key identity,

@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 74 - Describe the configured authentication provider - 25 November 2026
+
+- **W06 / 017 T001.** Startup and the profile picker use display facts from the
+  validated authentication registry. An exact-key configured override retains
+  its own executable, output format and remedy, with its arguments hidden and
+  its lifetime left to the provider. Default entries retain their vendor
+  details. The baseline reproduced the wrong stock label for configured
+  `entra`. All 31 focused cloud, picker and connection-details tests passed
+  with the fix. [Feature 017 tasks](../specs/017-connection-trust-surface/tasks.md)
+- **Owned macOS PTY.** The local arm64 binary at `654e062` plus the provider
+  changes used Homebrew Rust 1.100.0 and disposable PostgreSQL 18.7 over
+  `verify-full`. Startup with the configured `entra` extracted JSON. A picker
+  switch to the configured `aws` used standard output. Both displayed the
+  configured label and extraction rule. Reopening details left the call
+  count at two. The synthetic credential and private argument marker were
+  absent from the capture, and `Ctrl+Q` exited zero. Vendor CLI and live
+  cloud account evidence remain open.
+
 ## Wave 73 - Restore the active editor draft - 25 November 2026
 
 - **W10 / 043 T011.** Crash recovery maps the journal's active position

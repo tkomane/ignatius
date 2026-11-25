@@ -83,6 +83,11 @@ environment and from AWS configuration. When it cannot, the failure says so.
 A provider's command is run directly, never through a shell. `{host}`, `{port}`,
 `{user}` and `{database}` are substituted as whole arguments.
 
+An exact name in `[auth.providers]` replaces the built-in of the same name.
+Connection details use the selected entry at startup and after a profile
+switch. A configured provider shows its executable and output format, with
+arguments hidden and a lifetime defined by the provider.
+
 Credentials may come from a connection URI, a libpq keyword string, `PGPASSWORD`,
 a `.pgpass` password file, or the prompt: when the server asks for a password and
 none was found, both the full-screen client and plain mode ask for one, without

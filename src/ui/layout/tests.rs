@@ -2893,10 +2893,9 @@ fn the_export_palette_names_shapes_and_retained_row_scope() {
 #[test]
 fn connection_details_explain_identity_transport_and_posture_without_secrets() {
     let mut model = connected_model(Environment::Production);
-    model.credential_presentation = crate::connection::cloud::built_in()
-        .into_iter()
-        .find(|provider| provider.name == "entra")
-        .map(|provider| provider.presentation());
+    model.credential_presentation =
+        crate::connection::cloud::presentation_registry(&std::collections::BTreeMap::new())
+            .remove("entra");
     model.connection_details = true;
 
     let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 34);

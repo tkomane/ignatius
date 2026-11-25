@@ -155,11 +155,8 @@ fn the_built_in_providers_are_the_three_clouds_and_each_has_a_command() {
 
 #[test]
 fn provider_presentation_names_the_cloud_and_never_copies_arguments() {
-    let entra = built_in()
-        .into_iter()
-        .find(|provider| provider.name == "entra")
-        .expect("built-in Entra provider");
-    let view = entra.presentation();
+    let presentations = presentation_registry(&BTreeMap::new());
+    let view = &presentations["entra"];
     assert_eq!(view.display_name, "Microsoft Entra ID");
     assert_eq!(view.command_name, "az");
     assert!(view.invocation.contains("OSS RDBMS"));
@@ -192,6 +189,7 @@ fn custom_provider_presentation_hides_arbitrary_arguments() {
 
 #[test]
 fn every_built_in_cloud_has_a_named_route_and_lifetime() {
+    let presentations = presentation_registry(&BTreeMap::new());
     for (name, display, command, lifetime) in [
         (
             "entra",
@@ -212,11 +210,7 @@ fn every_built_in_cloud_has_a_named_route_and_lifetime() {
             "about 1 hour",
         ),
     ] {
-        let provider = built_in()
-            .into_iter()
-            .find(|provider| provider.name == name)
-            .expect("built-in provider");
-        let view = provider.presentation();
+        let view = &presentations[name];
         assert_eq!(view.display_name, display);
         assert!(view.invocation.contains(command), "{name}: {view:?}");
         assert!(view.lifetime.contains(lifetime), "{name}: {view:?}");
@@ -240,6 +234,63 @@ fn configuration_replaces_a_built_in_rather_than_being_ignored() {
     let all = registry(&configured);
     assert_eq!(all["entra"].command, vec!["mine".to_owned()]);
     assert!(all.contains_key("aws"), "the others are still there");
+}
+
+#[test]
+fn presentation_registry_tracks_configured_origin_by_exact_key() {
+    use crate::config::schema::ProviderConfig;
+
+    let stock = registry(&BTreeMap::new())
+        .remove("entra")
+        .expect("stock Entra");
+    let definition = ProviderConfig {
+        command: stock.command.clone(),
+        json_field: Some("accessToken".to_owned()),
+        timeout_seconds: Some(stock.timeout.as_secs()),
+        remedy: Some(stock.remedy.clone()),
+    };
+    let mut config = crate::config::Config::default();
+    config
+        .auth
+        .providers
+        .insert("Entra".to_owned(), definition.clone());
+
+    let configured = crate::cli::auth_providers(&config).expect("validated alias");
+    let views = presentation_registry(&configured);
+    assert_eq!(views["entra"].display_name, "Microsoft Entra ID");
+    assert_eq!(views["Entra"].name, "Entra");
+    assert_eq!(
+        views["Entra"].display_name,
+        r#"Configured provider "Entra""#
+    );
+
+    config.auth.providers.insert("entra".to_owned(), definition);
+    let configured = crate::cli::auth_providers(&config).expect("validated override and alias");
+    assert_eq!(
+        configured["entra"], stock,
+        "the override copies the stock definition"
+    );
+    let views = presentation_registry(&configured);
+    let overridden = &views["entra"];
+    assert_eq!(overridden.name, "entra");
+    assert_eq!(overridden.display_name, r#"Configured provider "entra""#);
+    assert_eq!(overridden.command_name, "az");
+    assert_eq!(
+        overridden.invocation,
+        "configured provider command (arguments hidden)"
+    );
+    assert_eq!(overridden.extraction, r#"JSON field "accessToken""#);
+    assert_eq!(
+        overridden.lifetime,
+        "short-lived credential, lifetime defined by the provider"
+    );
+    assert_eq!(overridden.remedy, stock.remedy);
+    assert_eq!(stock.presentation(), *overridden);
+
+    let aws = &views["aws"];
+    assert_eq!(aws.display_name, "AWS IAM database authentication");
+    assert_eq!(aws.extraction, "trimmed standard output");
+    assert!(aws.remedy.contains("aws sts get-caller-identity"));
 }
 
 #[test]
