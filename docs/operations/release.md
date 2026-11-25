@@ -93,30 +93,38 @@ retention, and exact publication authorization remain open.
 
 ### Owner release decision checklist (ADR-0008)
 
-Before any tag, signing, attestation, or public release operation can proceed:
-
-1. **Frozen source revision and tag.** Approve the exact clean commit on `main`
-   and version tag (for example `v0.1.0`), plus the matching `CHANGELOG.md`
-   heading (`notes_reference.entry`) so `release-notes/validate.sh` passes on
-   the generated aggregate record.
-2. **Approved signing and provenance identities.** Record the exact Sigstore
-   keyless `--certificate-identity` workflow ref (`https://token.actions.githubusercontent.com`),
-   SLSA `--signer-workflow` / `--builder-id`, and rotation, expiry,
-   revocation, and outage policies.
-3. **Canonical evidence promotion and retention.** Approve promoting or mapping
-   the workflow upload bundle into `release-evidence/runs/<run>/<target>/` and
-   the permanent evidence retention boundary (replacing 7-day Actions storage).
-4. **Independent trust-sidecar generation and verification.** Run signing and
-   SLSA attestation generation in the authorized workflow and independently
-   verify `<archive>.sigstore.json` and `<archive>.intoto.jsonl` with `cosign
-   verify-blob` and `gh attestation verify` / `slsa-verifier verify-artifact`.
+1. **Candidate source and tag.** Match the product version to its
+   `CHANGELOG.md` heading (`notes_reference.entry`). Obtain owner approval
+   for the exact tag and clean commit on `main` before tagging. Pushing the
+   approved tag triggers the non-publishing candidate build and its source
+   preflight.
+2. **Signing and provenance identities.** Record the owner-approved Sigstore
+   workflow certificate identity, including its exact workflow reference, for
+   `--certificate-identity`. The GitHub Actions OIDC issuer for
+   `--certificate-oidc-issuer` is `https://token.actions.githubusercontent.com`.
+   Record the approved provenance signer workflow or builder identity for the
+   chosen verifier, and the rotation, expiry, revocation and outage policies.
+3. **Canonical evidence and retention.** Obtain the owner's decision on how
+   to promote or map the allowlisted bundle to
+   `release-evidence/runs/<run>/<target>/` and where to retain it for the
+   support life of the release. The Actions upload expires after seven days.
+4. **Sign, attest and verify.** Obtain explicit owner authorization to sign
+   and attest the exact candidate archives before generating the sidecars.
+   Independently verify each archive's signature and SLSA provenance against
+   the approved identities and exact candidate. Retain the verified evidence
+   at the approved location. [Verifier commands](#independent-cryptographic-verification)
 5. **Remaining platform and governance closures.** Complete human hand use in
    installed Warp (`macOS`), Windows 11 Terminal (`001 T051`), Linux desktop
    (`001 T052`), and human VoiceOver/NVDA auditory review (`007 T032`/`T033`),
    plus trademark/domain confirmation and `SECURITY.md` reporting test.
-6. **Explicit publication authorization.** Record owner approval naming exact
-   product version, source revision, target set, artefact destination, and
-   `authorization_reference` so `cargo --locked xtask release check` exits `0`.
+6. **Readiness and publication.** Validate the aggregate with
+   `cargo --locked xtask release validate <record-path>` and run
+   `cargo --locked xtask release check <record-path>` for readiness. Present
+   the evidence and open blockers to the owner. Publication requires
+   separate owner approval for the exact product version, source
+   revision, target set and distribution destination. If approved, record the
+   controlled `authorization_reference` and rerun the readiness check. Publish
+   only within the approved scope after all release gates pass.
 
 ## Candidate review - 20 November 2026
 

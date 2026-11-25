@@ -273,7 +273,7 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             push(
                 &mut rows,
                 format!("Primary-key identity: {keys}"),
-                Token::Muted,
+                Token::Text,
             );
             push(
                 &mut rows,
@@ -282,7 +282,7 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
                 } else {
                     "The replacement is literal text data, including empty text; it cannot add SQL syntax."
                 },
-                Token::Muted,
+                Token::Text,
             );
             push(&mut rows, "Exact bound statement:", Token::Header);
             match pending.plan.bound_sql() {
@@ -300,7 +300,7 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             push(
                 &mut rows,
                 "The prior SELECT is a snapshot and will not be rerun automatically.",
-                Token::Muted,
+                Token::Text,
             );
         }
         Kind::Production | Kind::Analyze => {

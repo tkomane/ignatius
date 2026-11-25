@@ -161,3 +161,18 @@ on actual changes, so reading dimensions cannot repeatedly reset review.
 Runtime dispatches `InputAtSize` facts; the reducer applies size changes and
 owns any review acceptance suppression. Keep application policy out of the
 terminal I/O adapter. Recovery keys remain ordinary actions without a size read.
+
+## W09 generated UPDATE review readability - 2026-11-25
+
+The dark showcase rasterizer blends DIM text against `SurfaceOverlay`. The
+required UPDATE disclosures use `Muted`, which produces 2.98:1 contrast in
+that capture. In `src/ui/review.rs`, use the existing `Text` token for the three
+required disclosures in the Update review document. The same rendering and
+wrapping paths apply across colour depths. These token choices carry no I/O or
+reducer changes.
+
+Add a focused buffer regression in the existing test sidecar. Confirm the
+required text is present and styled as undimmed body text, then run the existing
+viewport and confirmation tests. Rerender the `reviewed-update` showcase still
+from the fixed buffer and inspect it. Record the local and hosted gates and
+keep human W08/J5 terminal acceptance open.
