@@ -1,8 +1,8 @@
 pub(super) mod view;
 
 use super::{
-    action_key_label, bound_key, hairline_rule, inset_empty_area, overlay_block_line, pane_block,
-    pane_block_line, syntax_token,
+    action_key_label, bound_key, focus_accent_style, hairline_rule, inset_empty_area,
+    overlay_block_line, pane_block, pane_block_line_with_motion, row_wave_progress, syntax_token,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, pad_to_width, sanitize_for_display, truncate_to_width};
@@ -11,7 +11,7 @@ use crate::ui::keymap::Keymap;
 use crate::ui::layout::{
     LayoutMode, OverlayAnchor, Presentation, layout_mode, overlay_box, pane_geometry,
 };
-use crate::ui::theme::Token;
+use crate::ui::theme::{Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
@@ -414,7 +414,20 @@ fn tab_window_width(start: usize, end: usize, total: usize, widths: &[usize]) ->
     left + widths[start..end].iter().sum::<usize>() + right
 }
 
-fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &mut Buffer) {
+fn tab_glide_inks_are_legible(theme: &Theme) -> bool {
+    let surface_alt = theme.rgb(Token::SurfaceAlt);
+    [Token::Info, Token::Focus]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(surface_alt) >= 4.5)
+}
+
+fn render_tab_bar(
+    model: &Model,
+    presentation: &Presentation,
+    tab_glide: Option<f32>,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     if area.width < 10 || area.height == 0 {
         return;
     }
@@ -504,10 +517,16 @@ fn render_tab_bar(model: &Model, presentation: &Presentation, area: Rect, buf: &
         };
 
         if is_active {
-            spans.push(Span::styled(
-                format!("[{label}]"),
-                theme.active_tab(Token::Focus),
-            ));
+            let mut active_style = theme.active_tab(Token::Focus);
+            if let Some(progress) = tab_glide
+                && theme.color
+                && theme.depth.shows_transitions()
+                && tab_glide_inks_are_legible(theme)
+                && let Some(ink) = theme.mix(Token::Info, Token::Focus, progress)
+            {
+                active_style = active_style.fg(ink);
+            }
+            spans.push(Span::styled(format!("[{label}]"), active_style));
             spans.push(Span::raw(" "));
         } else if is_secondary {
             spans.push(Span::styled(
@@ -793,7 +812,7 @@ fn render_editor_buffer_pane(
         };
         let mut line_marker_style = theme.style(line_marker_token);
         if !error_line && let Some(progress) = format_ripple {
-            let row_progress = format_ripple_row_progress(progress, visible_row, visible_rows);
+            let row_progress = row_wave_progress(progress, visible_row, visible_rows);
             if let Some(fg) = theme.mix(Token::Success, line_marker_token, row_progress) {
                 line_marker_style = line_marker_style.fg(fg);
             }
@@ -902,27 +921,6 @@ fn render_editor_buffer_pane(
     }
 }
 
-/// Computes the per-row settle progress for `FormatRipple`, sweeping the wave
-/// from the top visible row downward while ensuring every row reaches `1.0`
-/// before the transition ends.
-fn format_ripple_row_progress(progress: f32, visible_row: usize, visible_rows: usize) -> f32 {
-    if progress >= 1.0 {
-        return 1.0;
-    }
-    let frac = if visible_rows <= 1 {
-        0.0
-    } else {
-        visible_row as f32 / (visible_rows - 1) as f32
-    };
-    let lead = 0.45 * frac;
-    let span = 0.55;
-    if progress < lead {
-        1.0
-    } else {
-        ((progress - lead) / span).clamp(0.0, 1.0)
-    }
-}
-
 pub(crate) fn render_editor(
     model: &Model,
     keymap: &Keymap,
@@ -933,6 +931,19 @@ pub(crate) fn render_editor(
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Editor;
     let (line, column) = model.editor.position();
+    let lines_total = model.editor.line_count();
+    let lines_noun = if lines_total == 1 { "line" } else { "lines" };
+    let line_sep = if presentation.glyphs.is_ascii() {
+        ", "
+    } else {
+        " \u{00b7} "
+    };
+    let focus_pulse = (focused && !model.reduced_motion && !presentation.reduced_motion)
+        .then(|| model.motion().focus_pulse())
+        .flatten();
+    let tab_glide = (!model.reduced_motion && !presentation.reduced_motion)
+        .then(|| model.motion().tab_glide())
+        .flatten();
     let has_tab_bar_state = model.buffers.count() > 1
         || model.buffers.split_mode != crate::buffer::EditorSplitMode::None;
     let inner_height_est = area.height.saturating_sub(2);
@@ -948,48 +959,61 @@ pub(crate) fn render_editor(
     if model.splits.zoomed && focused {
         title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
+    let focus_style = focus_accent_style(theme, focus_pulse).add_modifier(Modifier::BOLD);
     let primary_style = if focused {
-        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+        focus_style
     } else {
         theme.style(Token::Header)
     };
-    title_spans.push(Span::styled(
-        format!("{}Editor", presentation.icon(Icon::Editor)),
-        primary_style,
-    ));
-    title_spans.push(Span::styled(
-        format!("  line {line}, column {column}"),
-        theme.style(Token::Muted),
-    ));
-    if !tab_bar_visible {
-        if model.buffers.split_mode != crate::buffer::EditorSplitMode::None {
-            title_spans.push(Span::styled(
-                format!("  [SPLIT: {}]", model.buffers.split_mode.label()),
-                theme.style(Token::Info).add_modifier(Modifier::BOLD),
-            ));
-        }
-        if model.buffers.count() > 1 {
-            title_spans.push(Span::styled(
-                format!(
-                    "  [BUFFERS: {}/{}]",
-                    model.buffers.count(),
-                    crate::buffer::MAX_EDITOR_BUFFERS
-                ),
-                theme.style(Token::Muted),
-            ));
-        }
-    }
-    if model.editor.is_modified() {
-        title_spans.push(Span::styled("  [modified]", theme.style(Token::Warning)));
-    }
-    if focused {
+    let editor_label = format!("{}Editor", presentation.icon(Icon::Editor));
+    let pos_label = format!("  line {line}, column {column}");
+    let line_count_suffix = format!("{line_sep}{lines_total} {lines_noun}");
+    let split_badge = (!tab_bar_visible
+        && model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
+        .then(|| format!("  [SPLIT: {}]", model.buffers.split_mode.label()));
+    let buffers_badge = (!tab_bar_visible && model.buffers.count() > 1).then(|| {
+        format!(
+            "  [BUFFERS: {}/{}]",
+            model.buffers.count(),
+            crate::buffer::MAX_EDITOR_BUFFERS
+        )
+    });
+    let reserved_w = 2
+        + usize::from(presentation.spacing().title_padding) * 2
+        + usize::from(focused) * 2
+        + usize::from(model.splits.zoomed && focused) * 9
+        + display_width(&editor_label)
+        + display_width(&pos_label)
+        + split_badge.as_deref().map_or(0, display_width)
+        + buffers_badge.as_deref().map_or(0, display_width)
+        + usize::from(model.editor.is_modified()) * 12
+        + usize::from(focused) * 11;
+    let pos_text = if reserved_w + display_width(&line_count_suffix) <= usize::from(area.width) {
+        format!("{pos_label}{line_count_suffix}")
+    } else {
+        pos_label
+    };
+    title_spans.push(Span::styled(editor_label, primary_style));
+    title_spans.push(Span::styled(pos_text, theme.style(Token::Muted)));
+    if let Some(badge) = split_badge {
         title_spans.push(Span::styled(
-            "  [focused]",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            badge,
+            theme.style(Token::Info).add_modifier(Modifier::BOLD),
         ));
     }
+    if let Some(badge) = buffers_badge {
+        title_spans.push(Span::styled(badge, theme.style(Token::Muted)));
+    }
+    if model.editor.is_modified() {
+        title_spans.push(Span::raw("  "));
+        title_spans.push(Span::styled("[modified]", theme.pill(Token::Warning)));
+    }
+    if focused {
+        title_spans.push(Span::styled("  [focused]", focus_style));
+    }
 
-    let block = pane_block_line(Line::from(title_spans), focused, presentation);
+    let block =
+        pane_block_line_with_motion(Line::from(title_spans), focused, focus_pulse, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
@@ -1020,6 +1044,7 @@ pub(crate) fn render_editor(
         render_tab_bar(
             model,
             presentation,
+            tab_glide,
             Rect::new(text_inner.x, text_inner.y, text_inner.width, 1),
             buf,
         );

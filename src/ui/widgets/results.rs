@@ -1,7 +1,8 @@
 use super::overlays::render_plan;
 use super::{
-    action_key_label, bound_key, hairline_rule, highlighted_sql_spans, input_cursor,
-    inset_empty_area, overlay_block, overlay_block_line, pane_block_line, syntax_token,
+    action_key_label, bound_key, focus_accent_style, hairline_rule, highlighted_sql_spans,
+    input_cursor, inset_empty_area, overlay_block, overlay_block_line, pane_block_line,
+    pane_block_line_with_motion, render_scrollbar, row_wave_progress, syntax_token,
     wrapped_line_count,
 };
 use crate::app::grid;
@@ -163,6 +164,10 @@ pub(crate) fn render_results(
 
     // A failed transaction is not an ordinary error: nothing else will run until
     // it ends, so the way out is shown rather than left to be remembered.
+    let focus_pulse = (focused && !model.reduced_motion && !presentation.reduced_motion)
+        .then(|| model.motion().focus_pulse())
+        .flatten();
+    let focus_style = focus_accent_style(theme, focus_pulse).add_modifier(Modifier::BOLD);
     if model.transaction == crate::query::result::TransactionState::Failed {
         let mut title_spans = Vec::new();
         if model.splits.zoomed && focused {
@@ -175,12 +180,14 @@ pub(crate) fn render_results(
                 .add_modifier(Modifier::BOLD),
         ));
         if focused {
-            title_spans.push(Span::styled(
-                "  [focused]",
-                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-            ));
+            title_spans.push(Span::styled("  [focused]", focus_style));
         }
-        let block = pane_block_line(Line::from(title_spans), focused, presentation);
+        let block = pane_block_line_with_motion(
+            Line::from(title_spans),
+            focused,
+            focus_pulse,
+            presentation,
+        );
         let inner = block.inner(area);
         block.render(area, buf);
         let mut lines = vec![
@@ -255,7 +262,7 @@ pub(crate) fn render_results(
         title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
     let primary_style = if focused {
-        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+        focus_style
     } else {
         theme.style(Token::Header)
     };
@@ -267,7 +274,7 @@ pub(crate) fn render_results(
     // success ink and fades to its resting ink. Only the word of the job that
     // started the settle is tinted, and only while it is that job's own
     // status rather than a refresh or a previous result.
-    let settle = result_settle_progress(model);
+    let settle = result_settle_progress(model, presentation);
     title_spans.push(Span::styled("  ", theme.style(Token::Muted)));
     title_spans.push(Span::styled(status, status_word_style(theme, settle)));
     title_spans.push(Span::styled(
@@ -296,10 +303,7 @@ pub(crate) fn render_results(
         ));
     }
     if focused {
-        title_spans.push(Span::styled(
-            "  [focused]",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ));
+        title_spans.push(Span::styled("  [focused]", focus_style));
         title_spans.push(Span::styled(
             format!(
                 " [{} grid controls]",
@@ -309,7 +313,8 @@ pub(crate) fn render_results(
         ));
     }
 
-    let block = pane_block_line(Line::from(title_spans), focused, presentation);
+    let block =
+        pane_block_line_with_motion(Line::from(title_spans), focused, focus_pulse, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
 
@@ -443,7 +448,17 @@ fn settle_inks_are_legible(theme: &Theme) -> bool {
         .all(|token| theme.rgb(token).contrast(pane) >= 4.5)
 }
 
-fn result_settle_progress(model: &Model) -> Option<f32> {
+fn gutter_settle_inks_are_legible(theme: &Theme) -> bool {
+    let stripe = theme.rgb(Token::SurfaceAlt);
+    [Token::Success, Token::Muted]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(stripe) >= 4.5)
+}
+
+fn result_settle_progress(model: &Model, presentation: &Presentation) -> Option<f32> {
+    if model.reduced_motion || presentation.reduced_motion {
+        return None;
+    }
     let execution = model.last_execution.as_ref()?;
     let previous_cancellation =
         model.phase.is_busy() && execution.status == ExecutionStatus::Cancelled;
@@ -858,12 +873,16 @@ fn render_results_placeholder(
     buf: &mut Buffer,
 ) {
     let theme = &presentation.theme;
+    let focus_pulse = (focused && !model.reduced_motion && !presentation.reduced_motion)
+        .then(|| model.motion().focus_pulse())
+        .flatten();
+    let focus_style = focus_accent_style(theme, focus_pulse).add_modifier(Modifier::BOLD);
     let mut title_spans = Vec::new();
     if model.splits.zoomed && focused {
         title_spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
     let primary_style = if focused {
-        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+        focus_style
     } else {
         theme.style(Token::Header)
     };
@@ -872,12 +891,10 @@ fn render_results_placeholder(
         primary_style,
     ));
     if focused {
-        title_spans.push(Span::styled(
-            "  [focused]",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ));
+        title_spans.push(Span::styled("  [focused]", focus_style));
     }
-    let block = pane_block_line(Line::from(title_spans), focused, presentation);
+    let block =
+        pane_block_line_with_motion(Line::from(title_spans), focused, focus_pulse, presentation);
     let inner = block.inner(area);
     block.render(area, buf);
     if inner.width == 0 || inner.height == 0 {
@@ -1093,8 +1110,11 @@ fn running_lines<'a>(model: &Model, keymap: &Keymap, presentation: &Presentation
 /// Cells on the heartbeat track.
 pub(crate) const HEARTBEAT_TRACK: usize = 24;
 
-/// Cells of fading tail behind the heartbeat head, where colour can fade.
-pub(crate) const HEARTBEAT_TAIL: usize = 3;
+/// Cells of fading phosphor tail behind the heartbeat head in truecolour.
+pub(crate) const HEARTBEAT_TAIL: usize = 5;
+
+/// Cells of unblended tail behind the heartbeat head at 256 colours.
+const HEARTBEAT_TAIL_INDEXED: usize = 3;
 
 /// Where the heartbeat head is on busy frame `frame`, and whether it is moving
 /// to the right.
@@ -1150,8 +1170,10 @@ pub(crate) fn heartbeat_line(
     };
     let tail = if ascii || !depth.paints_surfaces() {
         0
-    } else {
+    } else if depth == ColorDepth::TrueColor {
         HEARTBEAT_TAIL
+    } else {
+        HEARTBEAT_TAIL_INDEXED
     };
     // At 16 colours the head is bold as well as coloured; with no colour at
     // all it is shape alone, the heavy glyph on the light track.
@@ -1173,7 +1195,7 @@ pub(crate) fn heartbeat_line(
             match behind.filter(|distance| (1..=tail).contains(distance)) {
                 Some(distance) => {
                     let style = if depth == ColorDepth::TrueColor {
-                        let amount = distance as f32 / (HEARTBEAT_TAIL + 1) as f32;
+                        let amount = distance as f32 / (tail + 1) as f32;
                         theme.mix(ink, Token::Border, amount).map_or_else(
                             || theme.style(Token::Border),
                             |fg| Style::default().fg(fg),
@@ -1363,12 +1385,34 @@ fn render_grid(
             .map(|line| Line::from(Span::styled(line, theme.style(Token::Warning)))),
     );
     let order = first_fitting(order_candidates, grid_width);
-    lines.push(styled_toolbar_line(
-        &order,
-        Token::Info,
-        Some("selected column"),
-        theme,
-    ));
+    let mut order_line = styled_toolbar_line(&order, Token::Info, Some("selected column"), theme);
+    if !rows.is_empty() && selected_column.is_some() {
+        let row_num = model.selected_row.min(rows.len().saturating_sub(1)) + 1;
+        let row_coord = format!("{row_num}/{}", rows.len());
+        let sep = if presentation.glyphs.is_ascii() {
+            ", "
+        } else {
+            " \u{00b7} "
+        };
+        let cue_w = display_width(&row_coord) + display_width(sep) + display_width(&selected_label);
+        let order_w = display_width(&order);
+        if order_w > 0 && order_w + 2 + cue_w <= grid_width {
+            let gap = grid_width - order_w - cue_w;
+            order_line
+                .spans
+                .push(Span::styled(" ".repeat(gap), theme.style(Token::Muted)));
+            order_line
+                .spans
+                .push(Span::styled(row_coord, theme.style(Token::Muted)));
+            order_line
+                .spans
+                .push(Span::styled(sep, theme.style(Token::Muted)));
+            order_line
+                .spans
+                .push(Span::styled(selected_label, theme.style(Token::Info)));
+        }
+    }
+    lines.push(order_line);
     let state_line = first_fitting(state_candidates, grid_width);
     lines.push(styled_toolbar_line(&state_line, Token::Muted, None, theme));
     let clipboard_note = model
@@ -1513,7 +1557,8 @@ fn render_grid(
     } else if current_w > grid_width {
         grid_rule = grid_rule.chars().take(grid_width).collect();
     }
-    let rule_style = match result_settle_progress(model)
+    let settle = result_settle_progress(model, presentation);
+    let rule_style = match settle
         .filter(|_| settle_inks_are_legible(theme))
         .and_then(|progress| theme.mix(Token::Success, Token::Border, progress))
     {
@@ -1522,6 +1567,8 @@ fn render_grid(
     };
     lines.push(Line::from(Span::styled(grid_rule, rule_style)));
 
+    let gutter_settle = settle.filter(|_| gutter_settle_inks_are_legible(theme));
+    let total_visible = rendered_rows.max(1);
     for (offset_index, source) in rows.iter().skip(offset).take(visible_rows).enumerate() {
         let position = offset + offset_index;
         let Some(row) = set.rows.get(*source) else {
@@ -1536,11 +1583,15 @@ fn render_grid(
                 theme.style(Token::Selection),
             )]
         } else {
+            let mut gutter_style = theme.on_stripe(Token::Muted);
+            if let Some(progress) = gutter_settle {
+                let row_progress = row_wave_progress(progress, offset_index, total_visible);
+                if let Some(fg) = theme.mix(Token::Success, Token::Muted, row_progress) {
+                    gutter_style = gutter_style.fg(fg);
+                }
+            }
             vec![
-                Span::styled(
-                    format!("{:>gutter$}", source + 1),
-                    theme.on_stripe(Token::Muted),
-                ),
+                Span::styled(format!("{:>gutter$}", source + 1), gutter_style),
                 Span::styled(
                     padding.clone(),
                     cell_style(theme, Token::Muted, false, striped),
@@ -1725,46 +1776,6 @@ pub(crate) fn styled_toolbar_line(
         spans.push(Span::styled(part.to_owned(), theme.style(token)));
     }
     Line::from(spans)
-}
-
-/// A scroll indicator, so rows below the fold are visibly below the fold.
-fn render_scrollbar(
-    total: usize,
-    visible: usize,
-    offset: usize,
-    presentation: &Presentation,
-    focused: bool,
-    area: Rect,
-    buf: &mut Buffer,
-) {
-    if area.height == 0 || total == 0 {
-        return;
-    }
-    let track = area.height as usize;
-    let thumb = ((visible * track) / total).clamp(1, track);
-    let max_offset = total.saturating_sub(visible).max(1);
-    let position = (offset * track.saturating_sub(thumb)) / max_offset;
-
-    let (full, empty) = if presentation.glyphs.is_ascii() {
-        ("#", "|")
-    } else {
-        ("\u{2503}", "\u{2502}")
-    };
-    let thumb_token = if focused { Token::Focus } else { Token::Muted };
-
-    for row in 0..track {
-        let inside = row >= position && row < position + thumb;
-        let symbol = if inside { full } else { empty };
-        let style = presentation
-            .theme
-            .style(if inside { thumb_token } else { Token::Border });
-        buf.set_string(
-            area.x,
-            area.y + u16::try_from(row).unwrap_or(0),
-            symbol,
-            style,
-        );
-    }
 }
 
 /// Decides which columns read as numbers and should be right-aligned.

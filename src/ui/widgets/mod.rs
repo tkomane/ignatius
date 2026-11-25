@@ -192,27 +192,64 @@ pub(crate) fn pane_block_line(
     focused: bool,
     presentation: &Presentation,
 ) -> Block<'static> {
+    pane_block_line_with_motion(title, focused, None, presentation)
+}
+
+/// Whether both endpoints of a pane focus pulse read at >= 4.5:1 on `SurfacePane`.
+fn focus_pulse_inks_are_legible(theme: &crate::ui::theme::Theme) -> bool {
+    let pane = theme.rgb(Token::SurfacePane);
+    [Token::Info, Token::Focus]
+        .into_iter()
+        .all(|token| theme.rgb(token).contrast(pane) >= 4.5)
+}
+
+/// Accent style for a focused pane border or title, settling from `Info` to `Focus`.
+pub(crate) fn focus_accent_style(
+    theme: &crate::ui::theme::Theme,
+    focus_pulse: Option<f32>,
+) -> ratatui::style::Style {
+    let base = theme.style(Token::Focus);
+    let Some(progress) = focus_pulse.filter(|_| {
+        theme.color && theme.depth.shows_transitions() && focus_pulse_inks_are_legible(theme)
+    }) else {
+        return base;
+    };
+    match theme.mix(Token::Info, Token::Focus, progress) {
+        Some(ink) => base.fg(ink),
+        None => base,
+    }
+}
+
+/// The shared bordered block behind a pane with a multi-span editorial title
+/// and optional `FocusPulse` transition progress.
+pub(crate) fn pane_block_line_with_motion(
+    title: Line<'static>,
+    focused: bool,
+    focus_pulse: Option<f32>,
+    presentation: &Presentation,
+) -> Block<'static> {
     let mut spans = Vec::with_capacity(title.spans.len() + 1);
-    if focused {
+    let focus_style = focused.then(|| focus_accent_style(&presentation.theme, focus_pulse));
+    if let Some(style) = focus_style {
         let leader = if presentation.glyphs.is_ascii() {
             "> "
         } else {
             "\u{258d} "
         };
-        spans.push(Span::styled(
-            leader,
-            presentation
-                .theme
-                .style(Token::Focus)
-                .add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(leader, style.add_modifier(Modifier::BOLD)));
     }
     spans.extend(title.spans);
     // A focused title leads with its marker. The cell between the corner and
     // the marker carries on the heavy rule, so the corner does not hang alone
     // in front of a gap.
-    bordered_line_block(Line::from(spans), focused, focused, presentation)
-        .style(presentation.theme.surface(Token::SurfacePane))
+    bordered_line_block_with_style(
+        Line::from(spans),
+        focused,
+        focused,
+        focus_style,
+        presentation,
+    )
+    .style(presentation.theme.surface(Token::SurfacePane))
 }
 
 /// The shared bordered block behind an overlay.
@@ -230,18 +267,20 @@ pub(crate) fn overlay_block_line(
     title: Line<'static>,
     presentation: &Presentation,
 ) -> Block<'static> {
-    bordered_line_block(title, true, false, presentation)
+    bordered_line_block_with_style(title, true, false, None, presentation)
         .style(presentation.theme.surface(Token::SurfaceOverlay))
 }
 
-fn bordered_line_block(
+fn bordered_line_block_with_style(
     title: Line<'static>,
     focused: bool,
     lead_rule: bool,
+    focus_style: Option<ratatui::style::Style>,
     presentation: &Presentation,
 ) -> Block<'static> {
     let theme = &presentation.theme;
-    let border_style = theme.style(if focused { Token::Focus } else { Token::Border });
+    let border_style = focus_style
+        .unwrap_or_else(|| theme.style(if focused { Token::Focus } else { Token::Border }));
     let padding = " ".repeat(usize::from(presentation.spacing().title_padding));
     let mut spans = Vec::with_capacity(title.spans.len() + 2);
     if lead_rule && !padding.is_empty() {
@@ -263,6 +302,68 @@ fn bordered_line_block(
         .border_set(presentation.glyphs.borders(focused))
         .border_style(border_style)
         .title(Line::from(spans))
+}
+
+/// Shared vertical wave progress for row-based transitions (`FormatRipple`, `ResultSettle`).
+///
+/// Sweeps downward from row 0 while ensuring every visible row reaches `1.0`
+/// before the transition settles.
+pub(crate) fn row_wave_progress(progress: f32, visible_row: usize, visible_rows: usize) -> f32 {
+    if progress >= 1.0 {
+        return 1.0;
+    }
+    let frac = if visible_rows <= 1 {
+        0.0
+    } else {
+        visible_row as f32 / (visible_rows - 1) as f32
+    };
+    let lead = 0.45 * frac;
+    let span = 0.55;
+    if progress < lead {
+        1.0
+    } else {
+        ((progress - lead) / span).clamp(0.0, 1.0)
+    }
+}
+
+/// Shared hairline vertical scrollbar used by Results and Objects when rows exceed visible height.
+pub(crate) fn render_scrollbar(
+    total: usize,
+    visible: usize,
+    offset: usize,
+    presentation: &Presentation,
+    focused: bool,
+    area: Rect,
+    buf: &mut ratatui::buffer::Buffer,
+) {
+    if area.height == 0 || area.width == 0 || total == 0 {
+        return;
+    }
+    let track = area.height as usize;
+    let thumb = ((visible * track) / total).clamp(1, track);
+    let max_offset = total.saturating_sub(visible).max(1);
+    let position = (offset * track.saturating_sub(thumb)) / max_offset;
+
+    let (full, empty) = if presentation.glyphs.is_ascii() {
+        ("#", "|")
+    } else {
+        ("\u{2503}", "\u{2502}")
+    };
+    let thumb_token = if focused { Token::Focus } else { Token::Muted };
+
+    for row in 0..track {
+        let inside = row >= position && row < position + thumb;
+        let symbol = if inside { full } else { empty };
+        let style = presentation
+            .theme
+            .style(if inside { thumb_token } else { Token::Border });
+        buf.set_string(
+            area.x,
+            area.y + u16::try_from(row).unwrap_or(0),
+            symbol,
+            style,
+        );
+    }
 }
 
 /// The border, title and focus styling shared by panes and overlays.

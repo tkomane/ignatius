@@ -131,6 +131,28 @@ fn render_curtain(
             cell.modifier = old.modifier;
         }
     }
+
+    if incoming.depth == crate::ui::theme::ColorDepth::TrueColor && body.width > 0 {
+        let front_col = (0..body.width)
+            .find(|&column| {
+                !crate::ui::motion::curtain_shows_incoming(column, body.width, progress)
+            })
+            .unwrap_or(body.width);
+        if front_col > 0
+            && front_col < body.width
+            && let Some(focus_ink) = incoming.color(Token::Focus)
+        {
+            let seam_col = body.x + front_col - 1;
+            for row in body.top()..body.bottom() {
+                let Some(cell) = buf.cell_mut((seam_col, row)) else {
+                    continue;
+                };
+                if !cell.symbol().trim().is_empty() {
+                    cell.fg = focus_ink;
+                }
+            }
+        }
+    }
 }
 
 /// The rows the theme curtain sweeps: everything between the header and

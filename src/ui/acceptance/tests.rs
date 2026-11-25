@@ -3088,6 +3088,18 @@ fn motion_theme_curtain() -> MotionSequence {
                     );
                     if rails.contains(&y) {
                         assert_eq!(cell, new, "rails take the incoming theme in frame 0");
+                    } else if column > 0
+                        && column < SHOWCASE_AREA.width
+                        && x == column - 1
+                        && !cell.symbol().trim().is_empty()
+                    {
+                        assert_eq!(
+                            Some(cell.fg),
+                            model.presentation.theme.color(Token::Focus),
+                            "truecolour seam cell ({x}, {y}) takes incoming focus ink"
+                        );
+                        assert_eq!(cell.bg, new.bg);
+                        assert_eq!(cell.modifier, new.modifier);
                     } else {
                         let style = (cell.fg, cell.bg, cell.modifier);
                         assert!(

@@ -554,3 +554,151 @@ fn the_filter_line_takes_its_search_mark_from_the_glyph_tier() {
         assert!(!filter_line.contains('\u{2315}'), "{tier:?}: {text}");
     }
 }
+
+#[test]
+fn objects_scrollbar_renders_only_when_overflowing_with_focus_tokens() {
+    use crate::app::tree::MetadataPayload;
+    use crate::postgres::ObjectSummary;
+
+    let mut model = Model::new(100);
+    update(&mut model, Message::Connected(session()));
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema("public", 12)]))),
+    );
+    model.tree.selected = 1;
+    let (req, path, _) = model.tree.expand_selected().expect("expand tables");
+    let tables = (1..=12)
+        .map(|idx| ObjectSummary {
+            schema: "public".into(),
+            name: format!("orders_{idx:02}"),
+            kind: ObjectKind::Table,
+            readable: true,
+            detail: None,
+        })
+        .collect();
+    model
+        .tree
+        .apply(req, &path, MetadataPayload::Objects(tables));
+
+    let area = Rect::new(0, 0, 36, 8);
+    let scroll_x = area.width - 2;
+    let unicode = presentation();
+
+    model.focus = Focus::Objects;
+    let mut focused_buf = Buffer::empty(area);
+    render_objects(&model, &Keymap::new(), &unicode, area, &mut focused_buf);
+    let thumb_y = (1..area.height - 1)
+        .find(|&y| focused_buf[(scroll_x, y)].symbol() == "\u{2503}")
+        .expect("unicode scrollbar thumb");
+    let track_y = (1..area.height - 1)
+        .find(|&y| focused_buf[(scroll_x, y)].symbol() == "\u{2502}")
+        .expect("unicode scrollbar track");
+    assert_eq!(
+        Some(focused_buf[(scroll_x, thumb_y)].fg),
+        unicode.theme.color(crate::ui::theme::Token::Focus)
+    );
+    assert_eq!(
+        Some(focused_buf[(scroll_x, track_y)].fg),
+        unicode.theme.color(crate::ui::theme::Token::Border)
+    );
+
+    model.focus = Focus::Editor;
+    let mut unfocused_buf = Buffer::empty(area);
+    render_objects(&model, &Keymap::new(), &unicode, area, &mut unfocused_buf);
+    assert_eq!(
+        Some(unfocused_buf[(scroll_x, thumb_y)].fg),
+        unicode.theme.color(crate::ui::theme::Token::Muted)
+    );
+
+    let ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(area);
+    render_objects(&model, &Keymap::new(), &ascii, area, &mut ascii_buf);
+    assert!((1..area.height - 1).any(|y| ascii_buf[(scroll_x, y)].symbol() == "#"));
+    assert!((1..area.height - 1).any(|y| ascii_buf[(scroll_x, y)].symbol() == "|"));
+}
+
+#[test]
+fn objects_filter_uses_surface_alt_strip_and_highlights_unselected_utf8_matches() {
+    use crate::app::tree::MetadataPayload;
+    use crate::postgres::ObjectSummary;
+    use ratatui::style::Modifier;
+
+    let mut model = Model::new(100);
+    update(&mut model, Message::Connected(session()));
+    update(
+        &mut model,
+        Message::SchemasLoaded(Box::new(Ok(vec![schema("public", 2)]))),
+    );
+    model.tree.selected = 1;
+    let (req, path, _) = model.tree.expand_selected().expect("expand tables");
+    model.tree.apply(
+        req,
+        &path,
+        MetadataPayload::Objects(vec![
+            ObjectSummary {
+                schema: "public".into(),
+                name: "café_Orders".into(),
+                kind: ObjectKind::Table,
+                readable: true,
+                detail: None,
+            },
+            ObjectSummary {
+                schema: "public".into(),
+                name: "audit_orders".into(),
+                kind: ObjectKind::Table,
+                readable: true,
+                detail: None,
+            },
+        ]),
+    );
+    model.focus = Focus::Objects;
+    model.tree.filtering = true;
+    model.tree.filter = "ORD".into();
+    // Keep row 0 ("public") selected so the object rows below are unselected.
+    model.tree.selected = 0;
+
+    let pres = presentation();
+    let area = Rect::new(0, 0, 44, 10);
+    let mut buf = Buffer::empty(area);
+    render_objects(&model, &Keymap::new(), &pres, area, &mut buf);
+
+    let stripe_bg = pres.theme.stripe().bg.expect("SurfaceAlt bg");
+    for x in 1..area.width - 1 {
+        assert_eq!(
+            buf[(x, 1)].bg,
+            stripe_bg,
+            "filter strip cell at x={x} uses SurfaceAlt"
+        );
+    }
+
+    let focus_fg = pres.theme.color(crate::ui::theme::Token::Focus);
+    let cafe_y = (2..area.height - 1)
+        .find(|&y| {
+            (1..area.width - 1)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("café_Orders")
+        })
+        .expect("utf-8 filtered row");
+    let row_str: String = (0..area.width).map(|x| buf[(x, cafe_y)].symbol()).collect();
+    let ord_x = row_str[..row_str.find("Ord").expect("Ord substring")]
+        .chars()
+        .count() as u16;
+    for offset in 0..3 {
+        let cell = &buf[(ord_x + offset, cafe_y)];
+        assert_eq!(Some(cell.fg), focus_fg);
+        assert!(
+            cell.modifier
+                .contains(Modifier::BOLD | Modifier::UNDERLINED)
+        );
+    }
+    let c_x = row_str[..row_str.find("caf").expect("caf prefix")]
+        .chars()
+        .count() as u16;
+    assert!(!buf[(c_x, cafe_y)].modifier.contains(Modifier::UNDERLINED));
+}

@@ -1,13 +1,13 @@
 use super::{
-    action_key_label, hairline_rule, input_cursor, inset_empty_area, pane_block_line,
-    wrapped_line_count,
+    action_key_label, focus_accent_style, hairline_rule, input_cursor, inset_empty_area,
+    pane_block_line_with_motion, render_scrollbar, wrapped_line_count,
 };
 use crate::app::model::{Focus, Model};
 use crate::query::value::{display_width, sanitize_for_display, truncate_to_width};
 use crate::ui::glyphs::Icon;
 use crate::ui::keymap::Keymap;
 use crate::ui::layout::Presentation;
-use crate::ui::theme::Token;
+use crate::ui::theme::{Theme, Token};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -46,12 +46,16 @@ pub(crate) fn render_objects(
     let theme = &presentation.theme;
     let focused = model.focus == Focus::Objects;
     let unicode = !presentation.glyphs.is_ascii();
+    let focus_pulse = (focused && !model.reduced_motion && !presentation.reduced_motion)
+        .then(|| model.motion().focus_pulse())
+        .flatten();
 
     // The title doubles as a breadcrumb, so the path to the selected object is
     // visible without a second row of interface.
-    let block = pane_block_line(
-        objects_title_line(model, presentation, focused, area.width),
+    let block = pane_block_line_with_motion(
+        objects_title_line(model, presentation, focused, focus_pulse, area.width),
         focused,
+        focus_pulse,
         presentation,
     );
     let inner = block.inner(area);
@@ -121,15 +125,19 @@ pub(crate) fn render_objects(
         );
         let [filter_area, _] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
-        Paragraph::new(Line::from(Span::styled(
-            prompt,
-            theme.style(if model.tree.filtering {
-                Token::Focus
-            } else {
-                Token::Muted
-            }),
-        )))
-        .render(filter_area, buf);
+        let filter_token = if model.tree.filtering {
+            Token::Focus
+        } else {
+            Token::Muted
+        };
+        let filter_width = usize::from(filter_area.width);
+        let prompt = truncate_to_width(&prompt, filter_width, unicode);
+        let pad = filter_width.saturating_sub(display_width(&prompt));
+        let mut filter_spans = vec![Span::styled(prompt, theme.on_stripe(filter_token))];
+        if pad > 0 {
+            filter_spans.push(Span::styled(" ".repeat(pad), theme.stripe()));
+        }
+        Paragraph::new(Line::from(filter_spans).style(theme.stripe())).render(filter_area, buf);
     }
 
     if rows.is_empty() {
@@ -143,8 +151,9 @@ pub(crate) fn render_objects(
         .selected
         .saturating_sub(visible.saturating_sub(1))
         .min(rows.len().saturating_sub(1));
-
-    let max_row_width = usize::from(body.width);
+    let needs_scrollbar = rows.len() > visible && body.width > 1;
+    let max_row_width = usize::from(body.width).saturating_sub(usize::from(needs_scrollbar));
+    let filter_query = model.tree.filter.trim();
     let mut selected_y = None;
 
     for (screen_row, (index, row)) in rows
@@ -238,7 +247,13 @@ pub(crate) fn render_objects(
                     remaining_after_prefix,
                 );
                 let label = truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                spans.push(Span::styled(label, theme.style(label_token)));
+                push_highlighted_label(
+                    &mut spans,
+                    &label,
+                    filter_query,
+                    theme.style(label_token),
+                    theme,
+                );
             }
             crate::app::tree::RowKind::Group(kind) => {
                 let budget = push_icon_and_budget(
@@ -260,12 +275,24 @@ pub(crate) fn render_objects(
                     let count_str = format!(" ({count})");
                     let name_budget = budget.saturating_sub(display_width(&count_str));
                     let plural = truncate_to_width(group_kind.plural(), name_budget, unicode);
-                    spans.push(Span::styled(plural, theme.style(Token::Text)));
+                    push_highlighted_label(
+                        &mut spans,
+                        &plural,
+                        filter_query,
+                        theme.style(Token::Text),
+                        theme,
+                    );
                     spans.push(Span::styled(count_str, theme.style(Token::Muted)));
                 } else {
                     let label =
                         truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                    spans.push(Span::styled(label, theme.style(Token::Text)));
+                    push_highlighted_label(
+                        &mut spans,
+                        &label,
+                        filter_query,
+                        theme.style(Token::Text),
+                        theme,
+                    );
                 }
             }
             crate::app::tree::RowKind::Object { kind, readable } => match kind {
@@ -278,7 +305,13 @@ pub(crate) fn render_objects(
                     );
                     let label =
                         truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                    spans.push(Span::styled(label, theme.style(Token::Muted)));
+                    push_highlighted_label(
+                        &mut spans,
+                        &label,
+                        filter_query,
+                        theme.style(Token::Muted),
+                        theme,
+                    );
                 }
                 crate::postgres::ObjectKind::Extension => {
                     let budget = push_icon_and_budget(
@@ -289,7 +322,13 @@ pub(crate) fn render_objects(
                     );
                     let label =
                         truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                    spans.push(Span::styled(label, theme.style(Token::Text)));
+                    push_highlighted_label(
+                        &mut spans,
+                        &label,
+                        filter_query,
+                        theme.style(Token::Text),
+                        theme,
+                    );
                 }
                 _ => {
                     let budget = push_icon_and_budget(
@@ -305,7 +344,13 @@ pub(crate) fn render_objects(
                     };
                     let label =
                         truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                    spans.push(Span::styled(label, theme.style(label_token)));
+                    push_highlighted_label(
+                        &mut spans,
+                        &label,
+                        filter_query,
+                        theme.style(label_token),
+                        theme,
+                    );
                 }
             },
             crate::app::tree::RowKind::Column { primary_key, .. } => {
@@ -326,7 +371,13 @@ pub(crate) fn render_objects(
                     remaining_after_prefix,
                 );
                 let label = truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                spans.push(Span::styled(label, theme.style(label_token)));
+                push_highlighted_label(
+                    &mut spans,
+                    &label,
+                    filter_query,
+                    theme.style(label_token),
+                    theme,
+                );
             }
             crate::app::tree::RowKind::Message => {
                 let budget = push_icon_and_budget(
@@ -336,7 +387,13 @@ pub(crate) fn render_objects(
                     remaining_after_prefix,
                 );
                 let label = truncate_to_width(&sanitize_for_display(&row.label), budget, unicode);
-                spans.push(Span::styled(label, theme.style(Token::Muted)));
+                push_highlighted_label(
+                    &mut spans,
+                    &label,
+                    filter_query,
+                    theme.style(Token::Muted),
+                    theme,
+                );
             }
         }
 
@@ -363,9 +420,94 @@ pub(crate) fn render_objects(
 
     if let Some(sy) = selected_y {
         let selection_style = theme.style(Token::Selection);
-        for x in body.x..body.x.saturating_add(body.width) {
+        let row_end = body
+            .x
+            .saturating_add(u16::try_from(max_row_width).unwrap_or(body.width));
+        for x in body.x..row_end {
             buf[(x, sy)].set_style(selection_style);
         }
+    }
+
+    if needs_scrollbar {
+        render_scrollbar(
+            rows.len(),
+            visible,
+            offset,
+            presentation,
+            focused,
+            Rect {
+                x: body.x + body.width.saturating_sub(1),
+                y: body.y,
+                width: 1,
+                height: body.height,
+            },
+            buf,
+        );
+    }
+}
+
+fn push_highlighted_label(
+    spans: &mut Vec<Span<'static>>,
+    label: &str,
+    filter: &str,
+    base_style: Style,
+    theme: &Theme,
+) {
+    if filter.is_empty() || label.is_empty() {
+        spans.push(Span::styled(label.to_owned(), base_style));
+        return;
+    }
+    let chars: Vec<(usize, usize, char)> = label
+        .char_indices()
+        .map(|(start, ch)| {
+            (
+                start,
+                start + ch.len_utf8(),
+                ch.to_lowercase().next().unwrap_or(ch),
+            )
+        })
+        .collect();
+    let needle: Vec<char> = filter
+        .chars()
+        .map(|ch| ch.to_lowercase().next().unwrap_or(ch))
+        .collect();
+    if needle.is_empty() || needle.len() > chars.len() {
+        spans.push(Span::styled(label.to_owned(), base_style));
+        return;
+    }
+
+    let mut matched = vec![false; chars.len()];
+    let mut idx = 0usize;
+    while idx + needle.len() <= chars.len() {
+        if (0..needle.len()).all(|k| chars[idx + k].2 == needle[k]) {
+            matched[idx..idx + needle.len()].fill(true);
+            idx += needle.len();
+        } else {
+            idx += 1;
+        }
+    }
+
+    let highlight_style = theme
+        .style(Token::Focus)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let mut run_start = 0usize;
+    while run_start < chars.len() {
+        let is_match = matched[run_start];
+        let mut run_end = run_start + 1;
+        while run_end < chars.len() && matched[run_end] == is_match {
+            run_end += 1;
+        }
+        let byte_start = chars[run_start].0;
+        let byte_end = chars[run_end - 1].1;
+        spans.push(Span::styled(
+            label[byte_start..byte_end].to_owned(),
+            if is_match {
+                highlight_style
+            } else {
+                base_style
+            },
+        ));
+        run_start = run_end;
     }
 }
 
@@ -373,6 +515,7 @@ fn objects_title_line(
     model: &Model,
     presentation: &Presentation,
     focused: bool,
+    focus_pulse: Option<f32>,
     area_width: u16,
 ) -> Line<'static> {
     let theme = &presentation.theme;
@@ -388,8 +531,9 @@ fn objects_title_line(
     if zoomed {
         spans.push(Span::styled("(zoomed) ", theme.style(Token::Info)));
     }
+    let focus_style = focus_accent_style(theme, focus_pulse).add_modifier(Modifier::BOLD);
     let primary_style = if focused {
-        theme.style(Token::Focus).add_modifier(Modifier::BOLD)
+        focus_style
     } else {
         theme.style(Token::Header)
     };
@@ -455,10 +599,7 @@ fn objects_title_line(
     }
 
     if focused {
-        spans.push(Span::styled(
-            " [focused]",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(" [focused]", focus_style));
     }
     Line::from(spans)
 }

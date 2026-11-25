@@ -93,8 +93,11 @@ sorted column header when column width allows, and a hairline scroll indicator
 (`┃` thumb on `│` track, `#` on `|` in ASCII, `Token::Focus` when focused and
 `Token::Muted` when unfocused) when there are rows below the fold. Running queries
 render inside an inset area with the cancel key styled as `Theme::keycap(Token::Focus)`.
-The grid features a multi-span semantic toolbar with `Token::Border` pipe delimiters and
-`Token::Focus` selected column accents. When query errors occur, diagnostic labels
+The grid features a multi-span semantic toolbar with `Token::Border` pipe delimiters,
+`Token::Focus` selected column accents, and when width allows and rows exist, a
+compact right-aligned selected-cell coordinate cue (`row/total · col_name` in
+`Token::Muted`/`Token::Info`) that never displaces retention warnings or sort notes.
+When query errors occur, diagnostic labels
 are structured into multi-span coloured prefixes (`While:`, `Object context:`,
 `Catalogue:`, `Location:`, `Likely cause:`, `Next:`). Values that read as numbers
 are right-aligned. That is a heuristic on the shape of the value, not knowledge of
@@ -102,7 +105,10 @@ its type, and it is never described as type-aware: the simple query protocol
 reports no type information.
 
 **Editor.** Line numbers and a block cursor drawn by the renderer, because the
-terminal's own cursor is hidden while the alternate screen is in use. When
+terminal's own cursor is hidden while the alternate screen is in use. The editor
+pane title reports the cursor position alongside the buffer line count
+(`line X, column Y · N lines`) and a `Token::Warning` `[modified]` pill when the
+buffer has unsaved edits. When
 focused, the active row is highlighted with a full-width `SurfaceAlt`
 `CursorLine`, the active line number is emphasised as `CursorLineNr`
 (`Token::Focus` bold when focused, `Token::Header` bold when unfocused), and
@@ -116,6 +122,13 @@ selection bar and kind-based semantic colouring (keywords in `Token::SyntaxKeywo
 functions in `Token::SyntaxNumber`, tables and views in `Token::Info`, columns in
 `Token::Text`, and CTEs in `Token::Focus`). Before this, the editor had no visible
 caret at all.
+
+**Objects.** A hairline vertical scrollbar (`┃`/`│`, `#`/`|` in ASCII,
+`Token::Focus` when focused and `Token::Muted` when unfocused) draws on the
+rightmost column whenever visible tree rows exceed the viewport height. Active
+filtering renders inside a recessed `SurfaceAlt` strip and highlights
+case-insensitive matching filter substrings inside unselected object labels in
+`Token::Focus` with `BOLD | UNDERLINED`.
 
 **Focus.** Three signals at once: the pane title says `[focused]`, the border
 becomes heavier, and the border colour changes. The first two survive with colour
@@ -178,25 +191,30 @@ Three moving things answer "is this still working":
 - A heartbeat that travels back and forth while a statement runs.
 - The bounded US10 boot reveal wordmark on connecting frames.
 
-Five transitions decorate a change that has already happened, each `OutCubic` and
+Eight transitions decorate a change that has already happened, each `OutCubic` and
 bounded in `src/ui/motion.rs`:
 
 - **The theme curtain (`320 ms`).** Switching theme sweeps the new palette across
   the pane body from left to right in 320 ms, eased out. The edge is hard: every
   cell is wholly in the old theme or the new one, because a blend between a
   dark and a light palette passes through colours where text has no contrast.
+  At truecolour only, the single leading column right behind the curtain front
+  paints non-space body border, rule, and text cells in incoming `Token::Focus`
+  ink as a luminous seam while leaving characters and backgrounds untouched.
   The header and footer rails take the new theme in the first frame, and the
   words on screen are identical in every frame. At 16 colours and below the
   new theme appears at once.
 - **The result settle (`520 ms`).** When a statement completes successfully and its
   result is complete, the Results status word starts in the success colour and
-  fades to its resting colour over about half a second, and the column-header
-  hairline rule (`─┼─`) fades from success to `Token::Border`. A failure, a
-  cancellation, a lost connection or a limited result gets no transition and
-  keeps its static colours, because fading any of them toward calm would soften
-  news that is not calm. A `\watch` loop and a generated cell update do not
-  settle either. Only inks move, never a background, and the resting status word
-  is muted ink without dimming, so the last frame of the fade is exactly the
+  fades to its resting colour over about half a second, the column-header
+  hairline rule (`─┼─`) fades from success to `Token::Border`, and visible
+  unselected row-gutter numbers shimmer vertically from `Token::Success` to
+  resting `Token::Muted` (when both pass 4.5:1 contrast on `SurfaceAlt`). A
+  failure, a cancellation, a lost connection or a limited result gets no
+  transition and keeps its static colours, because fading any of them toward calm
+  would soften news that is not calm. A `\watch` loop and a generated cell update
+  do not settle either. Only inks move, never a background, and the resting status
+  word is muted ink without dimming, so the last frame of the fade is exactly the
   resting frame and nothing changes when it ends. A custom theme whose success
   colour reads below 4.5:1 on the pane gets no settle, because a word is never
   painted in an ink it cannot be read in.
@@ -214,10 +232,19 @@ bounded in `src/ui/motion.rs`:
   with `!failed_gate` and a verdict other than `Slower`, a settle starts.
   Failed runs, unmet gates, `Slower` regressions and intermediate baseline
   completions stay static.
+- **The focus pulse (`240 ms`).** Changing pane focus settles the active pane's
+  border and title accent from `Token::Info` to `Token::Focus` (4.5:1 contrast
+  guarded on `SurfacePane`) while keeping the heavier border and `[focused]`
+  marker present from frame 0.
+- **The tab glide (`260 ms`).** Creating, switching, or closing editor buffer
+  tabs settles the active tab pill accent from `Token::Info` to `Token::Focus`
+  (4.5:1 contrast guarded on `SurfaceAlt`).
+- **The plan sweep (`420 ms`).** Cleanly loading a query plan with nodes starts
+  a bounded sweep (`model.motion().plan_sweep()`) for plan micro-bar progression.
 
-Focus changes and overlays do not move. Focus already has its heavier border,
-its colour and the `[focused]` word in the same frame, and the palette and
-completion open too often for a fade to be anything but a delay.
+Overlays do not fade in or out: the palette and completion open too often for a
+fade to be anything but a delay, and focus already announces itself in frame 0
+with its heavier border and `[focused]` label.
 
 **The heartbeat shows time passing, not progress.** PostgreSQL reports no
 progress for a running statement, so nothing in the interface may imply a
@@ -227,8 +254,8 @@ track, moving one cell per busy tick (90 ms) at a constant pace and turning at
 each end, so it never fills, never arrives and never completes. Beside it the
 word `Running` and the elapsed time say what is known.
 
-- **Truecolour**: the head in the information colour with a three-cell tail
-  fading into the track colour behind it.
+- **Truecolour**: the head in the information colour with a five-cell phosphor
+  tail fading smoothly into the track colour behind it.
 - **256 colours**: the same head and tail shapes, with the tail in the track
   colour rather than a blend.
 - **16 colours**: a bold head alone on the track.
