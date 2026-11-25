@@ -26,7 +26,7 @@ Feature 064 executes across two coordinated waves and six focused pull requests 
    - `src/query/plan.rs`: `exclusive_time_ms`, `exclusive_cost`, `share_of_root`, self-time `attention_score`.
    - `src/ui/widgets/{overlays,palette,results,mod}.rs`, `src/ui/layout.rs`: proportional 5-cell plan micro-bars with unclipped badges, palette match highlight, `SurfaceAlt` SQL preview cards, scroll thumb, `modal_table_header_row`, colored benchmark deltas, `BenchSettle` hook, chord keycaps, structured cell inspector guides, and review rail emphasis.
 
-### Wave 2 - Showcase, Editorial README & Feature 064 Docs (PR 5)
+### Wave 2 - Showcase, Editorial README & Feature 064 Docs (PR #143)
 
 Branched from `origin/main` (`da82fe6`, containing PRs #138-#142):
 

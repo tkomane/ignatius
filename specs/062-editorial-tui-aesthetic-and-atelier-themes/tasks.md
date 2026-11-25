@@ -36,4 +36,13 @@
 
 - [x] T018 Update `docs/design/theme-tokens.md`, `docs/support/compatibility.md`, `README.md`, `CHANGELOG.md`, `docs/product/roadmap.md`, `docs/product/agent-delivery-plan.md`, `docs/status.md`, and `tests/documentation_matches_the_build.rs`.
 - [x] T019 Run full `cargo --locked xtask verify`, contract tests, `actionlint`, `diff -u AGENTS.md CLAUDE.md`, sidecar/dash checks, and shut down disposable DB (`cargo --locked xtask db down`).
-- [ ] T020 Push `feat/m16-editorial-tui-aesthetic`, pass all hosted CI and CodeQL checks, merge green PR into `main`, and verify clean post-merge `main` state.
+- [x] T020 Land the Atelier and Paper theme slice and verify the merged source.
+  [PR #123](https://github.com/tkomane/ignatius/pull/123) passed
+  [PR CI](https://github.com/tkomane/ignatius/actions/runs/44949834697) and
+  all three [PR CodeQL analyses](https://github.com/tkomane/ignatius/actions/runs/44949834690).
+  The separate aggregate CodeQL check reported neutral. PR head
+  `52941dbc167cae56d904f1c683f92618e9c84ef6` and merged
+  `a59690d5ab391d3d56f6dff34cbfcedc80c7ddd1` have the same Git tree.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/44950588920) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/44950588862)
+  passed at that revision. The scheduled fixture-drift job skipped.

@@ -4,6 +4,20 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 75 - Reconcile M16 and M18 merge evidence - 25 November 2026
+
+- **W01 / M16 Feature 062 T020.** [PR #123](https://github.com/tkomane/ignatius/pull/123)
+  and merged `a59690d` have the same source tree. The PR and the exact merge
+  commit each passed CI and all three CodeQL analyses. The separate aggregate
+  CodeQL check for the PR reported neutral. [Feature 062 tasks](../specs/062-editorial-tui-aesthetic-and-atelier-themes/tasks.md)
+- **W01 / M18 Feature 064 T011.** [PR #143](https://github.com/tkomane/ignatius/pull/143)
+  and merged `b65a099` have the same source tree. The PR records successful
+  local plain and verified-TLS verification against PostgreSQL 18.7. The local
+  socket, Gitleaks and `cargo-deny` checks skipped. The PR and the exact merge
+  commit passed CI and all three CodeQL analyses, with hosted socket,
+  repository secret and dependency checks executed. Both historical main runs
+  skipped the scheduled fixture-drift comparison. [Feature 064 tasks](../specs/064-tactile-craft-motion-and-devsecops/tasks.md)
+
 ## Wave 74 - Describe the configured authentication provider - 25 November 2026
 
 - **W06 / 017 T001.** Startup and the profile picker use display facts from the
@@ -153,8 +167,7 @@ floating modal shadows, and an expanded animated showcase across PRs #144-#147:
 
 Feature 064 (`064-tactile-craft-motion-and-devsecops`, milestone M18) closed the
 open Wave 68 benchmark cancellation, security reproducibility, contrast test,
-doc drift, and plan-bottleneck gaps across PRs #138-#142 plus the Wave 2
-showcase and editorial README refresh:
+doc drift, and plan-bottleneck gaps across PRs #138-#143.
 
 - **PR #138 & #140, reproducible `cargo xtask security` gate and hygiene
   contracts.** Added `cargo xtask security` (`xtask/src/security.rs`,
@@ -205,7 +218,7 @@ showcase and editorial README refresh:
   `BenchSettle` wiring (`src/ui/layout.rs`), `render_chords` recessed keycaps,
   `render_structured_inspector` indent guides and `Path` strip, and
   `render_sending_review` bottom-rail key highlights.
-- **Wave 2 showcase, hero banners and editorial README (PR 5).** Refined
+- **PR #143, Wave 2 showcase, hero banners and editorial README.** Refined
   showcase fixtures in `src/ui/acceptance/tests.rs` (inline `amount_cents ▾`
   sort chevron, SQL bracket match on `('paid', 'pending')`, multi-tab pills on
   `workbench-atelier` and `workbench-paper`, non-root `Sort` exclusive-time
