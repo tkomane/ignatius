@@ -363,6 +363,8 @@ zero-row result remains eligible when its result set and source are retained.
 Focus changes, filtering, sorting, layout controls, reconnect, cell-update
 completion and an earlier refresh outcome never start a request. Failures and
 connection loss are stated as actual or unknown outcomes without retry.
+If PostgreSQL reports an error position, the diagnostic identifies the
+retained query as its source and leaves the editor caret and focus in place.
 
 ## Transaction state
 

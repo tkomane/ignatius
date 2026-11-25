@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 85 - Keep refresh errors on the retained query - 26 November 2026
+
+- **W02 / 024 T022.** A position-bearing F6 failure identifies the retained
+  query as the source of the server position. The workbench keeps the
+  unrelated draft, editor caret and current focus in place. The reducer
+  retains the server diagnostic and records one failed history outcome.
+  [Feature 024 tasks](../specs/024-retained-result-refresh/tasks.md)
+- **Focused verification.** The regression failed on `2ee0040` by assigning
+  character 8 of the retained SQL to the active draft. All 16 focused
+  refresh tests and seven error-location tests passed with the correction.
+- **Owned macOS arm64 PTY with PostgreSQL 18.7.** The initial query selected
+  an owned test row. With an unrelated file active, renaming its source
+  column on the disposable server caused F6 to report the column error.
+  The baseline moved the editor caret from column 3 to 8 and took focus.
+  The fixed workbench displayed the retained-query location note, left
+  the caret at column 3 and kept focus out of the editor. The PTYs exited
+  zero and the draft file bytes remained intact.
+
 ## Wave 84 - Check the bundled Google Cloud CLI interpreter directly - 26 November 2026
 
 - **W06 / 011 T005.** The account-free dispatch at `ac53497` ran the

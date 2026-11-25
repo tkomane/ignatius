@@ -2298,6 +2298,53 @@ fn refreshing_uses_the_retained_source_and_leaves_the_editor_unchanged() {
 }
 
 #[test]
+fn a_failed_refresh_keeps_the_server_position_off_an_unrelated_draft() {
+    let source = "SELECT sample_value FROM sample_rows;";
+    let mut model = refresh_model(source);
+    model.editor.set_cursor(2);
+    let before = model.editor.clone();
+    let effects = update(&mut model, Message::Action(Action::RefreshResult));
+    let [Effect::Execute { job, sql }] = effects.as_slice() else {
+        panic!("expected one refresh execution");
+    };
+    assert_eq!(sql, source);
+    let diagnostic = Diagnostic::new(
+        DiagnosticKind::Query,
+        "column sample_value does not exist",
+        "running statement 1",
+    )
+    .in_statement(1)
+    .at_position(8);
+    let effects = update(
+        &mut model,
+        Message::ExecutionFinished(failed_execution(*job, diagnostic.clone())),
+    );
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::RecordHistory { sql, outcome: crate::history::Outcome::Failed, .. }] if sql == source
+    ));
+    assert_eq!(model.error.as_ref(), Some(&diagnostic));
+    assert!(
+        model.error_location.is_none(),
+        "the retained statement's position was mapped onto the unrelated draft: {:?}",
+        model.error_location
+    );
+    assert_eq!(model.editor, before);
+    assert_eq!(model.focus, Focus::Results);
+    let note = model
+        .error_location_note
+        .as_deref()
+        .expect("refresh error explains where the server position belongs");
+    assert!(note.contains("reported position belongs to the retained query"));
+    assert!(
+        model.refresh_notice.as_deref().is_some_and(
+            |notice| notice.contains("failed") && notice.contains("nothing was retried")
+        )
+    );
+}
+
+#[test]
 fn refreshing_parameterized_source_prompts_again_before_sending() {
     let mut model = refresh_model("SELECT :value AS value, :other AS other;");
     let before_text = model.editor.text().to_owned();

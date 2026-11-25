@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: A failed retained-result refresh keeps its error position with
+  the retained query and preserves the active editor caret and focus.
 - Fixed: Reviewed cell edits resolve unqualified temporary tables on the
   default PostgreSQL search path.
 - Fixed: A profile switch stops the previous connection's `\watch` loop.

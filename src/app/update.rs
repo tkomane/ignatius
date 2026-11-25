@@ -268,6 +268,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 running_revision,
                 running_source,
                 running_parameterized,
+                running_refresh,
             );
             model.phase = QueryPhase::Idle;
             model.running_for = None;
@@ -1472,6 +1473,7 @@ fn map_error_location(
     running_revision: Option<u64>,
     running_source: Option<StatementSource>,
     running_parameterized: bool,
+    running_refresh: bool,
 ) -> (
     Option<crate::query::error_location::ErrorLocation>,
     Option<String>,
@@ -1481,6 +1483,12 @@ fn map_error_location(
     };
     if error.kind != crate::diagnostics::DiagnosticKind::Query {
         return (None, None);
+    }
+    if running_refresh && error.position.is_some() {
+        return (
+            None,
+            Some("The reported position belongs to the retained query.".to_owned()),
+        );
     }
     if running_revision != Some(model.editor.revision()) {
         return (

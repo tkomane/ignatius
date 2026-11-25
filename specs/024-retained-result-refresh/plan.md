@@ -12,6 +12,15 @@ statement with a visible result, then passes the unchanged source through the
 existing execution and named-parameter paths. The editor remains independent,
 and no refresh is introduced into any passive state transition.
 
+## W02 error position provenance
+
+Use the existing refresh execution flag at the diagnostic mapping boundary.
+Keep the server diagnostic and one history outcome. Describe a reported
+position as belonging to the retained query and keep the editor and focus
+independent. Exercise a reported position with a different draft in the
+editor, then drive the same failure through the normal F6 action on a
+disposable PostgreSQL session.
+
 ## Technical Context
 
 <!--

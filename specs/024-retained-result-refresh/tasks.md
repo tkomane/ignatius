@@ -132,6 +132,13 @@ timer, retry, replay or second persistence route.
 - [x] T021 Mark all completed tasks, update the Feature 024 specification and
   roadmap state only after evidence is recorded, and run the normal-hyphen
   prose scan across all changed documentation.
+- [x] T022 Keep a failed refresh's reported position with the retained query.
+  Verify the unrelated draft, caret, focus, server diagnostic and single
+  history outcome in the reducer and exercise the normal F6 path in a PTY.
+
+The focused regression failed on `2ee0040` and passed with the correction.
+An owned macOS PTY confirmed the result on PostgreSQL 18.7.
+[Wave 85](../../docs/status.md#wave-85---keep-refresh-errors-on-the-retained-query---26-november-2026)
 
 ## Dependencies and execution order
 
