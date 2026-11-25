@@ -10866,6 +10866,37 @@ fn restore_session_restores_exact_buffers_syncs_editor_and_removes_the_journal()
 }
 
 #[test]
+fn restore_session_selects_active_draft_after_omitting_leading_scratch_tab() {
+    use crate::buffer::BufferManager;
+    use crate::recovery::RecoveryJournal;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let mut source = BufferManager::new();
+    source.new_buffer(Some("a.sql".into()), Some("SELECT 'a';".into()));
+    source.active_buffer_mut().editor.set_cursor(4);
+    source.active_buffer_mut().editor.insert(' ');
+    source.new_buffer(Some("b.sql".into()), Some("SELECT 'b';".into()));
+    source.active_idx = 1;
+    let journal = RecoveryJournal::from_buffers(&source, "session-filtered-active", false);
+    journal.save_to_disk(&recovery_dir).expect("seed journal");
+
+    let mut model = Model::new(100);
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    let effects = update(&mut model, Message::Action(Action::RestoreSession));
+    assert!(effects.is_empty());
+    assert_eq!(model.buffers.count(), 2);
+    assert_eq!(model.buffers.active_idx, 0);
+    assert_eq!(model.buffers.active_buffer().title, "a.sql");
+    assert_eq!(model.buffers.active_editor().text(), "SELE CT 'a';");
+    assert_eq!(model.buffers.active_editor().cursor(), 5);
+    assert!(model.buffers.active_editor().is_modified());
+    assert_eq!(model.editor.text(), model.buffers.active_editor().text());
+    assert_eq!(model.editor.cursor(), 5);
+}
+
+#[test]
 fn restore_keeps_edits_typed_after_the_capsule_appeared() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let recovery_dir = temp_dir.path().join("recovery");

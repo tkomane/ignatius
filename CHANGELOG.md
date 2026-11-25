@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Crash recovery restores the active editor draft when empty scratch
+  tabs appeared before it in the journal.
 - Fixed: The generated UPDATE review shows the primary-key identity,
   value-handling explanation and prior-SELECT notice at full body-text contrast.
 - Improved: Reframed Ignatius's product identity (`TAGLINE` and

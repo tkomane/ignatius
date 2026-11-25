@@ -193,13 +193,14 @@ impl RecoveryJournal {
 
     /// Restores the journal's snapshots into a target `BufferManager`.
     ///
-    /// Buffers that were never written to are not restored: an empty tab is
-    /// not worth a recovery decision.
+    /// Empty scratch tabs are omitted. The active position refers to the
+    /// original journal order.
     pub fn restore_into(&self, target: &mut BufferManager) -> usize {
-        let valid_buffers: Vec<&RecoveredBuffer> = self
+        let valid_buffers: Vec<(usize, &RecoveredBuffer)> = self
             .buffers
             .iter()
-            .filter(|b| !b.sql.trim().is_empty() || b.file_path.is_some())
+            .enumerate()
+            .filter(|(_, b)| !b.sql.trim().is_empty() || b.file_path.is_some())
             .collect();
 
         if valid_buffers.is_empty() {
@@ -207,7 +208,7 @@ impl RecoveryJournal {
         }
 
         target.buffers.clear();
-        for (i, b) in valid_buffers.iter().enumerate() {
+        for (i, (_, b)) in valid_buffers.iter().enumerate() {
             let mut ed_buf =
                 EditorBuffer::new((i + 1) as u64, b.title.clone(), Some(b.sql.clone()));
             ed_buf.file_path = b.file_path.clone();
@@ -216,9 +217,13 @@ impl RecoveryJournal {
             target.buffers.push(ed_buf);
         }
 
-        target.active_idx = self
-            .active_buffer_idx
-            .min(target.buffers.len().saturating_sub(1));
+        // The journal index refers to the pre-filtered vector. Select the
+        // first retained original position at or after it, or the last
+        // survivor when the recorded position is out of range.
+        target.active_idx = valid_buffers
+            .iter()
+            .position(|(original_idx, _)| *original_idx >= self.active_buffer_idx)
+            .unwrap_or(valid_buffers.len() - 1);
         target.split_mode = match self.split_mode.as_str() {
             "vertical" => EditorSplitMode::Vertical,
             "horizontal" => EditorSplitMode::Horizontal,

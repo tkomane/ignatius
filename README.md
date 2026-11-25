@@ -356,6 +356,10 @@ ignatius recovery restore --format sql > recovered.sql
 ignatius recovery discard
 ```
 
+In the workbench, `Ctrl+K r` restores the active draft and omits empty scratch
+tabs. If the active tab was empty, recovery selects the next retained tab or
+falls back to the last retained tab.
+
 Paths, file permissions, and retention lifetimes are documented in [data handling](docs/security/data-handling.md).
 
 ---
