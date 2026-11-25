@@ -222,6 +222,21 @@ No new codes:
   per provider, with the date and what it was run against. Until then the
   compatibility document says the mechanism is proven and the provider is not.
 
+## Windows x64 installed-command evidence
+
+W06 measures how the installed Azure CLI MSI launches on the Windows Server
+runner. Run `version --output json` through the same provider subprocess used
+for a connection. Use a synthetic TLS-required target and check the result of
+both the bare `az` name and the known MSI package interpreter. Compare the
+reported version with the installed MSI version. Record the exact runner image
+and source revision, and keep local static checks separate from a hosted run.
+
+Use a temporary Azure profile and isolated test process. The only accepted
+outputs are an installed version match and, for the bare name, the existing
+missing-program diagnostic. No account, token or database is needed. This
+evidence applies to the tested Windows x64 MSI layout. Keep Windows 11 desktop,
+other packages and live Azure PostgreSQL acceptance as separate gates.
+
 ## Assumptions
 
 - The cloud's own command-line tool is a reasonable prerequisite for the person

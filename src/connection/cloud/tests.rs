@@ -716,3 +716,54 @@ async fn w06_crlf_line_endings_are_trimmed_cleanly_from_token() {
         "synthetic-token-from-command"
     );
 }
+
+/// The CI helper starts this test once per route with a private Azure CLI
+/// profile. Only the installed CLI's version is requested or compared.
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[tokio::test]
+#[ignore = "requires scripts/check-windows-azure-msi.ps1 and the x64 MSI"]
+async fn installed_windows_azure_msi_version() {
+    use secrecy::ExposeSecret;
+
+    let route = std::env::var("IGNATIUS_TEST_AZ_ROUTE").expect("MSI probe route");
+    let expected = std::env::var("IGNATIUS_TEST_AZ_VERSION").expect("registered MSI version");
+    let mut command = match route.as_str() {
+        "bare" => vec!["az".to_owned()],
+        "package" => vec![
+            std::env::var("IGNATIUS_TEST_AZ_PYTHON").expect("MSI package interpreter"),
+            "-IBm".to_owned(),
+            "azure.cli".to_owned(),
+        ],
+        _ => panic!("unsupported MSI probe route"),
+    };
+    command.extend(["version", "--output", "json"].map(str::to_owned));
+    let probe = Provider {
+        name: "msi-version-probe".to_owned(),
+        command,
+        extract: Extract::JsonField("azure-cli".to_owned()),
+        timeout: DEFAULT_TIMEOUT,
+        remedy: String::new(),
+    };
+    let outcome = match fetch(&probe, &target(SslMode::VerifyFull)).await {
+        Ok(version) => {
+            assert!(
+                version.expose_secret() == expected,
+                "Azure CLI version differs from the registered MSI"
+            );
+            "version-matched"
+        }
+        Err(error)
+            if route == "bare"
+                && error.kind == DiagnosticKind::Config
+                && error.headline == "az is not installed, or is not on the path" =>
+        {
+            "missing-program"
+        }
+        Err(error) => panic!(
+            "unexpected {route} version command diagnostic: {:?}",
+            error.kind
+        ),
+    };
+    // An explicit receipt prevents a misspelled libtest filter from passing CI.
+    std::fs::write("probe-result", outcome).expect("write the version-probe result");
+}
