@@ -818,7 +818,7 @@ and [exact rehearsal](https://github.com/tkomane/ignatius/actions/runs/447215900
 
 | Target triple | Archive format | Workflow runner | Evidence class | Current state |
 | --- | --- | --- | --- | --- |
-| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, native archive checks | macOS 27.2.1 arm64 verified TLS, cancellation recovery, and installed Warp OSC 11/`--plain`/mode restoration against PostgreSQL 18.7. A separate hosted Warp source renderer displayed a live result and restored the shell. Human interactive signed Warp hand use and VoiceOver auditory review remain open |
+| `aarch64-apple-darwin` | `tar.gz` | `macos-latest` | Hosted packaging and runtime, native archive checks | macOS 27.2.1 arm64 verified TLS, cancellation recovery, and installed Warp OSC 11/`--plain`/mode restoration against PostgreSQL 18.7. A separate hosted Warp source renderer displayed a live result and restored the shell. Human hand use in installed Warp and VoiceOver auditory review remain open |
 | `x86_64-pc-windows-msvc` | `zip` | `windows-latest` | Hosted packaging, runtime and live archive checks | Windows Server 2025 x64 verified TLS against PostgreSQL 17.12. Native Windows 11 Terminal restored its cursor and console modes after running the same x64 archive under emulation. Windows Terminal hand use remains open |
 | `x86_64-unknown-linux-gnu` | `tar.gz` | `ubuntu-24.04` | Hosted packaging and runtime, emulated live archive checks | Ubuntu 24.04.5 x86-64 under emulation verified TLS, consecutive cancellations and PTY restoration against PostgreSQL 18.7. The archive requires `GLIBC_2.39` symbols. Linux desktop hand use remains open |
 
@@ -863,13 +863,16 @@ allowance across all result sets in an execution. It charges actual native
 ResultSet/name/type/row/Cell slots and UTF-8 payload before application-owned
 copies. Descriptions and rows are admitted whole; the first data refusal closes
 further data admission while PostgreSQL rows and CommandComplete are consumed.
-Existing row caps, zero-row count-only mode and the 1 MiB candidate-cell refusal
-remain separate. A CLI row-cap override does not disable this allowance.
+Existing row caps and zero-row count-only mode remain separate. A row still
+eligible for retention is refused if a cell exceeds 1 MiB. A CLI row-cap
+override does not disable the 32 MiB allowance.
 
-This is not RSS, incoming/driver-frame, metadata-cache, spare-capacity or
-control-vector accounting. Old results can coexist with an execution in flight.
-Public synthetic ResultSet construction is not a universal bound. Streaming
-exports keep complete values and do not use this buffered allowance.
+The driver can buffer incoming frames and queue batches before returning rows.
+The allowance covers the current buffered execution and excludes driver
+buffers, prior results, metadata caches, spare capacity and control vectors.
+Public construction of synthetic result sets sits outside the allowance.
+Streaming exports keep complete values and bypass the allowance.
+[Operational resource bounds](../../specs/001-foundation-vertical-slice/contracts/operational-resource-bounds.md#incoming-driver-allocation-boundary)
 
 An unavailable essential description is distinct from a known zero-row answer.
 It retains only its typed reason, source-column count and delivered-row count.

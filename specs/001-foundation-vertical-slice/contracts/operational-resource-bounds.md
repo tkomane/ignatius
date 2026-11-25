@@ -10,7 +10,7 @@
 `W10-007` proved that a row-count cap alone (`--max-rows` / `max_rows_in_memory`) does not bound three distinct resource routes:
 1. Cumulative server notice retention across a statement stream.
 2. Aggregate retained result-set bytes across wide rows or multiple statements in one buffered execution.
-3. Pre-retention wire-protocol frame allocation inside `tokio-postgres` before a `SimpleQueryMessage::Row` reaches application code.
+3. Pre-retention wire framing and buffering inside `tokio-postgres` before a `SimpleQueryMessage::Row` reaches application code.
 
 This contract specifies the distinct operational bounds across all three routes, pins the slow-export-sink measurement seam established in `W10-011`, and unifies the truthful refusal, truncation, unknown-outcome and recovery wording across CLI, plain and interactive surfaces.
 
@@ -22,15 +22,34 @@ This contract specifies the distinct operational bounds across all three routes,
 | --- | --- | --- | --- |
 | **Notice retention (`REL-005`, `W10-012`)** | At most `256` notices and `1,048,576` bytes (`1 MiB`) of retained UTF-8 fields (`severity`, `message`, `code`) per operation; individual messages shortened at `65,536` bytes (`64 KiB`); sticky parameter-privacy scrubbing (`"notice omitted for parameter privacy"`). | [`contracts/notice-retention.md`](notice-retention.md), `src/postgres/session.rs`, `src/query/result.rs` | Wire-level notice frame reading before `NoticeGuard` inspection. |
 | **Aggregate retained-result bytes (`REL-002`, `W10-013`)** | Checked `33,554,432`-byte (`32 MiB`) logical occupied-data allowance shared across all buffered `ResultSet` values in one `Execution`, charging native struct/slot sizes and UTF-8 bytes before copying. Whole-description or whole-row admission latches a retained prefix while continuing to drain and count `rows_seen`. | [`contracts/retained-result-data.md`](retained-result-data.md), `src/query/result.rs`, `src/postgres/session.rs` | Pre-retention `tokio-postgres` row-frame buffers, output/display formatting copies, and metadata caches. |
-| **Single-cell & input payload caps** | Individual retained cell strings are shortened at `65,536` bytes (`64 KiB`) with `[truncated]` metadata; generated cell-update parameters are refused above `16,384` bytes (`16 KiB`); bracketed paste and local SQL formatting are refused above `1,048,576` bytes (`1 MiB`); plan retention is bounded at `1 MiB` and `500` nodes. | `src/query/result.rs`, `src/query/update.rs`, `src/app/editor.rs`, `src/query/format.rs`, `src/query/plan.rs` | Streaming `--output` file exports, which write complete unshortened cell values directly to the sink. |
-| **Incoming driver frame / value allocation** | Bounded at the application boundary by immediately dropping non-admitted rows after `rows_seen` accounting and streaming `--output` exports row-by-row without buffering `ResultSet` vectors. | `src/postgres/session.rs`, `src/query/export.rs` | `tokio-postgres` allocates each incoming PostgreSQL `DataRow` message frame in process memory before yielding it to the stream consumer (`~18.5 MiB` peak RSS observed for an `8 MiB` single value in `W10-007` even when `max_rows = 1` drops the row). |
+| **Single-cell & input payload caps** | A buffered row that is still a candidate for retention is refused if any cell exceeds `1,048,576` bytes (`1 MiB`). Generated cell-update parameters are refused above `16,384` bytes (`16 KiB`). Bracketed paste and local SQL formatting are refused above `1 MiB`. Plan retention is bounded at `1 MiB` and `500` nodes. | `src/query/value.rs`, `src/query/result/retention_budget.rs`, `src/query/update.rs`, `src/app/editor.rs`, `src/query/format.rs`, `src/query/plan.rs` | Rows dropped after the row cap or aggregate allowance is exhausted still count as received. Streaming `--output` exports keep complete values. |
+| **Incoming driver frames and read buffer** | The application caps govern copies and retention after the driver delivers a row or notice. | `vendor/tokio-postgres/src/codec.rs`, `vendor/tokio-postgres/src/connection.rs`, `src/postgres/session.rs` | Driver read and response buffers, including complete messages queued for a consumer. See the boundary below. |
 
-### Architectural rule on incoming frame allocation
+### Incoming driver allocation boundary
 
-Because `tokio-postgres` reads complete backend protocol frames before yielding `SimpleQueryMessage` items, client-side collection caps cannot prevent a single oversized backend frame from transiently occupying the driver read buffer. Therefore:
-1. Ignatius never claims a fixed whole-process RSS ceiling against arbitrary server-sent frame sizes.
-2. Application-owned retention is strictly bounded before copying (`1 MiB` notices, `32 MiB` retained result data, `64 KiB` retained cell text).
-3. Unretained rows and overflow notices are dropped immediately upon arrival without secondary cloning, and complete exports stream through `Session::stream` / `Export::writer` without retaining rows in memory.
+The vendored `tokio-postgres` codec can group multiple complete messages already
+in its read buffer into one response batch. It emits the complete prefix before
+an incomplete frame and leaves the incomplete bytes in the buffer. Asynchronous
+messages are emitted separately, and `ReadyForQuery` marks the response complete.
+The driver can hold a batch waiting for the response receiver. Buffered
+ingestion applies the client allowances after delivery. `Session::stream` hands
+complete values to the export sink one row at a time without constructing a
+retained result set. Startup and TLS negotiation have their own driver and
+transport allocations.
+
+W10-007 observed `~18.5 MiB` peak RSS for an `8 MiB` value dropped at the row-cap
+boundary on its measured revision. The current source has no adopted incoming
+frame, driver-buffer or whole-process memory ceiling. A future wire limit needs
+a specific requirement and must define what happens when a valid row or COPY
+data exceeds it. Its verification needs to check the bound before body
+accumulation, preserve complete export below the limit, and cover startup and
+query diagnostics, partial export, write-outcome uncertainty, cancellation and
+reconnection over TCP, TLS and Unix sockets.
+
+The [retained-result contract tests](../../../tests/retained_result_contract.rs)
+cover retained prefixes across result sets, count-only dropping of an oversized
+value, real server errors after a retained prefix, and complete output through
+the streaming path. These cases exercise the application boundary.
 
 ---
 

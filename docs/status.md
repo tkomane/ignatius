@@ -4,13 +4,43 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 71 - Roadmap evidence and resource boundaries - 25 November 2026
+
+- **M19 / 065 T009.** [PR #147](https://github.com/tkomane/ignatius/pull/147)
+  merged at `98327c5`. Its head `baa821b` and the merge commit have the same
+  Git tree. On macOS 27.2.1 arm64 with Homebrew Rust 1.100.0, the local
+  `cargo --locked xtask verify` passed against disposable PostgreSQL 18.7
+  plain and verified TLS. The harness reported 2,371 passes across 54
+  summaries, including one semantic Unix-socket skip. The 24 documentation
+  contracts and the deterministic showcase and motion buffer checks passed.
+- **W05 hosted evidence.** At merged `98327c5`, 17 CI jobs and all three CodeQL
+  analyses passed. The job steps confirm plain and verified-TLS coverage for
+  PostgreSQL 14-18 and a real PostgreSQL 18 Unix socket on Linux. The matrix
+  also passed all three platform test jobs and the Rust 1.90 minimum-version
+  check. The scheduled PostgreSQL fixture-drift comparison skipped on the push.
+  [Main CI](https://github.com/tkomane/ignatius/actions/runs/45557188538) and
+  [main CodeQL](https://github.com/tkomane/ignatius/actions/runs/45557188520).
+- **W10-008.** The codec can collect multiple complete messages already in
+  its read buffer and queue that batch before delivery to the application.
+  The retained-result allowance starts after driver delivery. The contract
+  now records the 1 MiB candidate-cell refusal and the distinct 64 KiB notice
+  message rule. All six retained-result contracts passed on the local plain
+  fixture, including count-only dropping and complete streaming output.
+  [Operational resource bounds](../specs/001-foundation-vertical-slice/contracts/operational-resource-bounds.md#incoming-driver-allocation-boundary)
+- **W11 / 008 T033.** The existing local copy of `ci/44721590021-1` verified
+  against its recorded manifest and all three archive checksums. Its record
+  validates as `blocked` and `release check` returned exit 1 with eight issues.
+  All three targets record signatures and provenance as `not-configured`.
+  GitHub confirmed the [rehearsal aggregate](https://github.com/tkomane/ignatius/actions/runs/44721590021/artifacts/14622777105)
+  was available on 25 November and expires on 27 November 2026 at 12:57:04
+  SAST. [Candidate review and owner decisions](operations/release.md#current-candidate-review)
+
 ## Wave 70 - Product identity, kinetic motion, live theme previews and showcase - 25 November 2026
 
 Feature 065 (`065-terminal-workbench-identity-and-kinetic-ux`, milestone M19)
 reframed Ignatius's product identity around a fast, full-powered terminal
 PostgreSQL workbench and added kinetic transitions, live palette theme previews,
-floating modal shadows, and an expanded animated showcase across PRs #144-#146
-plus Wave 2 PR 4:
+floating modal shadows, and an expanded animated showcase across PRs #144-#147:
 
 - **PR #144, reframed product identity and gleaming boot reveal.** Updated
   `TAGLINE` and `IDENTITY_LINE` (`"the PostgreSQL workbench for your terminal"`)
@@ -35,7 +65,7 @@ plus Wave 2 PR 4:
   drop shadows (`paint_overlay_shadow`) clamped inside body bounds for floating
   overlays (`src/ui/layout.rs`), and a top summary KPI strip (`Nodes`,
   `Planning`, `Execution`, `Hotspot`) in `src/ui/widgets/overlays.rs`.
-- **Wave 2 showcase, 6 animated APNGs, hero SVGs, and README rewrite (PR 4).**
+- **PR #147, 6 animated APNGs, hero SVGs, and README rewrite.**
   Updated `src/ui/acceptance/tests.rs` so the Objects tree overflows with its
   hairline scrollbar and verified assertions for Editor line counts, Results
   coordinate cues, and Plan KPI strip; added `motion_format_and_plan()` and
@@ -4377,26 +4407,20 @@ evidence dependencies, not reasons to reopen those decisions.
 
 ## Next actions, in order
 
-See the current wave above for Milestone 15 and the latest verification.
-The open items below cover correctness, native platform use, accessibility
-and release evidence.
-
-1. **W07:** calibrate the Windows cursor sensor under the owned native contract,
-   preserving `7d167a9`'s three control passes and failed capability. Admit the
-   Guard option/path matrix only after faithful observations; preserve T055a's
-   remaining gaps and T051's hand-use limits. W10-013 is accepted at `54056c2`.
-2. **W10-008:** retain the separate notice and retained-data contracts; finish
-   the incoming-allocation design without claiming driver/startup/RSS ceilings.
-   Preserve cancellation, sticky privacy and unknown write outcomes.
-3. **W05/W07:** retain exact `54056c2` pinned five-major/plain/TLS/socket
-   acceptance, distinct from older frozen measurements. Repeat affected server
-   paths only after Session/protocol changes; Windows ConPTY and hand use remain
-   separately scoped.
-4. **Feature 025/015:** continue theme/pointer/daily-experience contracts after
-   resource work; mouse capture stays off until pointer behavior/parity exists.
-5. **W06/W08/W09:** obtain controlled provider/native/screen-reader evidence when
-   access exists. Synthetic buffers and PTYs do not replace hand use.
-6. **W11/W13/W12/W14:** keep the trust, governance and naming decisions open.
-   Verified branch pushes, pull requests and green merges follow the
-   constitution. Signing, tagging and public release decisions require
-   explicit owner authority.
+1. **W08/W09:** complete installed Warp, Windows 11 Terminal, Linux desktop
+   and applicable WSL journeys with a human operator. Capture VoiceOver and
+   NVDA plain-mode evidence and measure first-use and daily-use journeys.
+   Windows Guard restoration (W07-064 and 001 T055a) already has the 24-case
+   native automated evidence. Foundation T051/T052 and Plain Mode T032/T033
+   remain open for their respective hand-use scopes.
+2. **W06:** obtain controlled Entra, AWS and GCP accounts and database access
+   for the live authentication rows. Record each provider and platform separately.
+3. **W05/W10:** use the merged `98327c5` PostgreSQL matrix as the current
+   automated baseline. Repeat affected paths after Session or protocol changes.
+   Reuse the W10-008 allocation boundary when specifying a wire limit for an
+   observed problem. Any such change must account for PostgreSQL outcomes and
+   streaming export compatibility.
+4. **W11/W13, then W12/W14:** review release identity, trust, canonical evidence
+   retention and distribution decisions before selecting and verifying the exact
+   candidate. Feature 008 T033/T035 remain open. Signing, tagging and public
+   release require explicit owner authority.

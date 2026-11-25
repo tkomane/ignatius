@@ -9,11 +9,18 @@
 - [x] T002 Add `FocusPulse`, `TabGlide`, and `PlanSweep` transitions, luminous truecolour `ThemeCurtain` seam, Objects scrollbar & filter highlights, 5-cell phosphor comet, Results row-gutter shimmer & coordinate readout, and Editor line-count title (`PR #145`).
 - [x] T003 Add live Spotlight mini-workbench theme previews (`Theme: ...`), floating overlay 1-cell architectural drop shadows (`paint_overlay_shadow`), and Plan Explorer KPI strip (`PR #146`).
 
-## Phase 2: Wave 2 - Showcase Stills, 6 APNGs, Hero SVGs, README & Wave 70 Docs (PR 4)
+## Phase 2: Wave 2 - Showcase Stills, 6 APNGs, Hero SVGs, README & Wave 70 Docs (PR #147)
 
 - [x] T004 Update `src/ui/acceptance/tests.rs` showcase fixtures and add `motion_format_and_plan()` and `motion_palette_themes()` sequences.
 - [x] T005 Re-render and visually inspect all 14 `docs/assets/screenshots/*.png` stills and all 6 animated `docs/assets/motion/*.png` + `-still.png` posters via `scripts/render-showcase.py`.
 - [x] T006 Update `docs/assets/banner-dark.svg` and `docs/assets/banner-light.svg` and verify Quick Look rasterizations.
 - [x] T007 Rewrite `README.md` around Ignatius's terminal PostgreSQL workbench identity with all 6 motion `<picture>` blocks, passing `tests/documentation_matches_the_build.rs`.
 - [x] T008 Author Feature 065 docs and reconcile `CHANGELOG.md`, `docs/product/roadmap.md`, and `docs/status.md` (Wave 70).
-- [ ] T009 Run `cargo --locked xtask verify`, commit on `feat/065-showcase-animations-and-readme`, push, and open PR 4.
+- [x] T009 Verify the showcase update from `feat/065-showcase-animations-and-readme`.
+  [PR #147](https://github.com/tkomane/ignatius/pull/147) merged at `98327c5`.
+  On 25 November 2026, `cargo --locked xtask verify` passed on that revision
+  with macOS arm64 and PostgreSQL 18.7 plain and verified TLS. The local Unix
+  socket test skipped because its fixture URI was unset. The merge then passed
+  [hosted CI](https://github.com/tkomane/ignatius/actions/runs/45557188538),
+  including PostgreSQL 14-18 and a real Linux socket, and [CodeQL](https://github.com/tkomane/ignatius/actions/runs/45557188520).
+  [Verification record](../../docs/status.md#wave-71---roadmap-evidence-and-resource-boundaries---25-november-2026)

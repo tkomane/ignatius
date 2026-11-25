@@ -1,6 +1,6 @@
 # Roadmap
 
-**Reconciled 2026-11-07; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-11-25; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
 The implemented source through Feature 025 (`US1-US10`, `T001-T059`) and the
 Waves 13-15 4-tier TUI elevation and showcase suite (`PR53`, `PR54`, `PR57`) is
@@ -252,9 +252,8 @@ M17 (`063-living-surfaces-and-truthful-motion`) is delivered in source as of
   The focus sweep and overlay arrival fade were specified and then cut after
   design review, because they fired too often to earn their motion.
   The benchmark overlay's unguarded `m` re-run and the `EXPLAIN ANALYZE`
-  classification gap, both found during review, were fixed on 2026-11-24, and
-  benchmark session safety followed; cancelling a running benchmark stays open
-  (see `docs/status.md`).
+  classification gap, both found during review, were fixed on 2026-11-24.
+  M18 delivered running benchmark cancellation in PR #139.
 
 M18 (`064-tactile-craft-motion-and-devsecops`) is delivered in source as of
 2026-11-24 (#138, #139, #140, #141, #142, and Wave 2 showcase PR):
@@ -270,6 +269,14 @@ M18 (`064-tactile-craft-motion-and-devsecops`) is delivered in source as of
   micro-bars, palette SQL preview cards and scroll thumbs, and studio modal
   headers/deltas (#142), alongside refreshed showcase stills, the `boot-reveal`
   APNG, elevated hero SVGs, and editorial `README.md`.
+
+M19 (`065-terminal-workbench-identity-and-kinetic-ux`) is delivered in source
+as of 2026-11-25 (PRs #144-#147). Feature 065 T009 records local verification
+and the merged revision's hosted CI and CodeQL. The W05 baseline covers plain
+and verified TLS on PostgreSQL 14-18 and a real Linux Unix socket. Native
+hand use and the exact release-candidate gates remain open.
+[Feature 065 tasks](../../specs/065-terminal-workbench-identity-and-kinetic-ux/tasks.md) and
+[current evidence](../status.md#wave-71---roadmap-evidence-and-resource-boundaries---25-november-2026).
 
 ```mermaid
 flowchart LR
@@ -296,9 +303,13 @@ flowchart LR
     M15 --> M16["M16 Editorial TUI Aesthetic & Atelier/Paper Themes (062)"]
     M16 --> M17["M17 Living Surfaces (063)"]
     M17 --> M18["M18 Tactile Craft, Motion & DevSecOps (064)"]
+    M18 --> M19["M19 Workbench Identity & Kinetic UX (065)"]
 ```
 
 ## Start here
+
+Resume at the [current next actions](../status.md#next-actions-in-order).
+Use the sequence below to identify which checks a change needs to repeat.
 
 1. **W01/W02/W04/W10:** preserve the current integration baseline, close any
    remaining asynchronous connection-envelope gaps, probe generated-write

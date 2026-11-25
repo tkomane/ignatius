@@ -21,7 +21,7 @@ Feature 065 executes across two coordinated waves and four focused pull requests
    - `src/ui/layout.rs`: `paint_overlay_shadow` 1-cell architectural drop shadow for floating overlays.
    - `src/ui/widgets/overlays.rs`: `render_plan_kpi_strip` (`Nodes`, `Planning`, `Execution`, `Hotspot`) and studio overlay polish.
 
-### Wave 2 - Showcase, Animations, Hero Banners & Punchy README (PR 4)
+### Wave 2 - Showcase, Animations, Hero Banners & Punchy README (PR #147)
 
 Branched from `origin/main` (`ced9be8`, containing PRs #144-#146):
 
