@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 73 - Restore the active editor draft - 25 November 2026
+
+- **W10 / 043 T011.** Crash recovery maps the journal's active position
+  through the empty scratch-tab filter. A retained draft keeps focus. An
+  omitted active tab selects the next retained tab, with the last retained
+  tab as the fallback. Both regression tests failed against the old behavior
+  and 27 focused recovery tests plus eight binary contracts passed with the
+  fix. [Feature 043 tasks](../specs/043-session-state-and-crash-recovery/tasks.md#w10-recovery-follow-up-2026-11-25)
+- **Owned macOS PTY.** At `36d7ae2` plus the recovery changes, the local
+  arm64 binary built with Homebrew Rust 1.100.0 opened a synthetic recovery
+  capsule using an absent Unix-socket target. `Ctrl+K r` restored `[draft A,
+  draft B]`, focused A with its SQL intact and wrote a matching checkpoint.
+  `Ctrl+Q` exited zero. Native terminal hand use remains a separate gate.
+- **Integration baseline.** The base `36d7ae2` passed post-merge
+  [CI](https://github.com/tkomane/ignatius/actions/runs/45675384844) and
+  [CodeQL](https://github.com/tkomane/ignatius/actions/runs/45675384922) before
+  this work began.
+
 ## Wave 72 - Review readability and release authorization - 25 November 2026
 
 - **W09 J5 / 018 T041.** Generated UPDATE reviews show the primary-key

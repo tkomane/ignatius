@@ -68,3 +68,18 @@
 - Run `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings`.
 - Run full verification battery: `cargo xtask verify`.
 - Update `docs/status.md`, `CHANGELOG.md`, and `README.md`.
+
+## W10 restore the active draft - 2026-11-25
+
+The journal writes the active index before recovery filters empty scratch
+tabs. Keep the original index alongside each retained buffer and select the
+first retained index at or after the recorded position, falling back to the
+last retained buffer. The existing restore action synchronizes the visible
+editor from that selection. Use the version 1 journal and existing split,
+cursor, dirty marker and file association restoration.
+
+Prove the failure with an empty scratch tab before the active draft and
+another retained draft after it. Cover omitted or out-of-range active
+positions and a retained empty file-backed tab. Exercise the ordinary
+interactive restore action with synthetic content and run the local verifier,
+hosted PR checks and post-merge CI and CodeQL.

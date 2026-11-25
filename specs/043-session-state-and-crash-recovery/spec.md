@@ -19,6 +19,12 @@ An operator had 3 open editor tabs with unsaved schema migration drafts when the
   `[CRASH RECOVERY: 3 UNSAVED BUFFERS DETECTED] [Ctrl+K r] Restore  [Ctrl+K d] Discard`
 - Pressing `Ctrl+K r` immediately restores all 3 tabs with their respective titles, file path associations, cursor positions, dirty markers, and split layout.
 
+Recovery restores the active tab by its original journal position. Empty
+scratch tabs are omitted and file-backed tabs are retained. If the active
+tab was omitted, select the first retained tab after it, or the last retained
+tab when none follows. An out-of-range active position also selects the last
+retained tab. If no tab can be restored, keep the current workspace.
+
 ### Scenario 2: Headless Scriptable Recovery
 An operator working in an automated terminal environment or headless server checks if any orphaned queries remain:
 - `ignatius recovery status` prints a clear summary of unrecovered buffers, timestamps, and session ID.

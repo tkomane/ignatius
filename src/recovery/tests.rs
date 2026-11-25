@@ -129,6 +129,43 @@ fn restore_into_rebuilds_exact_buffer_state() {
     );
 }
 
+#[test]
+fn restore_selection_uses_surviving_journal_positions() {
+    let mut source = BufferManager::new();
+    source.new_buffer(Some("a.sql".into()), Some("SELECT 'a';".into()));
+    source.new_buffer(None, Some(" \t".into()));
+    source.new_buffer(Some("file.sql".into()), None);
+    source.active_buffer_mut().file_path = Some(PathBuf::from("file.sql"));
+    source.new_buffer(Some("b.sql".into()), Some("SELECT 'b';".into()));
+    source.new_buffer(None, None);
+    let mut journal = RecoveryJournal::from_buffers(&source, "selection", false);
+
+    for (recorded, expected) in [
+        (0, "a.sql"),
+        (1, "a.sql"),
+        (2, "file.sql"),
+        (3, "file.sql"),
+        (5, "b.sql"),
+        (usize::MAX, "b.sql"),
+    ] {
+        journal.active_buffer_idx = recorded;
+        let mut target = BufferManager::new();
+        assert_eq!(journal.restore_into(&mut target), 3);
+        assert_eq!(target.active_buffer().title, expected, "slot {recorded}");
+        let titles: Vec<_> = target
+            .buffers
+            .iter()
+            .map(|tab| tab.title.as_str())
+            .collect();
+        assert_eq!(titles, ["a.sql", "file.sql", "b.sql"]);
+        assert_eq!(
+            target.buffers[1].file_path.as_deref(),
+            Some(Path::new("file.sql"))
+        );
+        assert!(target.buffers[1].editor.text().is_empty());
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn the_journal_and_its_directory_are_owner_only_on_unix() {
