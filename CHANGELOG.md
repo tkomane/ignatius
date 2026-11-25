@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Reviewed cell edits resolve unqualified temporary tables on the
+  default PostgreSQL search path.
 - Fixed: A profile switch stops the previous connection's `\watch` loop.
   Bare `\watch` uses SQL from the current connection.
 - Fixed: Crash recovery retains a file-backed draft after its text was

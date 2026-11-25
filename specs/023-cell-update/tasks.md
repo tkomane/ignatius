@@ -78,6 +78,16 @@ confirmation emits one parameterized execution effect.
   relation named `only` stays usable, with focused evidence in
   `cargo test --locked --lib query::update`.
 
+- [x] T021 Resolve unqualified temporary tables at their effective position in
+  the session relation search path. Confirm a live result and cell-edit plan
+  on a disposable temporary table without changing the default search path.
+
+On PostgreSQL 18.7, the `e8fd6ff` regression selected the temporary row and
+failed to resolve its relation for the edit. The fix resolves the physical
+temporary schema, preserves the row through review, and changes exactly one
+row on explicit execution.
+[Wave 82](../../docs/status.md#wave-82---resolve-temporary-tables-for-reviewed-cell-edits---25-november-2026)
+
 ## Dependencies and execution order
 
 - T001 precedes all implementation.

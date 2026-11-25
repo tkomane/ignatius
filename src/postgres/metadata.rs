@@ -396,10 +396,9 @@ pub async fn columns(
 /// Resolves one source relation and reads the permission and key facts needed
 /// for a generated cell update.
 ///
-/// Schema and relation names are data throughout this query. In particular,
-/// an unqualified relation is matched against the session's effective
-/// `current_schemas(false)` in search-path order, while a qualified relation
-/// is matched exactly. No name is interpolated into catalogue SQL.
+/// Unqualified names follow the session's explicit search path, with its
+/// temporary schema first when PostgreSQL searches it implicitly. Qualified
+/// names match exactly. Names are bound parameters throughout the query.
 pub async fn update_relation(
     client: &Client,
     schema: Option<&str>,
@@ -413,9 +412,10 @@ pub async fn update_relation(
          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          WHERE c.relname = $1 \
            AND (($2::text IS NOT NULL AND n.nspname = $2) \
-             OR ($2::text IS NULL AND n.nspname = ANY(pg_catalog.current_schemas(false)))) \
-         ORDER BY CASE WHEN $2::text IS NULL \
-                      THEN pg_catalog.array_position(pg_catalog.current_schemas(false), n.nspname) \
+             OR ($2::text IS NULL AND (n.nspname = ANY(pg_catalog.current_schemas(false)) \
+               OR n.oid = pg_catalog.pg_my_temp_schema()))) \
+         ORDER BY CASE WHEN $2::text IS NULL THEN \
+                      COALESCE(pg_catalog.array_position(pg_catalog.current_schemas(false), n.nspname), 0) \
                       ELSE 0 END, n.nspname \
          LIMIT 1";
 
