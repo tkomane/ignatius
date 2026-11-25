@@ -11332,6 +11332,117 @@ fn metacommand_catalog_query_and_shell_refusal_behave_safely() {
     );
 }
 
+fn watched_profile() -> Model {
+    let mut model = Model::new(100);
+    model.connection_profiles = crate::app::connection_picker::summaries(
+        &BTreeMap::from([
+            (
+                "local-first".into(),
+                crate::config::schema::Profile::default(),
+            ),
+            (
+                "local-second".into(),
+                crate::config::schema::Profile::default(),
+            ),
+        ]),
+        &BTreeMap::new(),
+    );
+    select_watch_profile(&mut model, "local-first");
+    model
+}
+
+fn select_watch_profile(model: &mut Model, profile: &str) {
+    update(model, Message::Action(Action::OpenConnectionPicker));
+    for ch in profile.chars() {
+        update(model, Message::Action(Action::Insert(ch)));
+    }
+    assert_eq!(
+        update(model, Message::Action(Action::Activate)),
+        vec![Effect::ConnectProfile {
+            profile: Some(profile.into())
+        }],
+    );
+    let mut info = session();
+    info.database = profile.into();
+    info.target = format!("app@localhost/{profile}");
+    let generation = model.connection_generation;
+    update(
+        model,
+        Message::ForConnection {
+            generation,
+            message: Box::new(Message::Connected(info)),
+        },
+    );
+}
+
+fn complete_watch_test_query(model: &mut Model, input: &str) {
+    model.editor.set_text(input);
+    let effects = update(model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected one synthetic SELECT effect, got {effects:?}");
+    };
+    update(
+        model,
+        Message::ExecutionFinished(execution(*job, ExecutionStatus::Succeeded, &["1"])),
+    );
+}
+
+#[test]
+fn w02_watch_profile_switch_retires_the_previous_timer() {
+    let mut model = watched_profile();
+    complete_watch_test_query(&mut model, r"SELECT 1; \watch 60");
+    assert!(model.watch.is_some());
+    select_watch_profile(&mut model, "local-second");
+    let effects = update(&mut model, Message::WatchTick);
+    assert!(
+        effects.is_empty(),
+        "old timer emitted {effects:?} on local-second"
+    );
+    assert!(model.watch.is_none());
+}
+
+#[test]
+fn w02_watch_profile_switch_requires_a_current_source_for_bare_watch() {
+    let mut model = watched_profile();
+    complete_watch_test_query(&mut model, "SELECT 1;");
+    select_watch_profile(&mut model, "local-second");
+    model.editor.set_text(r"\watch 60");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(
+        effects.is_empty(),
+        "bare watch emitted {effects:?} before a new source existed"
+    );
+    assert!(model.watch.is_none());
+    assert_eq!(
+        model.error.as_ref().map(|d| d.kind),
+        Some(DiagnosticKind::Usage)
+    );
+    complete_watch_test_query(&mut model, "SELECT 2;");
+    model.editor.set_text(r"\watch 60");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert!(matches!(effects.as_slice(), [Effect::Execute { sql, .. }] if sql == "SELECT 2;"));
+}
+
+#[test]
+fn w02_watch_profile_switch_rejection_keeps_the_current_timer() {
+    let mut model = watched_profile();
+    model.editor.set_text(r"SELECT 1; \watch 60");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected one synthetic SELECT effect");
+    };
+    let generation = model.connection_generation;
+    assert!(update(&mut model, Message::Action(Action::OpenConnectionPicker)).is_empty());
+    assert!(model.palette.is_none());
+    assert_eq!(model.connection_generation, generation);
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(*job, ExecutionStatus::Succeeded, &["1"])),
+    );
+    let effects = update(&mut model, Message::WatchTick);
+    assert!(matches!(effects.as_slice(), [Effect::Execute { sql, .. }] if sql == "SELECT 1;"));
+}
+
 #[test]
 fn watch_loop_starts_ticks_and_stops_on_stop_cancel_and_loss() {
     let mut model = connected();

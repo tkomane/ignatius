@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: A profile switch stops the previous connection's `\watch` loop.
+  Bare `\watch` uses SQL from the current connection.
 - Fixed: Crash recovery retains a file-backed draft after its text was
   cleared, including its path and modified marker.
 - Fixed: The Windows x64 built-in Entra provider can launch the standard

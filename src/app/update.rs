@@ -8302,6 +8302,8 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.connecting_step = Some(ConnectingStep::ResolvingProfile);
     model.phase = QueryPhase::Idle;
     model.last_execution = None;
+    model.last_sql = None;
+    model.watch = None;
     model.retained_data_loss = crate::query::result::RetentionLossSummary::default();
     model.last_elapsed = None;
     model.running_for = None;
