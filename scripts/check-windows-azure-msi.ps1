@@ -120,9 +120,13 @@ try {
     $proxy = 'http://127.0.0.1:' + $socket.LocalEndPoint.Port
     $bare = Invoke-MsiRoute 'bare' $tempRoot.FullName $proxy
     $packaged = Invoke-MsiRoute 'package' $tempRoot.FullName $proxy
+    if ($bare -cne 'missing-program') {
+        throw "Bare az returned $bare. This installation cannot demonstrate the MSI fallback."
+    }
+    $resolved = Invoke-MsiRoute 'resolved' $tempRoot.FullName $proxy
     $image = $env:ImageVersion
     if ($image -notmatch '^\d+(\.\d+)+$') { $image = 'unreported' }
-    Write-Host "Azure CLI MSI x64 version=$version image=$image os=$([Environment]::OSVersion.Version) bare-on-msi-path=$bare package=$packaged"
+    Write-Host "Azure CLI MSI x64 version=$version image=$image os=$([Environment]::OSVersion.Version) bare-on-msi-path=$bare package=$packaged resolved-entra=$resolved"
 } finally {
     $socket.Dispose()
     $tempRoot.Delete($true)

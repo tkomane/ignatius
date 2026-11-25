@@ -17,3 +17,20 @@ Check workflow and script syntax locally. For the opted-in CI run require
 both Windows test receipts and the installed version match. Verify the pull request
 and the exact main revision with CI and CodeQL. Live sign-in and PostgreSQL
 evidence remain independent of the launch probe.
+
+## Windows x64 built-in Entra MSI launcher
+
+Preserve exact registry provenance at provider selection and TLS enforcement
+before process creation. Try one native spawn. A missing-program result for the
+built-in Entra route permits discovery under the x64 Program Files known folder.
+Match the installed `wbin` lexically on PATH, then verify the fixed package
+locations and reject path redirection within them. Use the bundled `python.exe`
+with `-IBm azure.cli`, the existing argument elements and child-only
+`AZ_INSTALLER=MSI`. Both launch choices share the existing timeout, output
+extraction and redaction paths.
+
+Retain the Windows evidence from T001 as the failing baseline. Exercise
+native success, spawn refusal, absent and invalid package layout, configured
+overrides, and a started child that fails. Run the opt-in hosted version probe
+through the runtime's fallback policy on the registered x64 MSI. Record both
+the selected route and its installed version match on the exact source.

@@ -717,6 +717,167 @@ async fn w06_crlf_line_endings_are_trimmed_cleanly_from_token() {
     );
 }
 
+#[test]
+fn only_the_registry_supplied_entra_definition_has_an_msi_launch_route() {
+    let configured = BTreeMap::new();
+    let (stock, launch) = resolve_provider("entra", &configured).unwrap();
+    assert_eq!(launch, Launch::BuiltInEntra);
+    for name in ["aws", "gcp"] {
+        assert_eq!(
+            resolve_provider(name, &configured).unwrap().1,
+            Launch::Direct
+        );
+    }
+    let configured = BTreeMap::from([("entra".into(), stock.clone()), ("Entra".into(), stock)]);
+    for name in ["entra", "Entra"] {
+        assert_eq!(
+            resolve_provider(name, &configured).unwrap().1,
+            Launch::Direct
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_missing_configured_program_keeps_its_diagnostic_at_zero_timeout() {
+    let directory = tempfile::tempdir().expect("test directory");
+    let program = directory.path().join("absent-provider.exe");
+    let provider = Provider {
+        name: "configured".into(),
+        command: vec![program.to_str().expect("fixture path").to_owned()],
+        extract: Extract::Raw,
+        timeout: Duration::ZERO,
+        remedy: String::new(),
+    };
+
+    let error = fetch(&provider, &target(SslMode::Require))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, DiagnosticKind::Config);
+    assert!(
+        error
+            .headline
+            .ends_with("is not installed, or is not on the path")
+    );
+}
+
+#[test]
+fn package_command_prefix_and_child_environment_preserve_the_argument_elements() {
+    use std::ffi::OsStr;
+
+    let python = PathBuf::from("fixture directory").join("python.exe");
+    let arguments = ["version", "--output", "one & literal % argument"].map(str::to_owned);
+    let command = package_command(python.clone(), &arguments);
+    let command = command.as_std();
+    assert_eq!(command.get_program(), python.as_os_str());
+    assert!(
+        command.get_args().eq([
+            "-IBm",
+            "azure.cli",
+            "version",
+            "--output",
+            "one & literal % argument"
+        ]
+        .map(OsStr::new))
+    );
+    assert!(
+        command
+            .get_envs()
+            .eq([(OsStr::new("AZ_INSTALLER"), Some(OsStr::new("MSI")))])
+    );
+}
+
+#[tokio::test]
+async fn missing_native_builtin_can_start_exactly_one_package_child() {
+    let directory = tempfile::tempdir().expect("test directory");
+    let missing = directory.path().join("absent-native.exe");
+    let mut lookups = 0;
+    let child = spawn_provider(
+        missing.to_str().expect("fixture path"),
+        &[],
+        Launch::BuiltInEntra,
+        || false,
+        || {
+            lookups += 1;
+            std::env::current_exe().map(Some)
+        },
+    )
+    .expect("the built-in should start the supplied package executable");
+    // The substitute interpreter is this test binary; libtest rejects Python's
+    // flags. Its nonzero exit is the final outcome of a successfully started child.
+    assert!(
+        !child
+            .wait_with_output()
+            .await
+            .expect("child output")
+            .status
+            .success()
+    );
+    assert_eq!(lookups, 1);
+}
+
+#[tokio::test]
+async fn an_expired_budget_never_starts_the_package() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("absent-native.exe");
+    let missing = missing.to_str().unwrap();
+    let expired = std::cell::Cell::new(false);
+    let result = spawn_provider(
+        missing,
+        &[],
+        Launch::BuiltInEntra,
+        || expired.get(),
+        || {
+            expired.set(true);
+            std::env::current_exe().map(Some)
+        },
+    );
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+    assert!(expired.get(), "the simulated lookup must have run");
+    let result = spawn_provider(
+        missing,
+        &[],
+        Launch::BuiltInEntra,
+        || true,
+        || panic!("a budget already exhausted at native spawn needs no lookup"),
+    );
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+}
+
+#[tokio::test]
+async fn started_denied_and_configured_commands_never_consult_the_msi() {
+    let never = || panic!("the package lookup must not run");
+    let executable = std::env::current_exe().unwrap();
+    for (args, success) in [("--list", true), ("--invalid-libtest-option", false)] {
+        let child = spawn_provider(
+            executable.to_str().unwrap(),
+            &[args.to_owned()],
+            Launch::BuiltInEntra,
+            || false,
+            never,
+        )
+        .unwrap();
+        assert_eq!(
+            child.wait_with_output().await.unwrap().status.success(),
+            success
+        );
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("invalid-native.exe");
+    let absent =
+        spawn_provider(path.to_str().unwrap(), &[], Launch::Direct, || false, never).unwrap_err();
+    assert_eq!(absent.kind(), io::ErrorKind::NotFound);
+    std::fs::write(&path, b"not an executable").unwrap();
+    let denied = spawn_provider(
+        path.to_str().unwrap(),
+        &[],
+        Launch::BuiltInEntra,
+        || false,
+        never,
+    )
+    .unwrap_err();
+    assert_ne!(denied.kind(), io::ErrorKind::NotFound);
+}
+
 /// The CI helper starts this test once per route with a private Azure CLI
 /// profile. Only the installed CLI's version is requested or compared.
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -727,13 +888,24 @@ async fn installed_windows_azure_msi_version() {
 
     let route = std::env::var("IGNATIUS_TEST_AZ_ROUTE").expect("MSI probe route");
     let expected = std::env::var("IGNATIUS_TEST_AZ_VERSION").expect("registered MSI version");
-    let mut command = match route.as_str() {
-        "bare" => vec!["az".to_owned()],
-        "package" => vec![
-            std::env::var("IGNATIUS_TEST_AZ_PYTHON").expect("MSI package interpreter"),
-            "-IBm".to_owned(),
-            "azure.cli".to_owned(),
-        ],
+    let (mut command, launch) = match route.as_str() {
+        "bare" => (vec!["az".to_owned()], Launch::Direct),
+        "package" => (
+            vec![
+                std::env::var("IGNATIUS_TEST_AZ_PYTHON").expect("MSI package interpreter"),
+                "-IBm".to_owned(),
+                "azure.cli".to_owned(),
+            ],
+            Launch::Direct,
+        ),
+        "resolved" => {
+            let (mut entra, launch) =
+                resolve_provider("entra", &BTreeMap::new()).expect("built-in Entra");
+            // Retain the shipping executable and launch policy. Substitute
+            // only the account-free command tail and output field.
+            entra.command.truncate(1);
+            (entra.command, launch)
+        }
         _ => panic!("unsupported MSI probe route"),
     };
     command.extend(["version", "--output", "json"].map(str::to_owned));
@@ -744,7 +916,7 @@ async fn installed_windows_azure_msi_version() {
         timeout: DEFAULT_TIMEOUT,
         remedy: String::new(),
     };
-    let outcome = match fetch(&probe, &target(SslMode::VerifyFull)).await {
+    let outcome = match fetch_selected(&probe, &target(SslMode::VerifyFull), launch).await {
         Ok(version) => {
             assert!(
                 version.expose_secret() == expected,

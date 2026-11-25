@@ -174,6 +174,14 @@ sentences, each naming what to do.
 - **FR-1108**: `{host}`, `{port}`, `{user}` and `{database}` MUST be substituted
   into argument elements whole. No shell is involved at any point.
 
+- **FR-1109**: On the Windows x64 build, the built-in `entra` provider tries
+  its native `az` command first. Only a missing program at process start may
+  select the standard Azure CLI x64 MSI under the Windows Program Files
+  known folder, with that installation's `wbin` on PATH. Launch its bundled
+  interpreter directly with the documented fixed module arguments and the
+  original argument elements. A configured provider always uses its configured
+  program. A process that starts has one outcome under the existing timeout.
+
 ### Security
 
 - **SEC-1101**: The credential is a bearer token. It lives in `SecretString`,

@@ -890,6 +890,7 @@ dependencies = [
  "clap_complete",
  "crossterm",
  "directories",
+ "dirs-sys",
  "futures-util",
  "ratatui",
  "rustls",
@@ -908,6 +909,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
