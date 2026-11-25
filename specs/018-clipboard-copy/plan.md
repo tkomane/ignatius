@@ -176,3 +176,16 @@ required text is present and styled as undimmed body text, then run the existing
 viewport and confirmation tests. Rerender the `reviewed-update` showcase still
 from the fixed buffer and inspect it. Record the local and hosted gates and
 keep human W08/J5 terminal acceptance open.
+
+## W09 sending-review disclosure contrast - 25 November 2026
+
+Use the existing body-text token for the required safety and privacy
+disclosures listed in the shared review viewport contract. Apply this in the
+review document so the same rows feed viewport measurement and rendering.
+Retain the wording, preview text and syntax styling. Review rendering and
+navigation perform no clipboard, database or history activity.
+
+Start with failing assertions on cells in each real confirmation overlay.
+Test the fixed style, verify the existing viewport, no-colour and admission
+checks, and inspect captured renders with synthetic data. Keep W08 hand use
+open and record the local and hosted results separately.

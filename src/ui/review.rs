@@ -220,7 +220,7 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             push(
                 &mut rows,
                 format!("Path: {target} -> terminal clipboard sequence"),
-                Token::Muted,
+                Token::Text,
             );
             push(
                 &mut rows,
@@ -230,12 +230,12 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             push(
                 &mut rows,
                 "Ignatius writes only; it never reads or clears the clipboard.",
-                Token::Muted,
+                Token::Text,
             );
             push(
                 &mut rows,
                 "Terminal acceptance is unconfirmed: this client can only know its write and flush.",
-                Token::Muted,
+                Token::Text,
             );
         }
         Kind::Update => {
@@ -341,7 +341,7 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
                     "Side effects are possible. This client will not automatically roll it back.",
                     Token::Warning,
                 );
-                push(&mut rows, format!("Target: {target}"), Token::Muted);
+                push(&mut rows, format!("Target: {target}"), Token::Text);
                 (
                     &pending.sql,
                     pending.impact,
@@ -377,7 +377,7 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             } else {
                 "Classification is advisory: database permissions remain the real control."
             };
-            push(&mut rows, advisory, Token::Muted);
+            push(&mut rows, advisory, Token::Text);
         }
         Kind::Parameter => {
             let prompt = model.parameter_prompt.as_ref()?;
@@ -396,12 +396,12 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
             push(
                 &mut rows,
                 "The answer is literal text data. Quotes, punctuation and newlines stay data; empty text is valid.",
-                Token::Muted,
+                Token::Text,
             );
             push(
                 &mut rows,
                 "The SQL template stays unchanged and prompted values are kept nowhere in history.",
-                Token::Muted,
+                Token::Text,
             );
         }
     }

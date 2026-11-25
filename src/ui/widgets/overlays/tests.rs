@@ -1,6 +1,9 @@
 use super::*;
 use crate::app::PlanView;
-use crate::app::model::{NamePrompt, UpdateCandidate, UpdatePrompt};
+use crate::app::model::{
+    NamePrompt, ParameterPrompt, PendingCopy, PendingPlan, PendingRun, UpdateCandidate,
+    UpdatePrompt,
+};
 use crate::config::ThemeChoice;
 use crate::postgres::metadata::{ColumnInfo, ObjectKind, UpdateRelation};
 use crate::query::PlanDocument;
@@ -1428,6 +1431,86 @@ fn cell_at<'a>(buf: &'a Buffer, needle: &str) -> &'a ratatui::buffer::Cell {
         }
     }
     panic!("{needle:?} missing:\n{}", buffer_to_string(buf));
+}
+
+#[test]
+fn required_review_disclosures_use_undimmed_body_text() {
+    use crate::ui::review::Kind;
+
+    let area = Rect::new(0, 0, 120, 30);
+    let pres = presentation(ColorDepth::TrueColor);
+    let expected_fg = pres.theme.color(Token::Text).unwrap();
+
+    let mut copy = Model::new(100);
+    copy.pending_copy = Some(PendingCopy {
+        result_job: crate::query::result::JobId(1),
+        source_row: 0,
+        column: 0,
+        bytes: 5,
+        characters: 5,
+    });
+    let mut analyze = Model::new(100);
+    analyze.pending_plan = Some(PendingPlan {
+        sql: "SELECT 1".into(),
+        impact: crate::query::Impact::Read,
+        typed: String::new(),
+        required: String::new(),
+    });
+    let mut production = Model::new(100);
+    production.pending_run = Some(PendingRun {
+        sql: "UPDATE orders SET status = 'paid'".into(),
+        impact: crate::query::Impact::Write,
+        typed: String::new(),
+        required: "ignatius_demo".into(),
+        source: None,
+    });
+    let mut parameter = Model::new(100);
+    parameter.parameter_prompt = Some(ParameterPrompt::new(
+        "SELECT :note".into(),
+        None,
+        vec!["note".into()],
+    ));
+    let reviews: [(Kind, Model, &[&str]); 4] = [
+        (
+            Kind::Copy,
+            copy,
+            &[
+                "Path: this terminal",
+                "Ignatius writes only",
+                "Terminal acceptance is",
+            ],
+        ),
+        (
+            Kind::Analyze,
+            analyze,
+            &["Target: this database", "Classification is advisory"],
+        ),
+        (
+            Kind::Production,
+            production,
+            &["This reads leading keywords"],
+        ),
+        (
+            Kind::Parameter,
+            parameter,
+            &["The answer is literal text", "The SQL template stays"],
+        ),
+    ];
+    let mut dimmed_disclosures = Vec::new();
+    for (kind, model, disclosures) in reviews {
+        let mut buf = Buffer::empty(area);
+        render_sending_review(&model, kind, &pres, area, &mut buf);
+        for disclosure in disclosures {
+            let cell = cell_at(&buf, disclosure);
+            if cell.fg != expected_fg || cell.modifier.contains(Modifier::DIM) {
+                dimmed_disclosures.push(disclosure);
+            }
+        }
+    }
+    assert!(
+        dimmed_disclosures.is_empty(),
+        "required disclosures need undimmed body text: {dimmed_disclosures:?}"
+    );
 }
 
 fn bench_state_with(rollback: bool, gate: Option<f64>) -> crate::app::model::QueryBenchState {

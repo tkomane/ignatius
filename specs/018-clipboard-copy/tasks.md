@@ -273,3 +273,14 @@ The new assertion failed on the baseline's muted primary-key text. The fix
 passed 43 focused checks and the local full verifier. Visual QA confirmed that
 all three disclosures, bound SQL and the command rail are legible in the
 regenerated synthetic still. See the [Wave 72 evidence](../../docs/status.md#wave-72---review-readability-and-release-authorization---25-november-2026).
+
+## W09 sending-review disclosure contrast - 25 November 2026
+
+- [x] T042 Restore full body-text contrast for the required clipboard,
+  production, EXPLAIN ANALYZE and parameter disclosures. Verify the real
+  rendered rows, viewport and confirmation tests, and synthetic captures.
+  [Review viewport contract](contracts/review-viewport.md#other-safety-and-privacy-disclosures)
+
+The rendered-cell assertion flagged all eight disclosures on the baseline.
+With the fix all 48 focused checks passed, and four synthetic review renders
+confirmed the contrast improvement. [Wave 76 evidence](../../docs/status.md#wave-76---make-sending-review-disclosures-readable---25-november-2026)

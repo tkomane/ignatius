@@ -130,6 +130,15 @@ overlay surface. The wording must stay readable as the user scrolls the review,
 including in ASCII and no-colour presentation. Existing review geometry and
 confirmation admission apply.
 
+### Other safety and privacy disclosures
+
+The clipboard destination, write-only behavior and unconfirmed terminal
+acceptance use full body-text contrast. The EXPLAIN ANALYZE target and both
+query review notices about database permissions use the same style. Named
+parameter reviews give literal input, empty text, the unchanged SQL template
+and the history boundary full body-text contrast. These disclosures render
+without DIM and remain reachable in every presentation mode.
+
 ## Privacy and proof
 
 Store navigation state only, never expanded SQL or answers in displayable model
