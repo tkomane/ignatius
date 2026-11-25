@@ -8,3 +8,14 @@
 - [x] T006: Add end-to-end tests against live PostgreSQL covering `\d`, `\dt`, `\l+`, `\conninfo`, and bounded `\watch`.
 - [x] T007: Update README, keymap/help docs, and compatibility documentation for supported meta-commands.
 - [x] T008: Run `cargo xtask verify` and record verification evidence in `docs/status.md`.
+
+- [x] T009 Stop the prior connection's watch and clear its result SQL on an
+  accepted profile switch. Verify the old timer, bare `\watch`, a new
+  query and a refused switch in the reducer. Check the normal interactive
+  route using disposable local profiles.
+
+Two reducer regressions failed on `e8fd6ff` and the rejected-switch control
+passed. The fix passed all three. An owned macOS arm64 PTY and PostgreSQL
+18.7 confirmed the first watch repeated, ended on the second profile, and
+bare `\watch` needed a query from that profile before repeating it.
+[Wave 80](../../docs/status.md#wave-80---retire-watch-state-on-profile-switch---25-november-2026)

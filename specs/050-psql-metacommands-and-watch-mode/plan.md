@@ -47,6 +47,15 @@
     `MAX_WATCH_ITERATIONS` (`1000`) and stop cleanly on user cancel, `\watch stop`,
     or error.
 
+### Retire the watch when a profile switch is accepted
+
+Clear the active watch and the prior result's SQL in the existing connection
+transition. Keep the busy-state refusal ahead of the reset. The runtime already
+clears its deadline when the model holds no watch. Exercise a pending old tick,
+an attempted bare watch before a new execution, a new local query and a rejected
+switch. Drive the ordinary picker and watch commands in an owned PTY against
+two disposable database profiles.
+
 ## 3. Verification and Documentation
 
 - `src/metacommand/tests.rs`: sidecar unit tests covering every catalog command,
