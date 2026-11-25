@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: Cloud providers have a 1 MiB stdout limit and a 64 KiB stderr
+  retention limit. Failure diagnostics omit incomplete output.
 - Fixed: A failed retained-result refresh keeps its error position with
   the retained query and preserves the active editor caret and focus.
 - Fixed: Reviewed cell edits use the query session to resolve unqualified and

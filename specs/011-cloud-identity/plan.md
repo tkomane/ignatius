@@ -71,3 +71,20 @@ path, `-S` and the fixed `version --format=json` command. Reuse the worker's
 bounded capture, isolated configuration and account-free environment. Require
 the same pinned version and retain the observed stock and vendor-launcher
 outcomes.
+
+## Shared provider output limits
+
+Drain stdout and stderr concurrently while waiting for the child. Retain
+complete streams up to their respective byte limits and discard any stream
+that overflows. Continue draining through the existing timeout so the
+process can report its exit status. Handle an oversized successful stdout
+as an authentication diagnostic before token decoding. Pass complete
+failure stderr through the existing redactor and omit partial streams
+from diagnostics. Apply this to direct launches and the Windows x64 MSI
+fallback while preserving each route's launch and timeout ordering.
+
+Verify byte boundaries and extraction decisions with small synthetic
+in-memory streams. Re-run the provider unit tests and the disposable TLS
+integration. Check the existing account-free Windows x64 Azure MSI launch
+probe and standard PR and main CI and CodeQL. The limits cover retained
+stream bytes.

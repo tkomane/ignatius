@@ -82,6 +82,13 @@ environment and from AWS configuration. When it cannot, the failure says so.
 A provider's command is run directly, never through a shell. `{host}`, `{port}`,
 `{user}` and `{database}` are substituted as whole arguments.
 
+A successful provider must supply its complete standard output within 1 MiB
+before whitespace trimming or JSON extraction. A larger stream causes an
+authentication refusal. On failure, the client reports the exit status and
+redacts complete standard error up to 64 KiB. If standard error exceeds that
+limit, the diagnostic explains that it was discarded. Both output streams
+continue draining through the existing provider timeout.
+
 An exact name in `[auth.providers]` replaces the built-in of the same name.
 Connection details use the selected entry at startup and after a profile
 switch. A configured provider shows its executable and output format, with
