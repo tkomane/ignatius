@@ -13,6 +13,10 @@
 //! PostgreSQL 9.1. Backslashes therefore escape only inside `E'...'` strings.
 //! This is stated in `docs/support/compatibility.md`.
 
+use crate::query::identifiers::{
+    is_identifier_part_without_dollar, is_identifier_start, unquoted_identifier_end,
+};
+
 /// One statement found in a buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Statement {
@@ -61,6 +65,7 @@ pub fn split(sql: &str) -> Vec<Statement> {
                 i += 1;
                 start = i;
             }
+            byte if is_identifier_start(byte) => i = unquoted_identifier_end(bytes, i),
             _ => i += 1,
         }
     }
@@ -141,22 +146,43 @@ pub(crate) fn skip_double_quoted(sql: &str, start: usize) -> usize {
 /// Skips a `$tag$...$tag$` body. Returns `start` when this `$` is not a quote,
 /// for example the `$1` of a parameter placeholder.
 pub(crate) fn skip_dollar_quoted(sql: &str, start: usize) -> usize {
+    match dollar_quote(sql, start) {
+        DollarQuote::Closed(end) => end,
+        DollarQuote::Unterminated => sql.len(),
+        DollarQuote::NotQuote => start,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DollarQuote {
+    Closed(usize),
+    Unterminated,
+    NotQuote,
+}
+
+/// Recognises a dollar quote at a token boundary. Callers scan a whole bare
+/// identifier before looking for a quote at the next token.
+pub(crate) fn dollar_quote(sql: &str, start: usize) -> DollarQuote {
     let bytes = sql.as_bytes();
-    let mut i = start + 1;
-    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-        // A tag may not begin with a digit, which is what separates $tag$ from $1.
-        if i == start + 1 && bytes[i].is_ascii_digit() {
-            return start;
-        }
-        i += 1;
+    let mut tag_end = start + 1;
+    if bytes.get(tag_end).is_some_and(u8::is_ascii_digit) {
+        return DollarQuote::NotQuote;
     }
-    if bytes.get(i) != Some(&b'$') {
-        return start;
+    while tag_end < bytes.len() && is_identifier_part_without_dollar(bytes[tag_end]) {
+        tag_end += 1;
     }
-    let tag = &sql[start..=i];
-    sql[i + 1..]
+    if bytes.get(tag_end) != Some(&b'$') {
+        return DollarQuote::NotQuote;
+    }
+    tag_end += 1;
+    // The opening tag starts and ends with ASCII dollars, so both slices are
+    // on UTF-8 boundaries even though the tag scan uses PostgreSQL's byte rules.
+    let tag = &sql[start..tag_end];
+    sql[tag_end..]
         .find(tag)
-        .map_or(bytes.len(), |rel| i + 1 + rel + tag.len())
+        .map_or(DollarQuote::Unterminated, |relative| {
+            DollarQuote::Closed(tag_end + relative + tag.len())
+        })
 }
 
 pub(crate) fn skip_line_comment(sql: &str, start: usize) -> usize {

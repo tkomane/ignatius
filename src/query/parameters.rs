@@ -6,6 +6,8 @@
 //! immediately before the existing simple-query path sends it.
 
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
+use crate::query::identifiers::{is_identifier_start, unquoted_identifier_end};
+use crate::query::statements;
 use secrecy::{ExposeSecret, SecretString};
 use std::fmt;
 use std::fmt::Write as _;
@@ -111,17 +113,17 @@ pub fn discover(sql: &str) -> Result<ParameterTemplate, ParameterError> {
 
     while i < bytes.len() {
         match bytes[i] {
-            b'\'' => i = crate::query::statements::skip_single_quoted(sql, i),
-            b'"' => i = crate::query::statements::skip_double_quoted(sql, i),
+            b'\'' => i = statements::skip_single_quoted(sql, i),
+            b'"' => i = statements::skip_double_quoted(sql, i),
             b'$' => {
-                let after = crate::query::statements::skip_dollar_quoted(sql, i);
+                let after = statements::skip_dollar_quoted(sql, i);
                 i = if after == i { i + 1 } else { after };
             }
             b'-' if bytes.get(i + 1) == Some(&b'-') => {
-                i = crate::query::statements::skip_line_comment(sql, i);
+                i = statements::skip_line_comment(sql, i);
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = crate::query::statements::skip_block_comment(sql, i);
+                i = statements::skip_block_comment(sql, i);
             }
             b':' if bytes.get(i.wrapping_sub(1)) == Some(&b':')
                 || bytes.get(i + 1) == Some(&b':') =>
@@ -160,6 +162,7 @@ pub fn discover(sql: &str) -> Result<ParameterTemplate, ParameterError> {
                 });
                 i = end;
             }
+            byte if is_identifier_start(byte) => i = unquoted_identifier_end(bytes, i),
             _ => i += 1,
         }
     }

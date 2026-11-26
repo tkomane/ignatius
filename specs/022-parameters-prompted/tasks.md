@@ -100,6 +100,13 @@ description: "Implementation tasks for prompted named parameters"
 - [x] T029 Run the authoritative `cargo --locked xtask verify`, then explicitly run `cargo xtask db down` and `cargo xtask db status`; retain the exact verifier and live evidence needed for release readiness.
 - [x] T030 Update `specs/022-parameters-prompted/spec.md`, `specs/022-parameters-prompted/tasks.md`, and `docs/status.md` with implementation state and separate local, live, skipped, and pending terminal evidence; verify the diff and normal-hyphen prose rule.
 
+- [x] T031 Preserve PostgreSQL dollar-quote boundaries across statement
+  splitting, parameter discovery and formatting. Cover UTF-8 tags, exact
+  case, unfinished bodies, positional parameters and unquoted identifiers
+  that contain a dollar sign. Verify both statement results on the fixture.
+
+[Focused and live CLI evidence](../../docs/status.md#wave-97---preserve-postgresql-dollar-quote-boundaries---26-november-2026)
+
 ## Dependencies and execution order
 
 ### W04 correction - 2026-10-25

@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 97 - Preserve PostgreSQL dollar-quote boundaries - 26 November 2026
+
+- **W03 / 022 T031.** Statement splitting, named-parameter discovery,
+  formatting and syntax highlighting now share PostgreSQL's dollar
+  delimiter rules. The scanner keeps dollar signs inside unquoted
+  identifiers and preserves literal bytes, exact tag case and UTF-8
+  offsets.
+  [Feature 022 tasks](../specs/022-parameters-prompted/tasks.md)
+- **Focused verification.** Six regressions failed on the baseline.
+  The fix passed 170 query, eleven metacommand and eighteen plain-mode
+  checks. Cases include externally bound parameters, positional
+  parameters, unmatched tags and formatter output.
+- **Read-only executable comparison on macOS arm64 and PostgreSQL 18.7.**
+  The baseline treated a literal's colon as a named parameter and lost a
+  result after a dollar-bearing alias. The corrected CLI matched both
+  PostgreSQL result sets, including the exact literal and aliased column.
+
 ## Wave 96 - Report import source file failures before COPY - 26 November 2026
 
 - **W03 / 028 T005.** The wizard reports unreadable or invalid source input,

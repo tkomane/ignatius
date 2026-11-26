@@ -238,6 +238,10 @@ Deliberate differences:
   so a completed statement reads "3 rows affected" rather than "INSERT 0 3".
 - **Statement boundaries** assume `standard_conforming_strings = on`, the default
   since PostgreSQL 9.1. Backslash escapes are honoured only inside `E'...'`.
+  Dollar tags follow PostgreSQL's identifier byte rules with exact case
+  matching. A dollar sign inside an unquoted identifier remains part of
+  that identifier.
+  [PostgreSQL 18 lexical rules](https://www.postgresql.org/docs/18/sql-syntax-lexical.html#SQL-SYNTAX-DOLLAR-QUOTING)
 - **NULL rendering.** `psql` shows an empty cell by default. This shows `[null]`,
   because a NULL must be distinguishable from an empty string and from the text
   `NULL`. In CSV and TSV, NULL is an empty field by default, matching `psql`, and
