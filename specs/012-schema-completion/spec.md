@@ -108,7 +108,10 @@ Principle I, applied to the one feature most tempted to bluff.
 - **FR-1201**: Candidates MUST be derived from the catalogue already read for
   the object tree. No new statement is issued to serve a keystroke.
 - **FR-1202**: What is in scope MUST be determined from the statement under the
-  cursor, including table aliases and `WITH` names.
+  cursor, including table aliases and `WITH` names. In an expression, an
+  in-scope relation qualifier takes precedence over a same-named schema.
+  Schema completion applies in a relation-name position. An in-scope alias
+  with unavailable column metadata keeps an empty column list.
 - **FR-1203**: Accepting a candidate MUST replace the word being typed and
   nothing else, MUST quote the identifier when PostgreSQL requires it, and MUST
   be one undo step.

@@ -168,6 +168,10 @@ explicit rather than per-keystroke.
 
 [Streaming evidence](../../docs/status.md#wave-101---stream-completion-catalogue-rows---26-november-2026)
 
+- [x] T034 Resolve an in-scope relation qualifier before a same-named schema
+  in expressions, retain schema completion in relation-name slots, and
+  verify the shared engine and real plain-mode command.
+
 ## Dependencies and execution order
 
 - T001-T004 are foundational; T007-T010 depend on the pure types and lexer
