@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: SQL buffers and queries preserve UTF-8 dollar-quoted literals and
+  statement boundaries after dollar-bearing unquoted identifiers.
 - Fixed: Import previews and runs report source file read errors. A failed
   read prevents COPY and clears the old preview.
 - Fixed: The import wizard requires the exact database name before a

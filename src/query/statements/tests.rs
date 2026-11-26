@@ -68,6 +68,54 @@ fn tagged_dollar_quotes_are_matched_by_tag() {
 }
 
 #[test]
+fn w03_unicode_tag_protects_semicolons_and_keeps_utf8_byte_offsets() {
+    let sql = "SELECT $café$note:label; next$café$ AS message; SELECT 2;";
+    let statements = split(sql);
+    assert_eq!(statements.len(), 2, "{statements:#?}");
+    assert_eq!(
+        statements[0].text,
+        "SELECT $café$note:label; next$café$ AS message"
+    );
+    assert_eq!(statements[1].text, "SELECT 2");
+    for statement in &statements {
+        assert!(sql.is_char_boundary(statement.start));
+        assert!(sql.is_char_boundary(statement.end));
+        assert_eq!(&sql[statement.start..statement.end], statement.text);
+    }
+    assert_eq!(
+        statements[1].start,
+        sql.find("SELECT 2").expect("second statement")
+    );
+}
+
+#[test]
+fn w03_dollar_in_unquoted_identifier_does_not_open_a_quote() {
+    let sql = "SELECT 1 AS amount$usd$; SELECT 2;";
+    let statements = split(sql);
+    assert_eq!(statements.len(), 2, "{statements:#?}");
+    assert_eq!(statements[0].text, "SELECT 1 AS amount$usd$");
+    assert_eq!(statements[1].text, "SELECT 2");
+}
+
+#[test]
+fn w03_unicode_dollar_tag_matching_is_case_sensitive() {
+    let sql = "SELECT $É2$a;$é2$:inside$É2$; SELECT 2;";
+    let statements = split(sql);
+    assert_eq!(statements.len(), 2, "{statements:#?}");
+    assert_eq!(statements[0].text, "SELECT $É2$a;$é2$:inside$É2$");
+    assert_eq!(statements[1].text, "SELECT 2");
+}
+
+#[test]
+fn w03_unfinished_unicode_dollar_tag_keeps_the_statement_unsplit() {
+    let sql = "SELECT $É2$a;$é2$;";
+    let statements = split(sql);
+    assert_eq!(statements.len(), 1, "{statements:#?}");
+    assert_eq!(statements[0].text, "SELECT $É2$a;$é2$;");
+    assert!(!statements[0].terminated);
+}
+
+#[test]
 fn parameter_placeholders_are_not_dollar_quotes() {
     assert_eq!(
         texts("SELECT $1; SELECT $2;"),

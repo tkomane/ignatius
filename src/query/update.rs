@@ -6,8 +6,9 @@
 //! projection from one relation. Anything more expressive is refused here,
 //! before live metadata or a write effect is requested.
 
-use crate::query::identifiers::quote_identifier;
+use crate::query::identifiers::{is_identifier_start, quote_identifier, unquoted_identifier_end};
 use crate::query::parameters::{ParameterBindings, ParameterError};
+use crate::query::statements;
 use crate::query::value::Cell;
 use secrecy::SecretString;
 use std::fmt;
@@ -796,17 +797,17 @@ fn lex(sql: &str) -> Vec<Token> {
         match bytes[index] {
             byte if byte.is_ascii_whitespace() => index += 1,
             b'\'' => {
-                index = crate::query::statements::skip_single_quoted(sql, index);
+                index = statements::skip_single_quoted(sql, index);
                 tokens.push(Token::Literal);
             }
             b'"' => {
-                let end = crate::query::statements::skip_double_quoted(sql, index);
+                let end = statements::skip_double_quoted(sql, index);
                 let raw = &sql[index + 1..end.saturating_sub(1).min(sql.len())];
                 tokens.push(Token::Ident(raw.replace("\"\"", "\"")));
                 index = end;
             }
             b'$' => {
-                let end = crate::query::statements::skip_dollar_quoted(sql, index);
+                let end = statements::skip_dollar_quoted(sql, index);
                 if end > index {
                     tokens.push(Token::Literal);
                     index = end;
@@ -816,21 +817,14 @@ fn lex(sql: &str) -> Vec<Token> {
                 }
             }
             b'-' if bytes.get(index + 1) == Some(&b'-') => {
-                index = crate::query::statements::skip_line_comment(sql, index);
+                index = statements::skip_line_comment(sql, index);
             }
             b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                index = crate::query::statements::skip_block_comment(sql, index);
+                index = statements::skip_block_comment(sql, index);
             }
-            byte if byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80 => {
+            byte if is_identifier_start(byte) => {
                 let start = index;
-                index += 1;
-                while index < bytes.len()
-                    && (bytes[index].is_ascii_alphanumeric()
-                        || bytes[index] == b'_'
-                        || bytes[index] >= 0x80)
-                {
-                    index += 1;
-                }
+                index = unquoted_identifier_end(bytes, index);
                 tokens.push(Token::Word(sql[start..index].to_owned()));
             }
             byte if byte.is_ascii_punctuation() => {

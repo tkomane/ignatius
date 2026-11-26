@@ -10,6 +10,7 @@
 
 use crate::branding::BINARY_NAME;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
+use crate::query::identifiers::{is_identifier_start, unquoted_identifier_end};
 use crate::query::result::ResultSet;
 use crate::query::statements::{
     skip_block_comment, skip_dollar_quoted, skip_double_quoted, skip_line_comment,
@@ -640,6 +641,7 @@ fn find_trailing_watch(input: &str) -> Option<(usize, &str)> {
                 }
                 i += 1;
             }
+            byte if is_identifier_start(byte) => i = unquoted_identifier_end(bytes, i),
             _ => i += 1,
         }
     }

@@ -92,6 +92,21 @@ fn protected_regions_are_copied_byte_for_byte() {
 }
 
 #[test]
+fn w03_unicode_dollar_body_is_preserved_and_separated_from_alias() {
+    let source = "select $café$note:label;  next$café$ as message; select 2;";
+    let result = formatted(source);
+    assert!(result.contains("$café$note:label;  next$café$"), "{result}");
+    assert!(
+        result.contains("$café$ as message"),
+        "tag and alias stay separate: {result}"
+    );
+    assert!(
+        result.contains(";\nselect 2;"),
+        "following statement stays separate: {result}"
+    );
+}
+
+#[test]
 fn comments_keep_their_content_and_line_role() {
     let source = "SELECT 1\n-- a line comment\nFROM t /* block\n comment */ WHERE a=1;";
     let result = formatted(source);

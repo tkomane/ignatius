@@ -6,8 +6,10 @@
 //! only whitespace and layout outside them. Ambiguous input is refused rather
 //! than guessed.
 
-use crate::query::highlight;
-use crate::query::statements;
+use crate::query::identifiers::{
+    is_identifier_part_without_dollar, is_identifier_start, unquoted_identifier_end,
+};
+use crate::query::statements::{self, DollarQuote};
 use std::fmt;
 
 /// The largest source buffer the formatter will derive a second string from.
@@ -740,35 +742,32 @@ fn scan(source: &str) -> Result<Vec<Token>, FormatError> {
                 line_break_before = false;
             }
             b'$' => {
-                if let Some(end) = dollar_quote_end(source, index) {
-                    tokens.push(Token {
-                        start,
-                        end,
-                        kind: TokenKind::DollarQuoted,
-                        line_break_before,
-                    });
-                    index = end;
-                    line_break_before = false;
-                } else if has_dollar_quote_opener(source, index) {
-                    return Err(FormatError::Unterminated {
-                        kind: ProtectedRegion::DollarQuotedBody,
-                        position: start,
-                    });
-                } else {
-                    let end = symbol_end(source, index);
-                    tokens.push(Token {
-                        start,
-                        end,
-                        kind: if end > index + 1 && bytes[index + 1].is_ascii_digit() {
+                let (end, kind) = match statements::dollar_quote(source, index) {
+                    DollarQuote::Closed(end) => (end, TokenKind::DollarQuoted),
+                    DollarQuote::Unterminated => {
+                        return Err(FormatError::Unterminated {
+                            kind: ProtectedRegion::DollarQuotedBody,
+                            position: start,
+                        });
+                    }
+                    DollarQuote::NotQuote => {
+                        let end = symbol_end(source, index);
+                        let kind = if end > index + 1 && bytes[index + 1].is_ascii_digit() {
                             TokenKind::Parameter
                         } else {
                             TokenKind::Symbol
-                        },
-                        line_break_before,
-                    });
-                    index = end;
-                    line_break_before = false;
-                }
+                        };
+                        (end, kind)
+                    }
+                };
+                tokens.push(Token {
+                    start,
+                    end,
+                    kind,
+                    line_break_before,
+                });
+                index = end;
+                line_break_before = false;
             }
             b'-' if bytes.get(index + 1) == Some(&b'-') => {
                 let raw_end = statements::skip_line_comment(source, index);
@@ -819,8 +818,8 @@ fn scan(source: &str) -> Result<Vec<Token>, FormatError> {
                 index = end;
                 line_break_before = false;
             }
-            byte if highlight::is_word_start(byte) || !byte.is_ascii() => {
-                let end = word_end(source, index);
+            byte if is_identifier_start(byte) => {
+                let end = unquoted_identifier_end(bytes, index);
                 tokens.push(Token {
                     start,
                     end,
@@ -868,30 +867,7 @@ fn is_closed_double(source: &str, end: usize) -> bool {
 fn is_prefixed_string(source: &str, index: usize, byte: u8) -> bool {
     matches!(byte, b'e' | b'E' | b'b' | b'B' | b'x' | b'X')
         && source.as_bytes().get(index + 1) == Some(&b'\'')
-        && (index == 0 || !highlight::is_word_byte(source.as_bytes()[index - 1]))
-}
-
-fn word_end(source: &str, start: usize) -> usize {
-    let bytes = source.as_bytes();
-    let mut end = start;
-    while end < bytes.len() {
-        if highlight::is_word_byte(bytes[end]) {
-            end += 1;
-        } else if bytes[end] == b'$' {
-            // PostgreSQL permits dollar signs after the first character of an
-            // unquoted identifier. Treating `foo$bar` as separate tokens would
-            // turn one identifier into an operator expression.
-            end += 1;
-        } else if !bytes[end].is_ascii() {
-            end += 1;
-            while end < bytes.len() && !bytes[end].is_ascii() {
-                end += 1;
-            }
-        } else {
-            break;
-        }
-    }
-    end
+        && (index == 0 || !is_identifier_part_without_dollar(source.as_bytes()[index - 1]))
 }
 
 fn closed_block_comment_end(source: &str, start: usize) -> Option<usize> {
@@ -969,11 +945,8 @@ fn symbol_end(source: &str, start: usize) -> usize {
         }
         return end;
     }
-    let mut end = start + 1;
-    while end < bytes.len() && !bytes[end].is_ascii() {
-        end += 1;
-    }
-    end
+    // A following non-ASCII byte starts a separate identifier.
+    start + 1
 }
 
 fn is_operator_byte(byte: u8) -> bool {
@@ -994,33 +967,6 @@ fn is_operator_byte(byte: u8) -> bool {
             | b'|'
             | b'~'
     )
-}
-
-fn dollar_quote_end(source: &str, start: usize) -> Option<usize> {
-    let tag_end = dollar_tag_end(source, start)?;
-    let tag = &source[start..tag_end];
-    source[tag_end..]
-        .find(tag)
-        .map(|relative| tag_end + relative + tag.len())
-}
-
-fn has_dollar_quote_opener(source: &str, start: usize) -> bool {
-    dollar_tag_end(source, start).is_some()
-}
-
-fn dollar_tag_end(source: &str, start: usize) -> Option<usize> {
-    let bytes = source.as_bytes();
-    if bytes.get(start) != Some(&b'$') {
-        return None;
-    }
-    let mut index = start + 1;
-    if bytes.get(index).is_some_and(u8::is_ascii_digit) {
-        return None;
-    }
-    while index < bytes.len() && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_') {
-        index += 1;
-    }
-    (bytes.get(index) == Some(&b'$')).then_some(index + 1)
 }
 
 fn major_clause(word: &str) -> Option<Clause> {

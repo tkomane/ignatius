@@ -148,7 +148,9 @@ diagnostic text for the synthetic secret marker.
 
 - **FR-2201**: The client MUST recognise named placeholders only outside
   PostgreSQL strings, identifiers, dollar-quoted bodies and comments, and MUST
-  exclude cast syntax.
+  exclude cast syntax. Dollar tags follow PostgreSQL's identifier byte
+  rules with exact case matching. Dollar signs within unquoted identifiers
+  remain part of the identifier.
 - **FR-2202**: The interactive client MUST prompt once for each distinct named
   placeholder in first-use order before sending the statement.
 - **FR-2203**: The parameter prompt MUST keep the editor template unchanged and

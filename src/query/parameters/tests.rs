@@ -114,3 +114,18 @@ fn w03_adversarial_parameter_lexer_ignores_casts_comments_quotes_and_dollar_quot
     assert!(bound.contains("WHERE tenant = E'acme-corp'"));
     assert!(!bound.contains(":tenant_id"));
 }
+
+#[test]
+fn w03_unicode_dollar_body_hides_colons_while_positional_parameters_remain() {
+    let sql = "SELECT $café$:hidden; :also_hidden$café$, $1, :real;";
+    let template = discover(sql).expect("template");
+    assert_eq!(template.names(), ["real"]);
+    assert_eq!(template.occurrences().len(), 1);
+    let bound = template
+        .bind(sql, &bindings(&["real"], &["bound-value"]))
+        .expect("binds the one executable name");
+    assert_eq!(
+        bound,
+        "SELECT $café$:hidden; :also_hidden$café$, $1, E'bound-value';"
+    );
+}

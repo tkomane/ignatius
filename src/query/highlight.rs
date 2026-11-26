@@ -14,6 +14,10 @@
 //! costs nothing. That is the whole point of keeping the list short and honest
 //! rather than exhaustive and stale.
 
+use crate::query::identifiers::unquoted_identifier_end;
+pub(crate) use crate::query::identifiers::{
+    is_identifier_part_without_dollar as is_word_byte, is_identifier_start as is_word_start,
+};
 use crate::query::statements;
 
 /// What a run of characters is, for colouring only.
@@ -60,14 +64,15 @@ pub fn tokens(sql: &str) -> Vec<Token> {
         match byte {
             b'\'' => {
                 let end = statements::skip_single_quoted(sql, i);
-                // An E prefix belongs to the literal it introduces, but only
-                // when the E stands alone: the last letter of an identifier is
-                // not a prefix.
-                let prefixed = i > 0
-                    && matches!(bytes[i - 1], b'e' | b'E')
-                    && (i == 1 || !is_word_byte(bytes[i - 2]));
-                let start = if prefixed { i - 1 } else { i };
-                push(&mut tokens, start, end, TokenKind::Literal);
+                push(&mut tokens, i, end, TokenKind::Literal);
+                i = end;
+            }
+            b'e' | b'E'
+                if bytes.get(i + 1) == Some(&b'\'') && (i == 0 || !is_word_byte(bytes[i - 1])) =>
+            {
+                // Include the escape prefix only when it starts this token.
+                let end = statements::skip_single_quoted(sql, i + 1);
+                push(&mut tokens, i, end, TokenKind::Literal);
                 i = end;
             }
             b'"' => {
@@ -119,10 +124,7 @@ pub fn tokens(sql: &str) -> Vec<Token> {
                 i = j;
             }
             _ if is_word_start(byte) => {
-                let mut j = i;
-                while j < bytes.len() && is_word_byte(bytes[j]) {
-                    j += 1;
-                }
+                let j = unquoted_identifier_end(bytes, i);
                 if is_keyword(&sql[i..j]) {
                     push(&mut tokens, i, j, TokenKind::Keyword);
                 }
@@ -261,14 +263,6 @@ fn push(tokens: &mut Vec<Token>, start: usize, end: usize, kind: TokenKind) {
     if end > start {
         tokens.push(Token { start, end, kind });
     }
-}
-
-pub(crate) const fn is_word_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80
-}
-
-pub(crate) const fn is_word_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80
 }
 
 pub(crate) fn is_keyword(word: &str) -> bool {
