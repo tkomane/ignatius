@@ -4,6 +4,19 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 110 - Keep the object-tree backend identifiable - 26 November 2026
+
+- **W05 / 007-object-definitions T002.** Object-tree connections retain
+  the `(objects)` marker in PostgreSQL. Names that fit keep their custom
+  prefix. Long or non-printable names use the default prefix on the object
+  connection. The query connection keeps its configured name.
+  [Object definitions tasks](../specs/007-object-definitions/tasks.md)
+- **Focused verification on macOS arm64 and PostgreSQL 18.7.** The two
+  PIDs reported the same 63-character name on the baseline. The fix
+  preserved the query name and showed the marked object name in
+  `pg_stat_activity`. The dedicated backend read the catalogue and
+  PostgreSQL refused a write with SQLSTATE 25006.
+
 ## Wave 109 - Show the shared object-tree connection with history off - 26 November 2026
 
 - **W05 / 007-object-definitions SEC-704 and SC-706.** The history and

@@ -1812,28 +1812,28 @@ fn indexes_and_extensions_are_listed() {
 fn the_object_tree_can_have_its_own_read_only_connection_to_the_same_server() {
     let uri = target_or_skip!();
     let config = Config::default();
-    let target = resolve(
+    let mut target = resolve(
         Some(&uri),
         &ConnectionArgs::default(),
         &EnvSnapshot::from_process(),
         &config.connection,
     )
     .expect("target resolves");
+    // PostgreSQL exposes at most 63 bytes of application_name. Keep the
+    // original exactly at that boundary so an appended object-tree marker
+    // cannot silently make both sessions look identical.
+    let original_application_name =
+        "ignatius-object-identity-abcdefghijklmnopqrstuvwxyz0123456789ab";
+    assert_eq!(original_application_name.len(), 63);
+    target.application_name = original_application_name.to_owned();
 
     let runtime = runtime();
     let query_session = runtime
         .block_on(session::connect(&target, Duration::ZERO))
         .expect("the session connects");
 
-    // The tree's connection is the same resolved target, cloned rather than
-    // derived again, so it reaches the same server the same way. Only the
-    // application name and the read-only posture differ, and both on purpose.
-    // The very same value the session connected with, moved rather than
-    // resolved again: whatever route, credential and protection it carried, the
-    // tree's connection carries too. That is the property under test.
-    let mut catalogue = target;
-    catalogue.application_name = format!("{} (objects)", catalogue.application_name);
-    catalogue.read_only = true;
+    // Use the same resolved route, credentials and transport for the tree.
+    let catalogue = target.for_object_tree();
     let catalogue_session = runtime
         .block_on(session::connect(&catalogue, Duration::ZERO))
         .expect("the object tree connects");
@@ -1848,6 +1848,44 @@ fn the_object_tree_can_have_its_own_read_only_connection_to_the_same_server() {
         "the tree only ever reads, and the server is what enforces that"
     );
     assert!(!query_session.info().read_only, "the session is unaffected");
+
+    let query_pid = query_session
+        .info()
+        .backend_pid
+        .parse::<i32>()
+        .expect("query backend pid");
+    let catalogue_pid = catalogue_session
+        .info()
+        .backend_pid
+        .parse::<i32>()
+        .expect("catalogue backend pid");
+    let visible_application_name = |pid: i32, job: u64| {
+        let execution = runtime.block_on(query_session.execute(
+            &format!(
+                "SELECT application_name::text FROM pg_catalog.pg_stat_activity WHERE pid = {pid}"
+            ),
+            10,
+            JobId(job),
+        ));
+        let result = execution
+            .statements
+            .first()
+            .and_then(|statement| statement.result_set.as_ref())
+            .expect("pg_stat_activity result");
+        assert_eq!(result.rows.len(), 1, "backend {pid} is visible");
+        match &result.rows[0][0] {
+            Cell::Text(name) => name.clone(),
+            value => panic!("unexpected application_name value: {value:?}"),
+        }
+    };
+    let visible_query_name = visible_application_name(query_pid, 2);
+    let visible_catalogue_name = visible_application_name(catalogue_pid, 3);
+    assert_eq!(visible_query_name, original_application_name);
+    assert_ne!(visible_catalogue_name, visible_query_name);
+    assert!(
+        visible_catalogue_name.contains("(objects)"),
+        "object-tree application_name keeps its marker: {visible_catalogue_name:?}"
+    );
 
     // And it can do the only job it has.
     let schemas = runtime
