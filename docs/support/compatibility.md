@@ -353,12 +353,14 @@ remain secret-bound until execution. The prior result is a snapshot and is not
 rerun automatically. The generated statement is bounded at 16 KiB after
 binding.
 
-The review is not a lock. It neither locks the row nor proves that the value read
-when the cell was selected is unchanged, and the generated statement matches only
-the primary key. A concurrent change to a non-key column is overwritten and a
-concurrent delete reports zero rows affected. Ignatius does not detect the
-conflict, retry the update, or silently roll back; the row count the server
-returns is the truthful outcome.
+The review is not a lock. It does not lock the row during review, and instead
+guards execution optimistically: the generated statement matches the primary
+key AND verifies that the observed cell value is still unchanged (`IS NULL`, or
+bytewise equal to the retained output text via `pg_catalog.format('%s', ...)`).
+A concurrent change to the observed cell or a concurrent deletion reports zero
+rows affected. Ignatius does not retry the update or silently roll back; the
+row count the server returns is the truthful outcome, and the operator can
+refresh (`F6`) to inspect current data.
 
 ## Explicit retained-result refresh
 

@@ -17,6 +17,7 @@ use std::fmt;
 pub const MAX_UPDATE_SQL_BYTES: usize = 16 * 1024;
 
 const NEW_VALUE_PARAMETER: &str = "__ignatius_new_value";
+const OLD_VALUE_PARAMETER: &str = "__ignatius_old_value";
 
 /// A relation named by the source SQL, before an unqualified name is resolved
 /// by PostgreSQL's search path.
@@ -68,6 +69,8 @@ pub struct UpdatePlan {
     pub parameters: ParameterBindings,
     /// Whether execution also checks the observed value and column origin.
     pub(crate) guarded: bool,
+    /// Whether execution guards against concurrent modification of the observed cell.
+    pub optimistic_guard: bool,
 }
 
 impl fmt::Debug for UpdatePlan {
@@ -77,6 +80,7 @@ impl fmt::Debug for UpdatePlan {
             .field("key_columns", &self.key_columns)
             .field("sql_template", &self.sql_template)
             .field("parameters", &"<hidden>")
+            .field("optimistic_guard", &self.optimistic_guard)
             .finish()
     }
 }
@@ -389,28 +393,35 @@ fn build_update(
         quote_identifier(resolved_relation),
     );
     let column = quote_identifier(&target.name);
+    let observed = &selected_row[source.selected_result_column];
+    let push_observed_text_guard =
+        |old: &str,
+         parameter_names: &mut Vec<String>,
+         parameter_values: &mut Vec<SecretString>,
+         predicate: &mut Vec<String>| {
+            parameter_names.push(OLD_VALUE_PARAMETER.to_owned());
+            parameter_values.push(SecretString::from(old.to_owned()));
+            // Use the type's own output text and a bytewise comparison. A
+            // concurrent modification of the selected value invalidates this
+            // predicate in the same UPDATE.
+            predicate.push(format!(
+                "{column} IS NOT NULL AND pg_catalog.format('%s', {column}) COLLATE pg_catalog.\"C\" \
+                 OPERATOR(pg_catalog.=) :{OLD_VALUE_PARAMETER}"
+            ));
+        };
     if let Some((origin, kind)) = replacement.guard {
-        let old = selected_row[source.selected_result_column]
-            .raw()
-            .ok_or(UpdateRefusal::MissingObservedValue)?;
-        parameter_names.extend(
-            [
-                "__ignatius_old_value",
-                "__ignatius_relation",
-                "__ignatius_attribute",
-            ]
-            .map(str::to_owned),
+        let old = observed.raw().ok_or(UpdateRefusal::MissingObservedValue)?;
+        push_observed_text_guard(
+            old,
+            &mut parameter_names,
+            &mut parameter_values,
+            &mut predicate,
         );
+        parameter_names.extend(["__ignatius_relation", "__ignatius_attribute"].map(str::to_owned));
         parameter_values
-            .extend([old, &relation, &target.name].map(|v| SecretString::from(v.to_owned())));
-        // Use the type's own output text and a bytewise comparison. The update
-        // checks the result's origin even if a same-named table or column was
-        // recreated after the metadata lookup. A concurrent modification of
-        // the selected value invalidates this predicate in the same UPDATE.
-        predicate.push(format!(
-            "{column} IS NOT NULL AND pg_catalog.format('%s', {column}) COLLATE pg_catalog.\"C\" \
-             OPERATOR(pg_catalog.=) :__ignatius_old_value"
-        ));
+            .extend([&relation, &target.name].map(|v| SecretString::from(v.to_owned())));
+        // The update checks the result's origin even if a same-named table or
+        // column was recreated after the metadata lookup.
         predicate.push(format!(
             "EXISTS (SELECT 1 FROM pg_catalog.pg_attribute AS a \
              WHERE a.attrelid = pg_catalog.to_regclass(:__ignatius_relation)::pg_catalog.oid \
@@ -447,6 +458,16 @@ fn build_update(
         if matches!(kind, crate::structured::Kind::Array { .. }) {
             predicate.push("pg_catalog.current_setting('array_nulls') = 'on'".into());
         }
+    } else {
+        match observed.raw() {
+            Some(old) => push_observed_text_guard(
+                old,
+                &mut parameter_names,
+                &mut parameter_values,
+                &mut predicate,
+            ),
+            None => predicate.push(format!("{column} IS NULL")),
+        }
     }
     let sql_template = format!(
         "UPDATE {relation} SET {column} = :{NEW_VALUE_PARAMETER} WHERE {}",
@@ -473,6 +494,7 @@ fn build_update(
         sql_template,
         parameters,
         guarded: replacement.guard.is_some(),
+        optimistic_guard: true,
     })
 }
 

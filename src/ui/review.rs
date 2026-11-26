@@ -288,6 +288,13 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
                 },
                 Token::Text,
             );
+            if !pending.plan.guarded && pending.plan.optimistic_guard {
+                push(
+                    &mut rows,
+                    "Optimistic check: the generated UPDATE verifies the observed cell value is still unchanged before applying.",
+                    Token::Text,
+                );
+            }
             push(&mut rows, "Exact bound statement:", Token::Header);
             match pending.plan.bound_sql() {
                 Ok(sql) => push(&mut rows, sql, Token::Text),
