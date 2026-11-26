@@ -105,7 +105,7 @@ Press `Ctrl+Shift+F` to format your SQL locally with a crisp green wave down the
   </tr>
 </table>
 
-PostgreSQL diagnostics preserve exact SQL whitespace so error carets line up under the offending token, with `Ctrl+D` toggling full SQLSTATE and severity details. Practical built-in guardrails keep mistakes cheap: inline result-cell edits preview the exact parameterized `UPDATE` first, writes against `[PROD]` pause for confirmation, destructive DDL asks for the database name, `ignatius query` and `ignatius bench` require `--allow-write` for non-read statements on production targets, and `--read-only` enforces server-side read-only transactions.
+PostgreSQL diagnostics preserve exact SQL whitespace so error carets line up under the offending token, with `Ctrl+D` toggling full SQLSTATE and severity details. Practical built-in guardrails keep mistakes cheap: inline result-cell edits preview the exact parameterized `UPDATE` and verify the observed cell value has not changed concurrently before writing (reporting 0-row conflicts without retrying), writes against `[PROD]` pause for confirmation, destructive DDL asks for the database name, `ignatius query` and `ignatius bench` require `--allow-write` for non-read statements on production targets, and `--read-only` enforces server-side read-only transactions.
 
 ### Spotlight command palette, chords, and floating overlays
 
@@ -113,7 +113,7 @@ PostgreSQL diagnostics preserve exact SQL whitespace so error carets line up und
   <img src="docs/assets/screenshots/palette-preview.png" alt="The saved queries palette open as a floating modal with a 1-cell drop shadow over a receded workbench, featuring a Spotlight search strip, proportional scroll thumb, and syntax-highlighted SQL preview card." width="92%" />
 </p>
 
-Press `Ctrl+P` for the Spotlight command palette with fuzzy match highlighting, proportional divider scrollbars, and live SQL preview cards across commands, saved queries, statement history, and connection profiles. Press `Ctrl+K` to open the two-key chord guide for all 58 workbench tools, leaving ordinary keys free for writing SQL. Floating modals cast a crisp 1-cell architectural drop shadow over the receded workspace while keeping the header and modal-scoped footer razor sharp. Mouse gestures work out of the box and can be turned off without losing any feature.
+Press `Ctrl+P` for the Spotlight command palette with fuzzy match highlighting, proportional divider scrollbars, and live SQL preview cards across commands, saved query collections (`collection/name`, `-- @tag:`, `-- @description:`), statement history, and connection profiles. Press `Ctrl+K` to open the adaptive 1/2/3-column chord guide for all 58 workbench tools, leaving ordinary keys free for writing SQL. Floating modals cast a crisp 1-cell architectural drop shadow over the receded workspace while keeping the header and modal-scoped footer razor sharp. Mouse gestures work out of the box and can be turned off without losing any feature.
 
 ### Live theme previews and seven adaptive palettes
 
@@ -276,14 +276,14 @@ Every action has a configurable name under `[keys]`, every chord appears in help
 # A connection URI. Keep the password out of it.
 ignatius connect "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
 
-# Individual flags, asking PostgreSQL to enforce a read-only session
-ignatius connect --host db.internal --port 5432 --username app_user --dbname analytics --sslmode verify-full --read-only
+# Individual flags, asking PostgreSQL to enforce a read-only primary or standby session
+ignatius connect --host db.internal --port 5432 --username app_user --dbname analytics --sslmode verify-full --read-only --target-session-attrs read-only
 
 # A named profile
 ignatius connect @production-orders
 ```
 
-Remote hosts default to `verify-full`. Failed TLS connections never downgrade or retry in plaintext, and unsupported options such as `sslcrl` or `channel_binding` fail explicitly rather than being silently ignored.
+Remote hosts default to `verify-full`. Failed TLS connections never downgrade or retry in plaintext, `target_session_attrs` (`any`, `read-write`, `read-only`, `primary`, `standby` via CLI, URI, `PGTARGETSESSIONATTRS`, `pg_service.conf`, or profile `target-session-attrs`) verifies PostgreSQL `transaction_read_only` and `pg_is_in_recovery()` without silent downgrade or retry, and unsupported options such as `sslcrl` or `channel_binding` fail explicitly rather than being silently ignored.
 
 ### Configuration Profiles (`config.toml`)
 
@@ -407,7 +407,7 @@ Against a production-classified target, `ignatius query` and `ignatius bench` re
 Descriptions match each command's `--help`.
 
 ```bash
-# Setup, configuration, history and snippets
+# Setup, configuration, history, snippets, saved queries, and offline result diffs
 ignatius doctor
 ignatius config validate
 ignatius connect --check @production-orders
@@ -415,6 +415,9 @@ ignatius history list
 ignatius history clear --yes
 ignatius snippet list
 ignatius snippet show cache-hit-ratio
+ignatius queries list --collection billing --tag finance
+ignatius queries show billing/monthly-revenue
+ignatius result-diff baseline.json current.json --key order_id
 ignatius completion zsh > ~/.zfunc/_ignatius
 
 # Catalogue meta-commands such as \dt also work with -c
@@ -567,8 +570,8 @@ Feature slugs such as `026-schema-er-diagrams` correspond to [the roadmap](docs/
 **Exploring and querying**
 
 - Object tree across schemas, tables, views, functions, indexes, constraints, and sequences, with fuzzy filter highlighting, hairline scrollbars, definitions (`Ctrl+K d`), and reverse dependencies (`Ctrl+K y`).
-- Up to 16 SQL editor buffers with tab pills, vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, snippet library (`Ctrl+K ;`), saved queries (`Ctrl+K w`, `Ctrl+K o`), and bounded bracketed paste.
-- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), and structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`).
+- Up to 16 SQL editor buffers with tab pills, session tab pinning (`Ctrl+K 9`) and renaming (`Ctrl+K 0`), vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, snippet library (`Ctrl+K ;`), saved query collections with `-- @tag:` / `-- @description:` headers (`Ctrl+K w`, `Ctrl+K o`, `ignatius queries`), and bounded bracketed paste.
+- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`), optimistic cell-update conflict guards (`Ctrl+K u`), and pinned in-memory result-set A/B diffing (`pin-result`, `compare-result`, `ignatius result-diff`).
 - Bounded `psql` backslash commands (`\d`, `\dt`, `\conninfo`, `\x`, `\watch` with `Ctrl+K :` stop) without claiming full `psql` parity.
 - Query plans, estimated (`Ctrl+K l`) or measured (`Ctrl+K a`) with KPI strip and exclusive self-time bottleneck micro-bars, plus extended `EXPLAIN (BUFFERS, WAL)` A/B plan comparison (`Ctrl+K /`, `ignatius plan-diff`).
 

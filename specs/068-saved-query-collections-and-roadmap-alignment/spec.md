@@ -1,8 +1,8 @@
 # Feature Specification: Saved Query Collections, Tag Metadata, Offline CLI, and Roadmap Alignment
 
-**Feature Branch**: `feat/m22-query-collections` (PR 3A) and `feat/m22-docs-readme` (PR 3B)
+**Feature Branch**: `feat/m22-query-collections` (PR 3A) and `docs/m22-roadmap-and-readme-sync` (PR 3B)
 **Created**: 2026-11-27
-**Status**: In Progress (PR 3A active; PR 3B pending)
+**Status**: Complete (PR 3A #197 `3111f0e` merged on `main`; PR 3B ready on `docs/m22-roadmap-and-readme-sync`)
 **Milestone**: M22 - Saved Query Collections and Roadmap Alignment
 
 ## Problem Statement

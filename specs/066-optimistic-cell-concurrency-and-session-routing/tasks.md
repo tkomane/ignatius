@@ -14,7 +14,7 @@
 
 ## Phase 2: PR 1B - `target_session_attrs` Session Role Routing (`feat/m20-target-session-attrs`)
 
-- [ ] T007 Implement `TargetSessionAttrs` (`Any`, `ReadWrite`, `ReadOnly`, `Primary`, `Standby`), `PGTARGETSESSIONATTRS`, `SUPPORTED_KEYS`, and strict libpq resolution precedence in `src/connection/target.rs`.
-- [ ] T008 Wire `target-session-attrs` into `Profile` (`src/config/schema.rs`) and `--target-session-attrs` into `ConnectionOptions` (`src/cli/mod.rs`).
-- [ ] T009 Enforce `TargetSessionAttrs` in `src/postgres/session.rs` using `transaction_read_only` and `pg_is_in_recovery()` without silent downgrade or retry, and display non-`Any` posture in connection details/doctor surfaces.
-- [ ] T010 Add unit tests and live PostgreSQL 18.7 integration tests for `target_session_attrs` and verify with `cargo --locked xtask verify`.
+- [x] T007 Implement `TargetSessionAttrs` (`Any`, `ReadWrite`, `ReadOnly`, `Primary`, `Standby`), `PGTARGETSESSIONATTRS`, `SUPPORTED_KEYS`, and strict libpq resolution precedence in `src/connection/target.rs`.
+- [x] T008 Wire `target-session-attrs` into `Profile` (`src/config/schema.rs`) and `--target-session-attrs` into `ConnectionOptions` (`src/cli/mod.rs`).
+- [x] T009 Enforce `TargetSessionAttrs` in `src/postgres/session.rs` using `transaction_read_only` and `pg_is_in_recovery()` without silent downgrade or retry, and display non-`Any` posture in connection details/doctor surfaces.
+- [x] T010 Add unit tests and live PostgreSQL 18.7 integration tests for `target_session_attrs` and verify with `cargo --locked xtask verify`.

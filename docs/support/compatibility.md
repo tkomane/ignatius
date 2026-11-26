@@ -170,6 +170,16 @@ is shown as unknown when that view is not readable.
 **Applied**: `service`, `passfile`, `host`, `port`, `dbname`, `user`, `password`,
 `sslmode`, `target_session_attrs`, `application_name`, `connect_timeout`.
 
+`target_session_attrs` follows the libpq vocabulary (`any`, `read-write`,
+`read-only`, `primary`, `standby`) across CLI (`--target-session-attrs`),
+URI/keyword connection strings (`target_session_attrs`), `pg_service.conf`,
+`PGTARGETSESSIONATTRS`, and profile configuration (`target-session-attrs`).
+After session bootstrap, Ignatius verifies `transaction_read_only` and
+`pg_is_in_recovery()` directly on PostgreSQL; mismatched sessions fail with a
+connection error and are never silently downgraded or retried. Internal
+object-tree connections clear `target_session_attrs` back to `any` and enforce
+their own read-only transaction posture.
+
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 `PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
 `PGCONNECT_TIMEOUT`, `PGSERVICE`, `PGSERVICEFILE`, `PGPASSFILE`, `PGSYSCONFDIR`.
@@ -325,6 +335,64 @@ entry refuses; the list skips it. Named replacements use exclusive private
 temporary files and atomic rename, as do configuration writes and history
 trimming. Earlier interrupted temporary files are preserved for inspection.
 
+## Saved query collections and offline CLI
+
+Saved queries live in `queries_dir` as plain PostgreSQL `.sql` files either at
+the root (`monthly-revenue`) or inside a single-level collection subdirectory
+(`billing/monthly-revenue`). Optional leading SQL header comments
+(`-- @tag:`, `-- @tags:`, and `-- @description:`) supply normalized tags and a
+description while keeping every file valid PostgreSQL SQL for `psql` or any
+editor.
+
+Name and path validation is a security boundary: at most one `/` is permitted
+with non-empty segments before and after `/`; `\`, `:`, `.`, `..`, control
+characters, and Windows-reserved device names (`CON`, `PRN`, `AUX`, `NUL`,
+`COM1`-`COM9`, `LPT1`-`LPT9`) are rejected across both collection and query-stem
+segments; `symlink_metadata` refuses symlinked collection directories or
+non-regular leaf files; directory scans skip nested depths beyond level 1; and
+reads are bounded at 1 MiB (`MAX_QUERY_FILE_BYTES`).
+
+In the TUI (`Ctrl+K o`), Saved Queries searches across query name, collection,
+`#tag`, description, and SQL text, and displays a bounded multi-line SQL preview
+(up to 24 lines / 2048 bytes). Offline CLI parity is available through
+`ignatius queries list [--collection <NAME>] [--tag <TAG>] [--format text|json]`
+and `ignatius queries show <NAME>`, respecting `--config-dir` with zero
+database or network calls.
+
+## Adaptive chord guide and buffer tabs
+
+Pressing `Ctrl+K` renders `CHORDS` (58 two-key workbench actions) in 1, 2, or 3
+balanced columns selected dynamically from chord count, terminal width, and
+terminal height (`area.width >= 114` uses 3 columns when 2 columns exceed
+available inner height), truncating only overlong descriptions with ellipses
+and preserving layout parity in both Unicode and ASCII modes.
+
+Up to 16 SQL editor buffers support session pinning (`Ctrl+K 9` / `pin-buffer`)
+and session renaming (`Ctrl+K 0` / `rename-buffer`). Pinned tabs display an
+explicit marker (`◆ ` in Unicode or `[P] ` in ASCII) and refuse `close-buffer`
+(`Ctrl+K -`) with `"Buffer is pinned; unpin it before closing."` until unpinned.
+Buffer renaming uses a single-line prompt that sanitizes control and bidi
+characters, trims whitespace, caps titles at 48 characters, refuses empty names,
+and writes nothing to disk.
+
+## Pinned result snapshot diffing
+
+The TUI exposes `pin-result` and `compare-result` (in the command palette and
+Results footer/bindings) to pin an ephemeral in-memory baseline (`PinnedResult`)
+from a retained result set and diff it against a later retained result in a
+scrollable `ResultDiff` overlay. Snapshots are bounded at 10,000 rows, 512
+columns, and 64 KiB per cell, never touch disk or crash-recovery journals, and
+clear automatically on connection target switches, profile switches, or quit.
+
+Row matching prefers a unique non-NULL shared key column (`Keyed`) and falls
+back explicitly to `Positional { reason }` alignment when no unique non-NULL key
+is available, reporting `SchemaDelta`, `[+]`/`[-]`/`[~]`/`[=]` badges, and
+truncation flags truthfully. Offline CLI parity via
+`ignatius result-diff <BASELINE> <CURRENT> [--key <COLUMN>] [--format text|json|markdown] [--output <PATH>] [--force]`
+parses local JSON or NDJSON exports up to 16 MiB (JSON nesting depth 64),
+rejects symlinks and non-regular inputs, writes `--output` atomically, and
+never opens a database or network connection.
+
 ## Reviewable cell-to-UPDATE
 
 The interactive client supports a deliberately narrow result-cell write flow.
@@ -354,13 +422,17 @@ rerun automatically. The generated statement is bounded at 16 KiB after
 binding.
 
 The review is not a lock. It does not lock the row during review, and instead
-guards execution optimistically: the generated statement matches the primary
-key AND verifies that the observed cell value is still unchanged (`IS NULL`, or
-bytewise equal to the retained output text via `pg_catalog.format('%s', ...)`).
-A concurrent change to the observed cell or a concurrent deletion reports zero
-rows affected. Ignatius does not retry the update or silently roll back; the
-row count the server returns is the truthful outcome, and the operator can
-refresh (`F6`) to inspect current data.
+guards ordinary and structured cell edits optimistically: the generated `UPDATE`
+matches the primary key AND verifies that the observed cell value is still
+unchanged (`IS NULL`, or `IS NOT NULL` and bytewise equal via
+`pg_catalog.format('%s', column) COLLATE pg_catalog."C" OPERATOR(pg_catalog.=)`
+against a secret-bound `:__ignatius_old_value` parameter kept out of
+`sql_template`, `Debug`, history, and diagnostics). A concurrent change to the
+observed cell or a concurrent deletion reports zero rows affected
+(`UPDATE matched 0 rows: the row was deleted or the observed cell value changed concurrently. Nothing was retried; refresh (F6) to read current data.`).
+Ignatius does not retry the update or silently roll back; the row count the
+server returns is the truthful outcome, and the operator can refresh (`F6`) to
+inspect current data.
 
 ## Explicit retained-result refresh
 
