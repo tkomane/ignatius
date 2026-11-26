@@ -7,6 +7,45 @@ use std::path::PathBuf;
 /// Maximum number of concurrent editor buffers.
 pub const MAX_EDITOR_BUFFERS: usize = 16;
 
+/// Maximum character length of a custom editor buffer title.
+pub const MAX_BUFFER_TITLE_CHARS: usize = 48;
+
+/// Sanitizes and bounds a user-supplied buffer title for single-line tab display.
+///
+/// Strips control and bidirectional formatting characters, escapes any remaining
+/// unsafe sequences via [`crate::query::value::sanitize_for_display`], trims
+/// surrounding whitespace, and caps length at [`MAX_BUFFER_TITLE_CHARS`]
+/// characters. Returns `None` if nothing non-empty remains.
+#[must_use]
+pub fn sanitize_buffer_title(title: &str) -> Option<String> {
+    let stripped: String = title
+        .chars()
+        .filter(|&ch| {
+            !ch.is_control()
+                && !matches!(
+                    ch as u32,
+                    0x200e | 0x200f | 0x202a..=0x202e | 0x2066..=0x2069
+                )
+        })
+        .collect();
+    let trimmed = stripped.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let display_safe = crate::query::value::sanitize_for_display(trimmed);
+    let capped: String = display_safe
+        .trim()
+        .chars()
+        .take(MAX_BUFFER_TITLE_CHARS)
+        .collect();
+    let final_title = capped.trim();
+    if final_title.is_empty() {
+        None
+    } else {
+        Some(final_title.to_owned())
+    }
+}
+
 /// Layout split mode for editor buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EditorSplitMode {
@@ -52,6 +91,8 @@ pub struct EditorBuffer {
     pub editor: Editor,
     /// Optional underlying filesystem path if saved or loaded.
     pub file_path: Option<PathBuf>,
+    /// Whether this buffer is pinned against accidental closure.
+    pub pinned: bool,
 }
 
 impl EditorBuffer {
@@ -68,6 +109,7 @@ impl EditorBuffer {
             title: title.into(),
             editor,
             file_path: None,
+            pinned: false,
         }
     }
 
@@ -182,9 +224,13 @@ impl BufferManager {
     }
 
     /// Closes the currently active buffer.
-    /// If it is the last remaining buffer, resets it to an empty default buffer.
+    /// Returns `false` without altering buffers when the active buffer is pinned.
+    /// If it is the last remaining unpinned buffer, resets it to an empty default buffer.
     /// Returns true if a buffer was closed/reset.
     pub fn close_active(&mut self) -> bool {
+        if self.active_buffer().pinned {
+            return false;
+        }
         if self.buffers.len() <= 1 {
             // Reset lone buffer
             self.buffers[0] = EditorBuffer::new(self.next_id, "buffer-1.sql", None);
@@ -219,6 +265,23 @@ impl BufferManager {
             }
         }
 
+        true
+    }
+
+    /// Toggles the pinned state of the active buffer and returns its new state.
+    pub fn toggle_pin_active(&mut self) -> bool {
+        let buf = self.active_buffer_mut();
+        buf.pinned = !buf.pinned;
+        buf.pinned
+    }
+
+    /// Renames the active buffer after sanitizing, trimming, and bounding `title`.
+    /// Returns `false` without changing the title if the sanitized title is empty.
+    pub fn rename_active(&mut self, title: &str) -> bool {
+        let Some(clean) = sanitize_buffer_title(title) else {
+            return false;
+        };
+        self.active_buffer_mut().title = clean;
         true
     }
 

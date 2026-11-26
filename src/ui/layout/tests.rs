@@ -3029,8 +3029,73 @@ fn a_pending_chord_lists_every_key_that_could_follow_it() {
         "the popup names the prefix: {text}"
     );
     for (key, _, description) in crate::ui::keymap::CHORDS {
-        assert!(text.contains(*description), "{key} is missing from {text}");
+        assert!(
+            text.contains(&format!(" {key} ")),
+            "key {key} is missing from {text}"
+        );
+        let prefix: String = description.chars().take(24).collect();
+        assert!(
+            text.contains(*description) || (text.contains(&prefix) && text.contains('\u{2026}')),
+            "{key} ({description}) is missing or clipped unexpectedly in 120x30:\n{text}"
+        );
     }
+
+    // On a wider terminal that fits 3 full columns, every description appears untruncated.
+    let wide = render_to_string(&model, &Keymap::new(), &rich(), 174, 30);
+    for (key, _, description) in crate::ui::keymap::CHORDS {
+        assert!(wide.contains(*description), "{key} is missing from {wide}");
+    }
+}
+
+#[test]
+fn chord_menu_renders_three_balanced_columns_in_unicode_and_ascii() {
+    let mut model = connected_model(Environment::Local);
+    model.prefix_pending = true;
+    let keymap = Keymap::new();
+
+    for (tier, divider, marker) in [
+        (GlyphTier::Unicode, "\u{2502}", "\u{2026}"),
+        (GlyphTier::Ascii, "|", "..."),
+    ] {
+        for (w, h) in [(120u16, 30u16), (114u16, 26u16)] {
+            let pres = presentation(ThemeChoice::Dark, true, tier);
+            let buf = rendered_buffer(&model, &pres, w, h);
+            let text = buffer_to_string(&buf);
+
+            assert!(text.contains("Ctrl+K then"), "{tier:?} {w}x{h}: {text}");
+            if tier == GlyphTier::Ascii {
+                assert!(
+                    text.is_ascii(),
+                    "ASCII chord menu emitted non-ASCII at {w}x{h}:\n{text}"
+                );
+            }
+
+            // At least one row has 2 column dividers (meaning 3 columns).
+            let has_three_columns = (0..h).any(|y| {
+                let row: String = (0..w).map(|x| buf[(x, y)].symbol()).collect();
+                row.matches(divider).count() >= 2
+            });
+            assert!(
+                has_three_columns,
+                "{tier:?} at {w}x{h} must render 3 columns with '{divider}' dividers:\n{text}"
+            );
+
+            // Every chord key and recognizable description (or bounded ellipsis) appears cleanly.
+            for (key, _, description) in crate::ui::keymap::CHORDS {
+                assert!(
+                    text.contains(&format!(" {key} ")),
+                    "{tier:?} {w}x{h}: key {key} missing:\n{text}"
+                );
+                let prefix: String = description.chars().take(20).collect();
+                assert!(
+                    text.contains(*description)
+                        || (text.contains(&prefix) && text.contains(marker)),
+                    "{tier:?} {w}x{h}: description for {key} missing:\n{text}"
+                );
+            }
+        }
+    }
+    let _ = keymap;
 }
 
 #[test]

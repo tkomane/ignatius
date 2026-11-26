@@ -1279,3 +1279,90 @@ fn editor_title_shows_line_count_modified_pill_focus_pulse_and_tab_glide() {
     super::render_editor(&model, &keymap, &pres, area, &mut settled);
     assert_eq!(settled, resting, "settled frame matches resting frame");
 }
+
+#[test]
+fn pinned_tab_marker_renders_and_hit_testing_matches_rendered_columns() {
+    let mut model = Model::new(100);
+    model.connection = ConnectionState::Connected(session());
+    model.buffers.toggle_pin_active();
+    model.buffers.rename_active("pinned-main");
+    model
+        .buffers
+        .new_buffer(Some("second.sql".into()), Some("SELECT 2;".into()));
+    model
+        .buffers
+        .new_buffer(Some("third.sql".into()), Some("SELECT 3;".into()));
+    model.buffers.toggle_pin_active();
+    model.buffers.switch_to(1);
+    model.sync_editor_from_active_buffer();
+
+    let keymap = Keymap::new();
+    for (tier, expected_pin) in [
+        (GlyphTier::Unicode, "\u{25c6} "),
+        (GlyphTier::Ascii, "[P] "),
+    ] {
+        let pres = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+            Glyphs::new(tier),
+            false,
+        );
+        model.presentation = crate::app::model::Presentation {
+            density: pres.density,
+            theme: pres.theme.clone(),
+            glyphs: pres.glyphs,
+            reduced_motion: false,
+            color_depth: ColorDepth::TrueColor,
+        };
+        let area = Rect::new(0, 0, 100, 14);
+        let mut buf = Buffer::empty(area);
+        render_editor(&model, &keymap, &pres, area, &mut buf);
+
+        let rows = rendered_rows(&buf, area);
+        let tab_y = rows
+            .iter()
+            .position(|r| r.contains("[BUFFERS: 3/16]"))
+            .expect("tab bar row") as u16;
+        let tab_row = &rows[usize::from(tab_y)];
+        assert!(
+            tab_row.contains(&format!("{expected_pin}1: pinned-main")),
+            "{tier:?} inactive pinned tab missing:\n{tab_row}"
+        );
+        assert!(
+            tab_row.contains("[2: second.sql]"),
+            "{tier:?} active unpinned tab missing:\n{tab_row}"
+        );
+        assert!(
+            tab_row.contains(&format!("{expected_pin}3: third.sql")),
+            "{tier:?} inactive pinned tab 3 missing:\n{tab_row}"
+        );
+
+        let bar_rect = Rect::new(area.x + 1, tab_y, area.width - 2, 1);
+        let tab1_col = tab_row[..tab_row.find("1: pinned-main").unwrap()]
+            .chars()
+            .count() as u16;
+        let tab2_col = tab_row[..tab_row.find("2: second.sql").unwrap()]
+            .chars()
+            .count() as u16;
+        let tab3_col = tab_row[..tab_row.find("3: third.sql").unwrap()]
+            .chars()
+            .count() as u16;
+        let plus_col = tab_row[..tab_row.find("[+]").unwrap()].chars().count() as u16;
+
+        assert_eq!(
+            super::tab_bar_hit(&model, &pres, bar_rect, tab1_col),
+            Some(crate::ui::widgets::Region::EditorTab { index: 0 })
+        );
+        assert_eq!(
+            super::tab_bar_hit(&model, &pres, bar_rect, tab2_col),
+            Some(crate::ui::widgets::Region::EditorTab { index: 1 })
+        );
+        assert_eq!(
+            super::tab_bar_hit(&model, &pres, bar_rect, tab3_col),
+            Some(crate::ui::widgets::Region::EditorTab { index: 2 })
+        );
+        assert_eq!(
+            super::tab_bar_hit(&model, &pres, bar_rect, plus_col),
+            Some(crate::ui::widgets::Region::NewEditorTab)
+        );
+    }
+}

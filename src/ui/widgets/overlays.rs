@@ -51,15 +51,22 @@ pub(crate) fn render_name_prompt(
         )),
     ];
 
-    Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .block(overlay_block(
+    let title = match prompt.purpose {
+        crate::app::model::NamePurpose::RenameBuffer => format!(
+            " {}Rename buffer  Enter to apply, Esc to cancel ",
+            presentation.icon(Icon::Editor)
+        ),
+        crate::app::model::NamePurpose::SaveQuery | crate::app::model::NamePurpose::ExportRows => {
             format!(
                 " {}Save  Enter to save, Esc to cancel ",
                 presentation.icon(Icon::Editor)
-            ),
-            presentation,
-        ))
+            )
+        }
+    };
+
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .block(overlay_block(title, presentation))
         .render(box_area, buf);
 }
 
@@ -1294,6 +1301,63 @@ pub(crate) fn render_definition(
         ))
         .render(box_area, buf);
 }
+fn split_chord_columns<T>(items: &[T], cols: usize) -> Vec<&[T]> {
+    let cols = cols.max(1);
+    let len = items.len();
+    let base = len / cols;
+    let extra = len % cols;
+    let mut slices = Vec::with_capacity(cols);
+    let mut offset = 0usize;
+    for col in 0..cols {
+        let count = base + usize::from(col < extra);
+        let end = (offset + count).min(len);
+        slices.push(&items[offset..end]);
+        offset = end;
+    }
+    slices
+}
+
+fn allocate_column_widths(needed: &[usize], avail: usize) -> Vec<usize> {
+    let cols = needed.len();
+    if cols == 0 {
+        return Vec::new();
+    }
+    let total_needed: usize = needed.iter().sum();
+    if total_needed <= avail {
+        return needed.to_vec();
+    }
+    let mut widths = vec![0usize; cols];
+    let mut remaining_cols = cols;
+    let mut remaining_avail = avail;
+    let mut done = vec![false; cols];
+    loop {
+        let share = remaining_avail / remaining_cols.max(1);
+        let mut assigned_any = false;
+        for i in 0..cols {
+            if !done[i] && needed[i] <= share {
+                widths[i] = needed[i];
+                remaining_avail = remaining_avail.saturating_sub(needed[i]);
+                remaining_cols -= 1;
+                done[i] = true;
+                assigned_any = true;
+            }
+        }
+        if !assigned_any || remaining_cols == 0 {
+            break;
+        }
+    }
+    if let Some(base) = remaining_avail.checked_div(remaining_cols) {
+        let mut extra_left = remaining_avail % remaining_cols;
+        for i in 0..cols {
+            if !done[i] {
+                widths[i] = base + usize::from(extra_left > 0);
+                extra_left = extra_left.saturating_sub(1);
+            }
+        }
+    }
+    widths
+}
+
 /// The popup that appears while a chord is waiting for its second key.
 ///
 /// Nothing here is on a timer: the reducer reads no clock, and a popup that
@@ -1308,6 +1372,9 @@ pub(crate) fn render_chords(
     let unicode = !presentation.glyphs.is_ascii();
     let chords = crate::ui::keymap::CHORDS;
     let single_col_height = u16::try_from(chords.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let two_col_height = u16::try_from(chords.len().div_ceil(2))
         .unwrap_or(u16::MAX)
         .saturating_add(2);
 
@@ -1342,93 +1409,99 @@ pub(crate) fn render_chords(
         }
     };
 
-    let use_two_columns = single_col_height > area.height && area.width >= 90;
-    if use_two_columns {
-        let split_at = chords.len().div_ceil(2);
-        let col1 = &chords[..split_at];
-        let col2 = &chords[split_at..];
-        let height = u16::try_from(split_at)
-            .unwrap_or(u16::MAX)
-            .saturating_add(2);
-        let max_width = 116u16.min(area.width.saturating_sub(2));
-        let chord_area = overlay_box(
-            area,
-            presentation,
-            (max_width, height),
-            height.min(area.height),
-            OverlayAnchor::Bottom,
-        );
-        if chord_area.width < 4 || chord_area.height < 3 {
-            return;
-        }
-        ratatui::widgets::Clear.render(chord_area, buf);
-
-        let inner_width = usize::from(chord_area.width.saturating_sub(2));
-        let divider_width = 3usize;
-        let col1_needed = col1
-            .iter()
-            .map(|(_, _, desc)| 4 + display_width(desc))
-            .max()
-            .unwrap_or(0);
-        let col2_needed = col2
-            .iter()
-            .map(|(_, _, desc)| 4 + display_width(desc))
-            .max()
-            .unwrap_or(0);
-        let even_col = inner_width.saturating_sub(divider_width) / 2;
-        let col_width =
-            even_col.min(col1_needed.max(inner_width.saturating_sub(divider_width + col2_needed)));
-        let divider_str = format!(" {} ", presentation.glyphs.column_rule());
-        let mut lines = Vec::new();
-        for i in 0..split_at {
-            let mut spans = Vec::new();
-            if let Some((key, _, description)) = col1.get(i) {
-                push_keycap(&mut spans, *key);
-                let pad = col_width.saturating_sub(4);
-                let text = format!("{:<pad$}", description);
-                spans.push(Span::styled(text, theme.style(Token::Text)));
-            }
-            spans.push(Span::styled(
-                divider_str.clone(),
-                theme.style(Token::Border),
-            ));
-            if let Some((key, _, description)) = col2.get(i) {
-                push_keycap(&mut spans, *key);
-                spans.push(Span::styled(*description, theme.style(Token::Text)));
-            }
-            lines.push(Line::from(spans));
-        }
-
-        Paragraph::new(lines)
-            .block(overlay_block_line(title_line, presentation))
-            .render(chord_area, buf);
+    let cols = if single_col_height <= area.height {
+        1
+    } else if two_col_height <= area.height && area.width >= 90 {
+        2
+    } else if area.width >= 114 {
+        3
+    } else if area.width >= 90 {
+        2
     } else {
-        let chord_area = overlay_box(
-            area,
-            presentation,
-            (60, single_col_height),
-            single_col_height.min(area.height),
-            OverlayAnchor::Bottom,
-        );
-        if chord_area.width < 4 || chord_area.height < 3 {
-            return;
+        1
+    };
+
+    let columns = split_chord_columns(chords, cols);
+    let row_count = columns.iter().map(|col| col.len()).max().unwrap_or(0);
+    let height = u16::try_from(row_count)
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let divider_str = format!(" {} ", presentation.glyphs.column_rule());
+    let divider_width = display_width(&divider_str);
+    let col_needed: Vec<usize> = columns
+        .iter()
+        .map(|col| {
+            col.iter()
+                .map(|(_, _, desc)| 4 + display_width(desc))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let max_width = match cols {
+        1 => 60,
+        2 => 116u16.min(area.width.saturating_sub(2)),
+        _ => {
+            let desired = col_needed
+                .iter()
+                .sum::<usize>()
+                .saturating_add(divider_width * cols.saturating_sub(1))
+                .saturating_add(2);
+            u16::try_from(desired)
+                .unwrap_or(u16::MAX)
+                .min(area.width.saturating_sub(2))
         }
-        ratatui::widgets::Clear.render(chord_area, buf);
+    };
 
-        let lines: Vec<Line> = chords
-            .iter()
-            .map(|(key, _, description)| {
-                let mut spans = Vec::new();
-                push_keycap(&mut spans, *key);
-                spans.push(Span::styled(*description, theme.style(Token::Text)));
-                Line::from(spans)
-            })
-            .collect();
-
-        Paragraph::new(lines)
-            .block(overlay_block_line(title_line, presentation))
-            .render(chord_area, buf);
+    let chord_area = overlay_box(
+        area,
+        presentation,
+        (max_width, height),
+        height.min(area.height),
+        OverlayAnchor::Bottom,
+    );
+    if chord_area.width < 4 || chord_area.height < 3 {
+        return;
     }
+    ratatui::widgets::Clear.render(chord_area, buf);
+
+    let inner_width = usize::from(chord_area.width.saturating_sub(2));
+    let avail_col_width = inner_width.saturating_sub(divider_width * cols.saturating_sub(1));
+    let col_widths = allocate_column_widths(&col_needed, avail_col_width);
+    let visible_rows = row_count.min(usize::from(chord_area.height.saturating_sub(2)));
+
+    let mut lines = Vec::with_capacity(visible_rows);
+    for i in 0..visible_rows {
+        let mut spans = Vec::new();
+        for (col_idx, col) in columns.iter().enumerate() {
+            if col_idx > 0 {
+                spans.push(Span::styled(
+                    divider_str.clone(),
+                    theme.style(Token::Border),
+                ));
+            }
+            let width = col_widths[col_idx];
+            let desc_budget = width.saturating_sub(4);
+            if let Some((key, _, description)) = col.get(i) {
+                push_keycap(&mut spans, *key);
+                let text = truncate_to_width(description, desc_budget, unicode);
+                if col_idx + 1 < cols {
+                    spans.push(Span::styled(
+                        pad_to_width(&text, desc_budget),
+                        theme.style(Token::Text),
+                    ));
+                } else {
+                    spans.push(Span::styled(text, theme.style(Token::Text)));
+                }
+            } else if col_idx + 1 < cols {
+                spans.push(Span::raw(" ".repeat(width)));
+            }
+        }
+        lines.push(Line::from(spans));
+    }
+
+    Paragraph::new(lines)
+        .block(overlay_block_line(title_line, presentation))
+        .render(chord_area, buf);
 }
 pub(crate) fn render_help(
     model: &crate::app::Model,

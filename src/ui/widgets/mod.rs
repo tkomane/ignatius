@@ -419,6 +419,13 @@ pub enum Region {
         /// One-based document line.
         line: usize,
     },
+    /// A tab in the editor buffer tab bar.
+    EditorTab {
+        /// Zero-based index into `model.buffers.buffers`.
+        index: usize,
+    },
+    /// The `[+]` new-buffer button on the editor buffer tab bar.
+    NewEditorTab,
     /// A result column header cell.
     ResultsHeaderCell {
         /// Zero-based source column.
@@ -666,26 +673,53 @@ fn sidebar_row_region(model: &Model, pane: Rect, column: u16, row: u16) -> Optio
     Some(Region::SidebarRow { index })
 }
 
-/// Maps a cell inside the editor pane to a gutter line or a text position.
+/// Maps a cell inside the editor pane to a tab, gutter line, or text position.
 fn editor_region(model: &Model, editor: Rect, column: u16, row: u16) -> Option<Region> {
     let inner = inner_rect(editor);
     if !in_rect(inner, column, row) {
+        return None;
+    }
+    let mut text_inner = inner;
+    if model.recovery_banner.is_some() && text_inner.height > 0 {
+        if row == text_inner.y {
+            return None;
+        }
+        text_inner.y = text_inner.y.saturating_add(1);
+        text_inner.height = text_inner.height.saturating_sub(1);
+    }
+    let show_tab_bar = (model.buffers.count() > 1
+        || model.buffers.split_mode != crate::buffer::EditorSplitMode::None)
+        && text_inner.height > 2
+        && text_inner.width >= 10;
+    if show_tab_bar {
+        if row == text_inner.y {
+            return editor::tab_bar_hit(
+                model,
+                &model.presentation,
+                Rect::new(text_inner.x, text_inner.y, text_inner.width, 1),
+                column,
+            );
+        }
+        text_inner.y = text_inner.y.saturating_add(1);
+        text_inner.height = text_inner.height.saturating_sub(1);
+    }
+    if text_inner.width == 0 || text_inner.height == 0 {
         return None;
     }
     let line_count = model.editor.line_count();
     let gutter = line_count.to_string().len().max(2);
     // The renderer draws the right-aligned number, a space, a statement marker
     // and then the text, so text starts this far in from the pane border.
-    let text_start = inner
+    let text_start = text_inner
         .x
         .saturating_add(u16::try_from(gutter.saturating_add(2)).unwrap_or(u16::MAX));
     let (cursor_line, _) = model.editor.position();
-    let height = inner.height as usize;
+    let height = text_inner.height as usize;
     let offset = cursor_line
         .saturating_sub(1)
         .saturating_sub(height.saturating_sub(1));
     let line = offset
-        .saturating_add(usize::from(row.saturating_sub(inner.y)))
+        .saturating_add(usize::from(row.saturating_sub(text_inner.y)))
         .saturating_add(1);
     if line > line_count {
         return None;
@@ -693,7 +727,7 @@ fn editor_region(model: &Model, editor: Rect, column: u16, row: u16) -> Option<R
     if column < text_start {
         return Some(Region::EditorGutter { line });
     }
-    let capacity = usize::from(inner.width).saturating_sub(gutter + 2);
+    let capacity = usize::from(text_inner.width).saturating_sub(gutter + 2);
     if capacity == 0 {
         return None;
     }

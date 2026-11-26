@@ -2879,6 +2879,8 @@ pub enum NamePurpose {
     SaveQuery,
     /// Writing the rows on screen to a file.
     ExportRows,
+    /// Renaming an editor buffer tab for this session.
+    RenameBuffer,
 }
 
 /// A shape for an interactive export of retained rows.
@@ -2988,6 +2990,24 @@ impl NamePrompt {
             purpose: NamePurpose::ExportRows,
             note: note.into(),
             export_format: Some(format),
+        }
+    }
+
+    /// Opens a prompt for a custom in-session buffer tab title.
+    #[must_use]
+    pub fn for_buffer_rename(current_title: &str) -> Self {
+        Self {
+            typed: String::new(),
+            subject: format!(
+                "Rename tab {} to",
+                crate::query::value::sanitize_for_display(current_title)
+            ),
+            purpose: NamePurpose::RenameBuffer,
+            note: format!(
+                "Tab title is local to this session (up to {} characters).",
+                crate::buffer::MAX_BUFFER_TITLE_CHARS
+            ),
+            export_format: None,
         }
     }
 }
@@ -4086,6 +4106,8 @@ pub struct Model {
     pub format_notice: Option<FormatNotice>,
     /// The last value-free paste refusal or acknowledgement shown in the editor footer.
     pub paste_notice: Option<PasteNotice>,
+    /// Transient buffer-tab feedback shown in the footer (e.g. closing a pinned buffer).
+    pub buffer_notice: Option<String>,
     /// The in-memory plan view over the Results pane.
     pub plan: PlanView,
     /// The transaction state the server last reported.

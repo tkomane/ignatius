@@ -155,6 +155,10 @@ pub enum Action {
     PrevEditorBuffer,
     /// Toggle editor split layout (None, Vertical, Horizontal).
     ToggleEditorSplit,
+    /// Pin or unpin the currently active SQL editor buffer.
+    TogglePinEditorBuffer,
+    /// Rename the currently active SQL editor buffer tab.
+    RenameEditorBuffer,
     /// Open the persistent scratchpad and snippet library overlay.
     SnippetLibrary,
     /// Restore crash-recovered session buffers into the editor.
@@ -319,6 +323,8 @@ impl Action {
             Self::NextEditorBuffer,
             Self::PrevEditorBuffer,
             Self::ToggleEditorSplit,
+            Self::TogglePinEditorBuffer,
+            Self::RenameEditorBuffer,
             Self::SnippetLibrary,
             Self::RestoreSession,
             Self::DiscardRecovery,

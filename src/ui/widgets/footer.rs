@@ -109,6 +109,7 @@ pub(crate) fn render_footer(
         || model.notice_state.pending.needs_report()
         || model.format_notice.is_some()
         || model.paste_notice.is_some()
+        || model.buffer_notice.is_some()
         || model.layout_notice.is_some();
     // While an overlay owns input the rail offers that overlay's keys, in its
     // words; workbench keys there would be swallowed and do nothing.
@@ -271,6 +272,26 @@ pub(crate) fn render_footer(
                 style = style.fg(ink);
             }
             spans.push(Span::styled(format!(" {message}"), style));
+        }
+        Paragraph::new(Line::from(spans))
+            .style(theme.surface(Token::SurfaceAlt))
+            .render(area, buf);
+        return true;
+    }
+
+    if let Some(notice) = &model.buffer_notice {
+        let remaining = usize::from(area.width).saturating_sub(used + 1);
+        let full = sanitize_for_display(notice);
+        let message = if display_width(&full) <= remaining {
+            full
+        } else {
+            truncate_to_width("Buffer pinned", remaining, !presentation.glyphs.is_ascii())
+        };
+        if !message.is_empty() {
+            spans.push(Span::styled(
+                format!(" {message}"),
+                theme.on_stripe(Token::Warning),
+            ));
         }
         Paragraph::new(Line::from(spans))
             .style(theme.surface(Token::SurfaceAlt))

@@ -113,7 +113,7 @@ PostgreSQL diagnostics preserve exact SQL whitespace so error carets line up und
   <img src="docs/assets/screenshots/palette-preview.png" alt="The saved queries palette open as a floating modal with a 1-cell drop shadow over a receded workbench, featuring a Spotlight search strip, proportional scroll thumb, and syntax-highlighted SQL preview card." width="92%" />
 </p>
 
-Press `Ctrl+P` for the Spotlight command palette with fuzzy match highlighting, proportional divider scrollbars, and live SQL preview cards across commands, saved queries, statement history, and connection profiles. Press `Ctrl+K` to open the two-key chord guide for all 56 workbench tools, leaving ordinary keys free for writing SQL. Floating modals cast a crisp 1-cell architectural drop shadow over the receded workspace while keeping the header and modal-scoped footer razor sharp. Mouse gestures work out of the box and can be turned off without losing any feature.
+Press `Ctrl+P` for the Spotlight command palette with fuzzy match highlighting, proportional divider scrollbars, and live SQL preview cards across commands, saved queries, statement history, and connection profiles. Press `Ctrl+K` to open the two-key chord guide for all 58 workbench tools, leaving ordinary keys free for writing SQL. Floating modals cast a crisp 1-cell architectural drop shadow over the receded workspace while keeping the header and modal-scoped footer razor sharp. Mouse gestures work out of the box and can be turned off without losing any feature.
 
 ### Live theme previews and seven adaptive palettes
 
@@ -232,7 +232,7 @@ Try these right after the workbench opens:
 - Place your cursor on `SELECT * FROM orders WHERE customer_id = 10482;` and press `Ctrl+K l` for an estimated query plan (`Esc` closes).
 - Press `Tab` into Results, pick a cell with the arrow keys, and press `Enter` to open the structured Cell Detail inspector.
 - Press `Ctrl+P`, type `Theme:`, and arrow through `atelier`, `paper`, `material`, and `field-industrial` to preview them live before pressing `Enter`.
-- Press `Ctrl+K` to browse all 56 chords, `F1` for help, and `Ctrl+Q` to quit.
+- Press `Ctrl+K` to browse all 58 chords, `F1` for help, and `Ctrl+Q` to quit.
 
 When you finish, `cargo xtask db down` removes the practice containers and volumes. Synthetic fixture credentials live in `docker/dev.env` and are wired automatically by `cargo xtask run`.
 
@@ -546,6 +546,8 @@ Press `Ctrl+K` to open the live chord guide showing every key that can follow; p
 | `'` | Run query latency benchmark and A/B suite |
 | `"` | Inspect schema snapshot and drift guard |
 | `?` | Open interactive SQL Markdown runbook |
+| `9` | Pin or unpin the active buffer |
+| `0` | Rename the active buffer |
 
 </details>
 
