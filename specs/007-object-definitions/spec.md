@@ -118,6 +118,8 @@ Someone is about to change a table and wants to know what reads it.
   `application_name`.
 - **SEC-704**: Falling back to a shared connection MUST be visible, because it
   is why the tree can wait behind a long query.
+  The fallback explanation and history status must both appear when the
+  header has room for both.
 
 ## Success Criteria
 
@@ -128,6 +130,9 @@ Someone is about to change a table and wants to know what reads it.
 - **SC-704**: A view that reads a table appears in that table's dependency list,
   and the table appears in the view's.
 - **SC-705**: A long query on the session does not delay the object tree.
+- **SC-706**: After a real refusal of the dedicated connection, the workbench
+  shows the shared fallback even with history disabled. A fresh tree reload
+  uses the same backend as the query session.
 
 ## Assumptions
 

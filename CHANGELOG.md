@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: The workbench can show the shared object-tree connection notice
+  alongside disabled or paused history.
 - Fixed: SQL completion offers the scoped alias's columns when its name
   also matches a schema and the qualifier is in an expression.
 - Fixed: Direct synthetic seed inserts preserve caller transactions,
