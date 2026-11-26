@@ -41,6 +41,12 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   result. After a late failure, the final path stays untouched and the
   diagnostic identifies the incomplete file without claiming a row count.
   Standard output remains buffered until PostgreSQL confirms completion.
+- **FR-2808.** Bulk COPY import requires the COPY row count and readiness
+  from the same request before reporting the COPY result. An error that
+  follows the command tag retains its safe SQLSTATE and omits row values.
+  An explicitly unwrapped import leaves any open caller transaction under
+  the caller's control. Ignatius-owned commit and dry-run rollback still
+  require their own confirmations.
 - **SC-2801.** With disposable PostgreSQL, valid dry-run returns the row count
   and leaves zero imported rows. Contradictory options leave zero rows.
   A refused nested import leaves the caller's transaction and its sentinel
@@ -64,3 +70,8 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   increase in fixed-width output does not produce proportional resident
   memory growth. A late server rejection retains the partial and preserves
   the original file, and a failure before any payload leaves no partial.
+- **SC-2806.** A deferred unique constraint rejects an unwrapped autocommit
+  import. The CLI reports SQLSTATE 23505 without the input value and prints
+  no success summary. The durable table stays unchanged and the same
+  session can subsequently import valid data. Unwrapped COPY in a caller
+  transaction leaves its rows subject to the caller's rollback.

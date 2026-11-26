@@ -23,5 +23,10 @@ waits for the same request's COPY command tag and ReadyForQuery before
 publishing data, so PostgreSQL errors after CopyDone reach the caller.
 Ordinary COPY streams still end at CopyDone.
 
+`src/copy_in.rs` offers the corresponding opt-in completion check for a COPY
+sink. Bulk import validates and retains the COPY row count pending ReadyForQuery
+on the original request. A deferred PostgreSQL rejection can then reach the
+caller. The ordinary sink and binary sync still return at the command tag.
+
 When a compatible upstream release provides these capabilities, remove this copy,
 the Cargo patch and the patch-specific inventory and advisory checks.

@@ -20,6 +20,9 @@
 - [x] T007 Stream named bulk COPY exports to the owned partial. Verify
   publication after completion, failure recovery, exact zero-byte output
   and peak resident memory across different fixed-width result sizes.
+- [x] T008 Confirm bulk COPY import completion and surface deferred server
+  errors. Verify the unwrapped autocommit CLI, same-session recovery and
+  caller rollback.
 
 [Local evidence](../../docs/status.md#wave-92---keep-bulk-import-transactions-under-caller-control---26-november-2026)
 
@@ -30,3 +33,5 @@
 [Bulk export completion evidence](../../docs/status.md#wave-113---confirm-bulk-copy-before-publishing-exports---26-november-2026)
 
 [Named bulk export evidence](../../docs/status.md#wave-114---stream-bulk-copy-exports-to-named-files---26-november-2026)
+
+[Bulk import completion evidence](../../docs/status.md#wave-115---confirm-bulk-copy-import-completion---26-november-2026)

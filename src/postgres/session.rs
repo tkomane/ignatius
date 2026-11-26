@@ -1588,7 +1588,7 @@ impl Session {
 
         let copy_sql = crate::transfer::build_copy_from_sql(options);
         let sink = self.client.copy_in(&copy_sql).await?;
-        let mut sink = std::pin::pin!(sink);
+        let mut sink = std::pin::pin!(sink.with_completion());
         for chunk in data.chunks(64 * 1024) {
             sink.as_mut()
                 .send(bytes::Bytes::copy_from_slice(chunk))

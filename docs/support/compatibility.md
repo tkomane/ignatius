@@ -508,6 +508,11 @@ is already active, failed or its state is unavailable. End a caller-owned
 transaction before retrying. CLI import with `--no-transaction` leaves
 transaction control with the caller.
 
+Bulk import waits for the COPY row count and readiness on the same request.
+This allows an unwrapped import in autocommit to report a deferred server
+rejection before printing a success summary. Inside an open caller
+transaction, its rows remain subject to the caller's commit or rollback.
+
 `--dry-run` requires the wrapper and conflicts with `--no-transaction`. Its
 row count is reported after PostgreSQL acknowledges rollback. COPY and commit
 errors retain SQLSTATE when available and omit diagnostic text that could

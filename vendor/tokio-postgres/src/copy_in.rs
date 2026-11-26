@@ -67,6 +67,7 @@ enum SinkState {
     Active,
     Closing,
     Reading,
+    ReadingReady(u64),
 }
 
 pin_project! {
@@ -81,6 +82,7 @@ pin_project! {
         responses: Responses,
         buf: BytesMut,
         state: SinkState,
+        wait_for_ready: bool,
         _p2: PhantomData<T>,
     }
 }
@@ -89,6 +91,13 @@ impl<T> CopyInSink<T>
 where
     T: Buf + 'static + Send,
 {
+    /// Waits for this request's ready-for-query response before returning the
+    /// COPY row count. A server error after command completion is returned.
+    pub fn with_completion(mut self) -> Self {
+        self.wait_for_ready = true;
+        self
+    }
+
     /// A poll-based version of `finish`.
     pub fn poll_finish(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<u64, Error>> {
         loop {
@@ -109,11 +118,24 @@ where
                 }
                 SinkState::Reading => {
                     let this = self.as_mut().project();
-                    match ready!(this.responses.poll_next(cx))? {
-                        Message::CommandComplete(body) => {
-                            let rows = extract_row_affected(&body)?;
-                            return Poll::Ready(Ok(rows));
-                        }
+                    let Message::CommandComplete(body) = ready!(this.responses.poll_next(cx))?
+                    else {
+                        return Poll::Ready(Err(Error::unexpected_message()));
+                    };
+                    if !*this.wait_for_ready {
+                        return Poll::Ready(extract_row_affected(&body));
+                    }
+                    let tag = body.tag().map_err(Error::parse)?;
+                    let rows = tag
+                        .strip_prefix("COPY ")
+                        .filter(|rows| rows.bytes().all(|byte| byte.is_ascii_digit()))
+                        .and_then(|rows| rows.parse().ok())
+                        .ok_or_else(Error::unexpected_message)?;
+                    *this.state = SinkState::ReadingReady(rows);
+                }
+                SinkState::ReadingReady(rows) => {
+                    match ready!(self.as_mut().project().responses.poll_next(cx))? {
+                        Message::ReadyForQuery(_) => return Poll::Ready(Ok(rows)),
                         _ => return Poll::Ready(Err(Error::unexpected_message())),
                     }
                 }
@@ -220,6 +242,7 @@ where
         responses,
         buf: BytesMut::new(),
         state: SinkState::Active,
+        wait_for_ready: false,
         _p2: PhantomData,
     })
 }

@@ -132,9 +132,11 @@ listed below are open.
   - **Target Column Mapping:** Users map input columns to table columns, select null value representations, and set encoding/quoting rules.
   - **Dry-Run & Transactional Guard:** Transaction-wrapped import requires an
     autocommit session. Dry-run requires that wrapper and reports success
-    after PostgreSQL acknowledges rollback. COPY and commit failures retain
-    SQLSTATE when available and omit server prose that can contain input
-    values. [Transaction ownership contract](../../specs/028-data-import-export-and-backup/spec.md).
+    after PostgreSQL acknowledges rollback. Unwrapped import awaits COPY
+    completion and leaves an open caller transaction under caller control.
+    COPY and commit failures retain SQLSTATE when available and omit
+    server prose that can contain input values.
+    [Transaction ownership contract](../../specs/028-data-import-export-and-backup/spec.md).
   - **Production Guard:** Imports into production profiles require typing the database name or passing `--confirm-production`.
 - **Backup and Restore Orchestration (`pg_dump` / `pg_restore`):**
   - Provides a safe subprocess harness wrapping native PostgreSQL client tools (`pg_dump`, `pg_restore`).

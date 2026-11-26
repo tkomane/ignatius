@@ -4,6 +4,26 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 115 - Confirm bulk COPY import completion - 26 November 2026
+
+- **W05 / 028 T008.** Bulk import requires the COPY row count and
+  ReadyForQuery on the original request. Deferred server rejections
+  retain SQLSTATE. Caller-managed transactions, Ignatius-owned commit
+  and dry-run rollback each retain their existing ownership and outcome
+  checks. [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
+- **Focused verification.** The new regression failed on the baseline,
+  which reported two imported rows after the server rejected them. The
+  fix passed the three import tests on plain and verified TLS PostgreSQL
+  18.7. They cover deferred rejection, same-session recovery, a caller
+  rollback after a successful unwrapped COPY, and owned transaction
+  checks.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** The
+  baseline CLI exited 0 after a deferred unique constraint rejected the
+  unwrapped import. The fix returns exit 7 and SQLSTATE 23505 with empty
+  stdout for both unwrapped and wrapped imports. Independent SQL confirmed
+  the original durable row on both transports. A successful dry run left
+  that state intact, and a later unwrapped call committed one verified row.
+
 ## Wave 114 - Stream bulk COPY exports to named files - 26 November 2026
 
 - **W05 and W10 / 028 T007.** Named exports feed COPY chunks to the
