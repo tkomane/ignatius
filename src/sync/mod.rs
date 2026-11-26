@@ -242,7 +242,7 @@ pub struct SyncReport {
     pub total_bytes: u64,
     /// Total elapsed time in milliseconds.
     pub total_duration_ms: u64,
-    /// Whether any foreign key cycles required deferred constraint checks.
+    /// Whether the selected source tables have a foreign-key dependency cycle.
     pub has_cycles: bool,
     /// Per-table transfer records.
     pub table_progress: Vec<SyncTableProgress>,
@@ -274,7 +274,7 @@ impl SyncReport {
         if self.has_cycles {
             let _ = writeln!(
                 out,
-                "Notice: Cyclic foreign keys detected; deferred constraints applied."
+                "Notice: Cyclic foreign keys detected. A transfer uses the destination's configured constraints."
             );
         }
         let _ = writeln!(out);

@@ -11,3 +11,4 @@
 - [x] T009: Run documentation contract tests and full verification battery (`cargo xtask verify`).
 - [x] T010: Update `docs/status.md` and `CHANGELOG.md` with Wave 31 delivery evidence.
 - [x] T011: Keep copied data out of sync failure diagnostics. Verify a destination uniqueness failure and exact successful transfer counts on a disposable PostgreSQL fixture.
+- [x] T012: Commit all sync destination writes atomically. Verify grouped foreign-key replacement, rollback on COPY and commit failure, caller transaction ownership, same-database refusal and dry-run behavior.

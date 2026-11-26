@@ -30,13 +30,16 @@ use crate::query::result::{
 };
 use crate::query::statements;
 use crate::query::value::Cell;
+use crate::sync::{SyncTableProgress, SyncTableStatus, TableKey};
 use futures_util::StreamExt;
 use secrecy::ExposeSecret;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
-use tokio_postgres::{AsyncMessage, Client, SimpleColumn, Socket, config::SslMode as PgSslMode};
+use tokio_postgres::{
+    AsyncMessage, Client, SimpleColumn, Socket, Transaction, config::SslMode as PgSslMode,
+};
 
 /// What is known about a live session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,6 +319,25 @@ impl TransferOperation {
     }
 }
 
+/// A definitive server rejection can be reported as such. Any missing or
+/// ambiguous COMMIT acknowledgment requires the caller to verify the destination.
+fn sync_commit_error(error: &tokio_postgres::Error) -> Diagnostic {
+    let mut diagnostic = TransferOperation::Sync.error(error, "destination commit");
+    let unknown = diagnostic.kind == DiagnosticKind::Connection
+        || error
+            .code()
+            .and_then(|state| safe_sqlstate(state.code()))
+            .is_none_or(|state| state.starts_with("08") || state == "40003");
+    if unknown {
+        diagnostic.kind = DiagnosticKind::Connection;
+        diagnostic.headline = "destination commit outcome is unknown".to_owned();
+        diagnostic = diagnostic
+            .likely_cause("the destination did not confirm whether the transaction committed")
+            .next_action("reconnect and check the destination before retrying; no transfer is retried automatically");
+    }
+    diagnostic
+}
+
 impl Session {
     /// The driver client, for catalog readers in sibling modules.
     #[must_use]
@@ -554,9 +576,9 @@ impl Session {
 
     /// Refuses unless the server reports the session outside a transaction.
     ///
-    /// Called with the SQL gate held, before work that brackets itself in
-    /// `BEGIN` and `ROLLBACK`: inside a user's transaction that `ROLLBACK`
-    /// would end the transaction and discard its work.
+    /// Called with the SQL gate held or exclusive access to the session before
+    /// starting an owned transaction. Ending a caller's transaction here could
+    /// commit or discard unrelated work.
     async fn require_autocommit(
         &self,
         what: &str,
@@ -829,46 +851,60 @@ impl Session {
         Ok(report.total_rows as u64)
     }
 
-    /// Copies an individual table from this session (source) to a target session using binary streaming COPY.
+    /// Copies one table in an owned destination transaction, or counts source rows in dry-run.
     pub async fn copy_table_to_target(
         &self,
-        target_session: &Session,
-        table: &crate::sync::TableKey,
+        target_session: &mut Session,
+        table: &TableKey,
         truncate: bool,
         cascade: bool,
         dry_run: bool,
-    ) -> Result<crate::sync::SyncTableProgress, Diagnostic> {
-        use futures_util::{SinkExt, StreamExt};
-
-        let start = std::time::Instant::now();
+    ) -> Result<SyncTableProgress, Diagnostic> {
         if dry_run {
-            let count_sql = format!("SELECT count(*) FROM {}", table.qualified_sql());
-            let row = self
-                .client
-                .query_one(&count_sql, &[])
-                .await
-                .map_err(|e| TransferOperation::Sync.error(&e, "source dry-run count"))?;
-            let count: i64 = row.get(0);
-            return Ok(crate::sync::SyncTableProgress {
-                key: table.clone(),
-                status: crate::sync::SyncTableStatus::Completed,
-                rows_copied: count as u64,
-                bytes_transferred: 0,
-                duration_ms: start.elapsed().as_millis() as u64,
-                message: Some("Dry-run verified".to_string()),
-            });
+            return self.count_sync_table(table).await;
         }
+        let tables = std::slice::from_ref(table);
+        let truncate_order = if truncate { tables } else { &[] };
+        let mut progress = self
+            .write_sync_tables(
+                target_session,
+                tables,
+                truncate_order,
+                cascade,
+                table.schema == "pg_temp",
+            )
+            .await?;
+        Ok(progress.pop().expect("single-table sync returns one table"))
+    }
 
-        if truncate {
-            let cascade_clause = if cascade { " CASCADE" } else { "" };
-            let trunc_sql = format!("TRUNCATE TABLE {}{cascade_clause}", table.qualified_sql());
-            target_session
-                .client
-                .batch_execute(&trunc_sql)
-                .await
-                .map_err(|e| TransferOperation::Sync.error(&e, "destination truncate"))?;
-        }
+    async fn count_sync_table(&self, table: &TableKey) -> Result<SyncTableProgress, Diagnostic> {
+        let start = Instant::now();
+        let count_sql = format!("SELECT count(*) FROM {}", table.qualified_sql());
+        let row = self
+            .client
+            .query_one(&count_sql, &[])
+            .await
+            .map_err(|e| TransferOperation::Sync.error(&e, "source dry-run count"))?;
+        let count: i64 = row.get(0);
+        Ok(SyncTableProgress {
+            key: table.clone(),
+            status: SyncTableStatus::Completed,
+            rows_copied: count as u64,
+            bytes_transferred: 0,
+            duration_ms: start.elapsed().as_millis() as u64,
+            message: Some("Dry-run verified".to_string()),
+        })
+    }
 
+    /// The COPY resources leave scope before the caller can roll back the transaction.
+    async fn stream_sync_table(
+        &self,
+        transaction: &Transaction<'_>,
+        table: &TableKey,
+    ) -> Result<SyncTableProgress, Diagnostic> {
+        use futures_util::SinkExt;
+
+        let start = Instant::now();
         let copy_out_sql = format!("COPY {} TO STDOUT (FORMAT BINARY)", table.qualified_sql());
         let copy_in_sql = format!("COPY {} FROM STDIN (FORMAT BINARY)", table.qualified_sql());
 
@@ -877,8 +913,7 @@ impl Session {
             .copy_out(&copy_out_sql)
             .await
             .map_err(|e| TransferOperation::Sync.error(&e, "source COPY startup"))?;
-        let sink = target_session
-            .client
+        let sink = transaction
             .copy_in(&copy_in_sql)
             .await
             .map_err(|e| TransferOperation::Sync.error(&e, "destination COPY startup"))?;
@@ -901,9 +936,9 @@ impl Session {
             .await
             .map_err(|e| TransferOperation::Sync.error(&e, "destination COPY completion"))?;
 
-        Ok(crate::sync::SyncTableProgress {
+        Ok(SyncTableProgress {
             key: table.clone(),
-            status: crate::sync::SyncTableStatus::Completed,
+            status: SyncTableStatus::Completed,
             rows_copied,
             bytes_transferred,
             duration_ms: start.elapsed().as_millis() as u64,
@@ -911,10 +946,129 @@ impl Session {
         })
     }
 
+    /// The exclusive borrow owns every request on the destination through COMMIT.
+    async fn write_sync_tables(
+        &self,
+        destination: &mut Session,
+        insert_order: &[TableKey],
+        truncate_order: &[TableKey],
+        cascade: bool,
+        session_local_table: bool,
+    ) -> Result<Vec<SyncTableProgress>, Diagnostic> {
+        destination
+            .require_autocommit(
+                "the destination sync",
+                "synchronizing data",
+                "destination write",
+            )
+            .await?;
+        let transaction = destination
+            .client
+            .transaction()
+            .await
+            .map_err(|e| TransferOperation::Sync.error(&e, "destination begin"))?;
+        let copied = async {
+            if !session_local_table && self.same_sync_database(&transaction).await? {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "source and destination are the same PostgreSQL database",
+                    "synchronizing data",
+                )
+                .next_action("select a different destination database"));
+            }
+            if !truncate_order.is_empty() {
+                let names = truncate_order
+                    .iter()
+                    .map(TableKey::qualified_sql)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let cascade_clause = if cascade { " CASCADE" } else { "" };
+                let sql = format!("TRUNCATE TABLE {names}{cascade_clause}");
+                transaction
+                    .batch_execute(&sql)
+                    .await
+                    .map_err(|e| TransferOperation::Sync.error(&e, "destination truncate"))?;
+            }
+            let mut progress = Vec::with_capacity(insert_order.len());
+            for table in insert_order {
+                progress.push(self.stream_sync_table(&transaction, table).await?);
+            }
+            Ok(progress)
+        }
+        .await;
+        let progress = match copied {
+            Ok(progress) => progress,
+            Err(mut diagnostic) => {
+                if transaction.rollback().await.is_err() {
+                    diagnostic = diagnostic
+                        .likely_cause("PostgreSQL did not acknowledge the destination rollback")
+                        .next_action(
+                            "check the destination and its transaction state before continuing",
+                        );
+                } else if diagnostic.kind == DiagnosticKind::Connection {
+                    diagnostic = diagnostic
+                        .likely_cause("PostgreSQL confirmed the destination rollback")
+                        .next_action("reconnect before starting another sync");
+                }
+                return Err(diagnostic);
+            }
+        };
+        transaction
+            .commit()
+            .await
+            .map_err(|error| sync_commit_error(&error))?;
+        Ok(progress)
+    }
+
+    /// A fresh database-scoped marker identifies the actual destination through aliases.
+    async fn same_sync_database(&self, transaction: &Transaction<'_>) -> Result<bool, Diagnostic> {
+        use std::hash::{BuildHasher, RandomState};
+
+        // Two int4 keys appear as unsigned OIDs with objsubid 2 in pg_locks.
+        const HELD: &str = "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_locks \
+            WHERE locktype = 'advisory' AND granted AND objsubid = 2 \
+            AND database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database()) \
+            AND classid = $1 AND objid = $2 AND pid = COALESCE($3, pg_catalog.pg_backend_pid()))";
+        const ACQUIRE: &str = "SELECT pg_catalog.pg_backend_pid(), pg_catalog.pg_try_advisory_xact_lock($1::int4, $2::int4)";
+        let marker = RandomState::new().hash_one(());
+        let high = (marker >> 32) as u32;
+        let low = marker as u32;
+        let collision = || {
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "could not reserve a fresh destination database marker",
+                "checking the sync destination",
+            )
+        };
+        // PostgreSQL permits reentrant locks. A session-level lock already held
+        // by this backend would outlive the transaction, so refuse that collision.
+        let held = transaction
+            .query_one(HELD, &[&high, &low, &None::<i32>])
+            .await
+            .map_err(|e| TransferOperation::Sync.error(&e, "destination identity check"))?;
+        if held.get::<_, bool>(0) {
+            return Err(collision());
+        }
+        let acquired = transaction
+            .query_one(ACQUIRE, &[&(high as i32), &(low as i32)])
+            .await
+            .map_err(|e| TransferOperation::Sync.error(&e, "destination identity check"))?;
+        if !acquired.get::<_, bool>(1) {
+            return Err(collision());
+        }
+        let pid: i32 = acquired.get(0);
+        let observed = self
+            .client
+            .query_one(HELD, &[&high, &low, &Some(pid)])
+            .await
+            .map_err(|e| TransferOperation::Sync.error(&e, "source identity check"))?;
+        Ok(observed.get(0))
+    }
+
     /// Executes an end-to-end topological cross-database copy and synchronization pipeline.
     pub async fn execute_sync_pipeline(
         &self,
-        target_session: &Session,
+        target_session: Option<&mut Session>,
         schema: Option<&str>,
         filter_tables: &[String],
         truncate: bool,
@@ -954,36 +1108,48 @@ impl Session {
 
         let plan = filtered_graph.compute_sync_plan();
 
-        if truncate && !dry_run {
-            for table in &plan.truncate_order {
-                let cascade_clause = if cascade { " CASCADE" } else { "" };
-                let trunc_sql = format!("TRUNCATE TABLE {}{cascade_clause}", table.qualified_sql());
-                target_session
-                    .client
-                    .batch_execute(&trunc_sql)
-                    .await
-                    .map_err(|e| TransferOperation::Sync.error(&e, "destination truncate"))?;
+        let target_endpoint = target_session
+            .as_deref()
+            .unwrap_or(self)
+            .info
+            .target
+            .clone();
+        let table_progress = if dry_run {
+            let mut progress = Vec::with_capacity(plan.insert_order.len());
+            for table in &plan.insert_order {
+                progress.push(self.count_sync_table(table).await?);
             }
-        }
-
-        let mut table_progress = Vec::with_capacity(plan.insert_order.len());
-        let mut total_rows = 0;
-        let mut total_bytes = 0;
-
-        for table in &plan.insert_order {
-            let res = self
-                .copy_table_to_target(target_session, table, false, false, dry_run)
-                .await?;
-            total_rows += res.rows_copied;
-            total_bytes += res.bytes_transferred;
-            table_progress.push(res);
-        }
+            progress
+        } else if plan.insert_order.is_empty() {
+            Vec::new()
+        } else {
+            let destination = target_session.ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    "a target database connection is required for data synchronization",
+                    "synchronizing data",
+                )
+            })?;
+            let truncate_order = if truncate {
+                plan.truncate_order.as_slice()
+            } else {
+                &[]
+            };
+            self.write_sync_tables(
+                destination,
+                &plan.insert_order,
+                truncate_order,
+                cascade,
+                false,
+            )
+            .await?
+        };
 
         Ok(crate::sync::SyncReport {
             source_endpoint: self.info.target.clone(),
-            target_endpoint: target_session.info.target.clone(),
-            total_rows,
-            total_bytes,
+            target_endpoint,
+            total_rows: table_progress.iter().map(|p| p.rows_copied).sum(),
+            total_bytes: table_progress.iter().map(|p| p.bytes_transferred).sum(),
             total_duration_ms: start.elapsed().as_millis() as u64,
             has_cycles: plan.has_cycles,
             table_progress,

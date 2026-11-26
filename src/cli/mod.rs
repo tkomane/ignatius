@@ -4664,10 +4664,10 @@ pub struct SyncArgs {
     /// Specific tables to synchronize (can be repeated). If omitted, all base tables in the schema/database are synchronized.
     #[arg(long = "table", value_name = "TABLE")]
     pub tables: Vec<String>,
-    /// Truncate target tables in reverse topological order before streaming data.
+    /// Truncate the selected target tables together before streaming data.
     #[arg(long)]
     pub truncate: bool,
-    /// Use CASCADE when truncating tables.
+    /// Include foreign-key dependents outside the selection when truncating.
     #[arg(long)]
     pub cascade: bool,
     /// Run dry-run verification queries without writing or truncating.
@@ -4752,12 +4752,12 @@ fn run_sync(
             &loaded.config.connection,
         )?;
         let tgt_target = authenticate_target(tgt_target, &loaded.config)?;
-        let tgt_session = rt.block_on(crate::postgres::session::connect(
+        let mut tgt_session = rt.block_on(crate::postgres::session::connect(
             &tgt_target,
             std::time::Duration::from_secs(30),
         ))?;
         rt.block_on(src_session.execute_sync_pipeline(
-            &tgt_session,
+            Some(&mut tgt_session),
             args.schema.as_deref(),
             &args.tables,
             args.truncate,
@@ -4767,7 +4767,7 @@ fn run_sync(
     } else {
         // Dry-run mode without target: verify source tables and topological ordering
         rt.block_on(src_session.execute_sync_pipeline(
-            &src_session,
+            None,
             args.schema.as_deref(),
             &args.tables,
             false,
