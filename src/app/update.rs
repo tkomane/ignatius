@@ -130,6 +130,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
         Message::Connected(info) => {
             let was_connecting = matches!(model.connection, ConnectionState::Connecting { .. });
             model.banner.finish();
+            model.retire_import();
             model.connection = ConnectionState::Connected(info);
             model.error = None;
             model.connecting_step = None;
@@ -151,6 +152,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                     model.reduced_motion || model.presentation.reduced_motion,
                 );
             }
+            model.retire_import();
             model.connection = ConnectionState::Connecting { step, target };
             model.connecting_step = Some(step);
             Vec::new()
@@ -161,6 +163,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.update_lookup = None;
             model.update_prompt = None;
             model.pending_update = None;
+            model.retire_import();
             // The server was reached and said no about credentials. That is the
             // one connection failure a person can answer from here, so it is
             // asked rather than merely reported.
@@ -218,6 +221,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.running_for = None;
             model.transaction = crate::query::result::TransactionState::Unknown;
             model.completion.menu = None;
+            model.retire_import();
             // The runtime sends this message before the late execution result
             // when a session closes. Clear every server-bound prompt and
             // running marker now: the result that follows is deliberately
@@ -422,6 +426,13 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::NoticeSourceInstalled { source, session_id } => {
+            if source == crate::app::model::NoticeSource::User
+                && model.notice_state.sources[source.index()]
+                    .as_ref()
+                    .is_some_and(|old| old.session_id != session_id)
+            {
+                model.retire_import();
+            }
             model
                 .notice_state
                 .install(source, model.connection_generation, session_id);
@@ -535,6 +546,16 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             session_id,
             counts,
         } => {
+            if source == crate::app::model::NoticeSource::User
+                && generation == model.connection_generation
+                && model.notice_state.sources[source.index()]
+                    .as_ref()
+                    .is_some_and(|installed| {
+                        installed.generation == generation && installed.session_id == session_id
+                    })
+            {
+                model.retire_import();
+            }
             model
                 .notice_state
                 .retire(source, generation, &session_id, counts);
@@ -856,6 +877,10 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::ImportExecuted { request, result } => {
+            if model.import_in_flight != Some(request) {
+                return Vec::new();
+            }
+            model.import_in_flight = None;
             if request != model.import_wizard_request {
                 return Vec::new();
             }
@@ -1703,6 +1728,7 @@ fn switch_theme_action(model: &mut Model) -> Vec<Effect> {
         || model.name_prompt.is_some()
         || model.connection_details
         || model.prefix_pending
+        || model.pending_import.is_some()
         || model.pending_run.is_some()
         || model.pending_plan.is_some()
         || model.pending_copy.is_some()
@@ -1809,6 +1835,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.prefix_pending {
         return resolve_prefix(model, action);
+    }
+    if model.pending_import.is_some() {
+        return import_confirmation_action(model, action);
     }
     if model.pending_run.is_some() {
         return confirmation_action(model, action);
@@ -3092,7 +3121,7 @@ fn import_wizard_open(model: &mut Model) -> Vec<Effect> {
         model.import_wizard = None;
         return Vec::new();
     }
-    if !model.connection.is_ready() {
+    if !model.connection.is_ready() || model.import_in_flight.is_some() {
         return Vec::new();
     }
     let table = if let Some(selected) = model.tree.selected_row() {
@@ -3119,6 +3148,11 @@ fn import_wizard_open(model: &mut Model) -> Vec<Effect> {
 
 /// Handles input while the bulk data import wizard overlay is on screen.
 fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    if model.import_in_flight.is_some()
+        && !matches!(action, Action::Dismiss | Action::ImportData | Action::Quit)
+    {
+        return Vec::new();
+    }
     match action {
         Action::Dismiss | Action::ImportData => {
             model.import_wizard = None;
@@ -3207,45 +3241,97 @@ fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
         }
         Action::Activate => {
-            if let Some(wizard) = &mut model.import_wizard {
-                if wizard.step == crate::app::model::ImportWizardStep::Execute {
-                    wizard.loading = true;
-                    wizard.error = None;
-                    model.import_wizard_request = model.import_wizard_request.wrapping_add(1);
-                    let request = model.import_wizard_request;
-                    let options = crate::transfer::ImportOptions {
-                        schema: wizard.schema.clone(),
-                        table: wizard.table.clone(),
-                        file_path: wizard.file_path.clone(),
-                        format: wizard.format,
-                        delimiter: wizard.delimiter,
-                        has_header: wizard.has_header,
-                        null_string: wizard.null_string.clone(),
-                        quote: wizard.quote,
-                        escape: wizard.escape,
-                        columns: wizard.preview.as_ref().map_or(Vec::new(), |p| {
-                            p.column_mappings
-                                .iter()
-                                .filter(|m| !m.skip)
-                                .map(|m| m.target_column.clone())
-                                .collect()
-                        }),
-                        dry_run: wizard.dry_run,
-                        transactional: wizard.transactional,
-                    };
-                    return vec![Effect::ExecuteImport {
-                        request,
-                        options,
-                        data: Vec::new(),
-                    }];
-                } else {
-                    wizard.step = wizard.step.next();
-                }
+            let Some(wizard) = model.import_wizard.as_mut() else {
+                return Vec::new();
+            };
+            if wizard.step != crate::app::model::ImportWizardStep::Execute {
+                wizard.step = wizard.step.next();
+                return Vec::new();
+            }
+            let options = wizard.options();
+            let Some(connection) = model.import_connection() else {
+                return Vec::new();
+            };
+            if connection.environment.is_production() {
+                model.review_scroll = 0;
+                model.pending_import = Some(crate::app::model::PendingImport {
+                    connection,
+                    options,
+                    typed: String::new(),
+                });
+            } else {
+                return start_import(model, connection, options);
             }
         }
         _ => {}
     }
     Vec::new()
+}
+
+fn import_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    let current = model.import_connection();
+    let Some(pending) = model.pending_import.as_ref() else {
+        return Vec::new();
+    };
+    if current.as_ref() != Some(&pending.connection)
+        || model.import_wizard.as_ref().is_none_or(|wizard| {
+            wizard.step != crate::app::model::ImportWizardStep::Execute
+                || wizard.options() != pending.options
+        })
+    {
+        model.pending_import = None;
+        return Vec::new();
+    }
+    if review_action(model, crate::ui::review::Kind::Import, &action) {
+        return Vec::new();
+    }
+    let Some(pending) = model.pending_import.as_mut() else {
+        return Vec::new();
+    };
+    match action {
+        Action::Insert(ch) => pending.typed.push(ch),
+        Action::Backspace => {
+            pending.typed.pop();
+        }
+        Action::Activate | Action::RunBuffer => {
+            if pending.typed.is_empty() || pending.typed != pending.connection.database {
+                return Vec::new();
+            }
+            let Some(pending) = model.pending_import.take() else {
+                return Vec::new();
+            };
+            return start_import(model, pending.connection, pending.options);
+        }
+        Action::Cancel | Action::Dismiss => model.pending_import = None,
+        Action::Quit => {
+            model.should_quit = true;
+            return vec![Effect::Quit];
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+fn start_import(
+    model: &mut Model,
+    connection: crate::app::model::ImportConnection,
+    options: crate::transfer::ImportOptions,
+) -> Vec<Effect> {
+    let Some(wizard) = model.import_wizard.as_mut() else {
+        return Vec::new();
+    };
+    wizard.loading = true;
+    wizard.error = None;
+    wizard.result = None;
+    model.import_wizard_request = model.import_wizard_request.wrapping_add(1);
+    let request = model.import_wizard_request;
+    model.import_in_flight = Some(request);
+    vec![Effect::ExecuteImport {
+        connection,
+        request,
+        options,
+        data: Vec::new(),
+    }]
 }
 
 fn routine_runner_open(model: &mut Model) -> Vec<Effect> {
@@ -8123,7 +8209,11 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
         model.format_notice = None;
         return Vec::new();
     }
-    if model.pending_run.is_some() || model.pending_plan.is_some() || model.pending_copy.is_some() {
+    if model.pending_import.is_some()
+        || model.pending_run.is_some()
+        || model.pending_plan.is_some()
+        || model.pending_copy.is_some()
+    {
         model.paste_notice = Some(PasteNotice::Ignored);
         model.format_notice = None;
         return Vec::new();
@@ -8337,6 +8427,7 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     {
         return Vec::new();
     }
+    model.retire_import();
     let summary = profile.as_deref().and_then(|name| {
         model
             .connection_profiles

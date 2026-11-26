@@ -507,7 +507,12 @@ transaction control with the caller.
 `--dry-run` requires the wrapper and conflicts with `--no-transaction`. Its
 row count is reported after PostgreSQL acknowledges rollback. COPY and commit
 errors retain SQLSTATE when available and omit diagnostic text that could
-contain input values. Production confirmation also applies to dry runs.
+contain input values.
+
+For production-classified targets, the wizard shows the database,
+destination and commit or rollback intent. Type the exact database name and
+accept to run either mode. Each approval is specific to one import and one
+query session. The CLI requires `--confirm-production` for these targets.
 
 ## Export
 

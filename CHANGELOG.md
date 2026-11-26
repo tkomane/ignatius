@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: The import wizard requires the exact database name before a
+  production-classified import or dry run.
 - Fixed: Replace Cell checks the query backend's effective read-only setting
   before asking for a replacement value.
 - Fixed: Unix SIGTERM restores the terminal when a workbench key chord or

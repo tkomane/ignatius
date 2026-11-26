@@ -11,3 +11,9 @@ Prove the CLI refuses the flags without a readable input file. Exercise
 transaction boundaries with synthetic rows on disposable PostgreSQL, and
 verify the actual executable reports a rejected combination and zero new
 rows. Run the full local verifier and check the exact pull request and main.
+
+For production confirmation, use the common workbench review with a snapshot
+of the options, target and installed query session. Check that session after
+waiting for the user SQL gate. The runtime uses the same installed query
+backend that the user approved. Verify the reducer and the live workbench
+against a disposable database with an explicit production label.

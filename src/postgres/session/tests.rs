@@ -681,3 +681,80 @@ async fn cancel_delivery_succeeds_before_timeout() {
         .await
         .expect("completed cancel returns Ok");
 }
+
+#[tokio::test]
+async fn queued_import_rechecks_approval_after_obtaining_the_user_sql_gate() {
+    use crate::query::result::TransactionState;
+    use crate::transfer::{ImportOptions, TransferFormat};
+    use futures_util::FutureExt;
+
+    let Some(session) = live_session(None).await else {
+        return;
+    };
+    session
+        .client
+        .batch_execute("CREATE TEMP TABLE import_approval_queue (id integer PRIMARY KEY)")
+        .await
+        .unwrap();
+    let options = ImportOptions {
+        schema: "pg_temp".into(),
+        table: "import_approval_queue".into(),
+        file_path: "synthetic.csv".into(),
+        format: TransferFormat::Csv,
+        delimiter: b',',
+        has_header: true,
+        null_string: String::new(),
+        quote: b'"',
+        escape: b'"',
+        columns: Vec::new(),
+        dry_run: false,
+        transactional: true,
+    };
+    let held = session.user_sql_gate.lock().await;
+    let approved = AtomicBool::new(true);
+    let mut queued = Box::pin(
+        session
+            .execute_import_while_current(&options, b"id\n1\n", || approved.load(Ordering::SeqCst)),
+    );
+    assert!(
+        queued.as_mut().now_or_never().is_none(),
+        "blocked behind user SQL"
+    );
+    approved.store(false, Ordering::SeqCst);
+    drop(held);
+    let refused = queued
+        .await
+        .expect_err("retired approval must not admit an import");
+    assert_eq!(refused.kind, DiagnosticKind::Connection);
+    assert!(refused.headline.contains("before COPY started"));
+    assert!(
+        session.user_sql_gate.try_lock().is_ok(),
+        "refusal released the queue"
+    );
+
+    let checks = std::cell::Cell::new(0);
+    let refused_after_begin = session
+        .execute_import_while_current(&options, b"id\n2\n", || {
+            let check = checks.get();
+            checks.set(check + 1);
+            // Allow the two checks before BEGIN and retire at COPY admission.
+            check < 2
+        })
+        .await
+        .expect_err("retirement before COPY must end the empty wrapper");
+    assert_eq!(checks.get(), 3);
+    assert!(refused_after_begin.headline.contains("before COPY started"));
+    assert_eq!(
+        session.transaction_state().await,
+        TransactionState::Autocommit
+    );
+
+    let rows = single_row(
+        &session.client,
+        "SELECT count(*) FROM pg_temp.import_approval_queue",
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(rows.get(0), Some("0"));
+}

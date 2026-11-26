@@ -4,6 +4,25 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 95 - Require typed approval for production imports - 26 November 2026
+
+- **W03 / 028 T004.** The wizard shows the resolved database, destination
+  and commit or rollback intent before requiring the exact database name.
+  One acceptance authorizes one configuration on the reviewed query
+  session. Queued work rechecks that session under the SQL gate before
+  starting COPY.
+  [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
+- **Focused verification.** Two confirmation regressions failed on the
+  baseline reducer. The fix passed five import checks, including duplicate
+  submission, rejected and retired approvals, and a disposable PostgreSQL
+  test of retirement while queued and after BEGIN. The latter confirmed
+  autocommit recovery and zero imported rows.
+- **Owned macOS arm64 PTY with PostgreSQL 18.7.** A disposable target labelled
+  Production required the exact database name. Blank, wrong-case and
+  dismissed entries left the table empty. An approved dry run also left it
+  empty. A new exact approval committed one CSV row, which an independent
+  session read back.
+
 ## Wave 94 - Refuse reviewed cell edits in a read-only transaction - 26 November 2026
 
 - **W03 / 023 T023.** Replace Cell checks the query backend's effective

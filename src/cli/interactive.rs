@@ -1198,6 +1198,7 @@ async fn event_loop(
                     );
                 }
                 Effect::ExecuteImport {
+                    connection,
                     request,
                     options,
                     data,
@@ -1209,7 +1210,7 @@ async fn event_loop(
                         options,
                         data,
                         Arc::clone(&connection_generation),
-                        connection_generation.load(std::sync::atomic::Ordering::SeqCst),
+                        connection,
                     );
                 }
                 Effect::LoadRoutines { request, schema } => {
@@ -3052,25 +3053,38 @@ fn spawn_load_import_preview(
 
 fn spawn_execute_import(
     tx: mpsc::UnboundedSender<Message>,
-    slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
+    slot: SessionSlot,
     request: u64,
     options: crate::transfer::ImportOptions,
     mut data: Vec<u8>,
     generation: Arc<std::sync::atomic::AtomicU64>,
-    request_generation: u64,
+    connection: crate::app::model::ImportConnection,
 ) {
     tokio::spawn(async move {
-        let opened = {
-            let held = slot.read().await;
-            held.clone()
-        };
-        let Some(installed) = opened else {
+        let request_generation = connection.generation;
+        if !connection_generation_is_current(&generation, request_generation) {
             return;
-        };
-        if data.is_empty() {
-            data = std::fs::read(&options.file_path).unwrap_or_default();
         }
-        let result = installed.session.execute_import(&options, &data).await;
+        let opened = slot.read().await.clone();
+        let result = if let Some(installed) = opened.filter(|installed| {
+            installed.generation == request_generation
+                && installed.session_id == connection.session_id
+                && installed.info().database == connection.database
+                && installed.info().environment == connection.environment
+        }) {
+            if data.is_empty() {
+                data = std::fs::read(&options.file_path).unwrap_or_default();
+            }
+            installed
+                .session
+                .execute_import_while_current(&options, &data, || {
+                    connection_generation_is_current(&generation, request_generation)
+                        && !installed.retired.load(std::sync::atomic::Ordering::SeqCst)
+                })
+                .await
+        } else {
+            Err(crate::postgres::session::import_session_changed())
+        };
         if !connection_generation_is_current(&generation, request_generation) {
             return;
         }

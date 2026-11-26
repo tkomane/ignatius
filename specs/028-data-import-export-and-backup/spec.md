@@ -16,8 +16,18 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   COPY and commit diagnostics preserve safe SQLSTATE codes and omit text
   that can disclose row values.
   The production confirmation requirement applies to dry runs.
+- **FR-2804.** For a production-classified interactive connection, an
+  import requires the exact resolved database name and an explicit
+  acceptance. The review shows the destination and commit or rollback
+  intent. Approval applies to one configuration and one query session.
+  Cancelling, switching sessions or entering a mismatched name prevents
+  the import from starting. A queued import rechecks its approved session
+  before starting under the user SQL gate.
 - **SC-2801.** With disposable PostgreSQL, valid dry-run returns the row count
   and leaves zero imported rows. Contradictory options leave zero rows.
   A refused nested import leaves the caller's transaction and its sentinel
   row intact until the user ends that transaction. Intentional unwrapped
   import still writes the supplied rows.
+- **SC-2802.** Synthetic production confirmation emits one import after
+  exact typed approval and none after an empty, mismatched or dismissed
+  review. A retired session cannot begin a queued import.
