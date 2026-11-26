@@ -250,7 +250,11 @@ Deliberate differences:
   inspection and watch loops; full `psql` scripting parity (`\if`, `\gset`,
   arbitrary shell `\!`) remains intentionally out of scope.
   Switching connections stops a running watch. After a switch, bare `\watch`
-  needs a completed query from the current connection.
+  needs a completed query from the current connection. Server positions for
+  bare watch and periodic iterations identify the watched query and preserve
+  the editor caret and focus. The first execution of literal companion SQL
+  can point into its original editor draft. Scheduled runs wait while a
+  named-parameter prompt or run confirmation is open.
 
 ## SQL buffer formatting
 

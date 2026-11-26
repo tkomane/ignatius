@@ -65,3 +65,19 @@ two disposable database profiles.
   `\timing`, `\?`/`\h`, and explicit refusal of `\!` and unsupported commands.
 - Integration tests and documentation updates once wired into `src/app/` and
   `src/cli/`.
+
+## W02 retain the source of watched SQL
+
+Carry the origin with the submitted job across any interactive confirmation
+or parameter prompt. Standalone watch and periodic ticks carry the watched
+query origin. Literal companion SQL carries the submitting editor span
+and identity. Use the existing diagnostic and history paths and stop the
+watch on a failed iteration.
+
+Verify standalone and timer failures, a positioned failure in the second
+statement of the initial companion SQL, and an ordinary query with a
+watch armed. Exercise different tabs at the same revision, workspace
+replacement through crash recovery, and timer deferral for a parameterized
+refresh and a run confirmation. Reproduce a failing tick through an
+owned terminal and disposable PostgreSQL. Run the full local, PR and
+post-merge gates.

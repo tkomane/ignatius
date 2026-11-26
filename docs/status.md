@@ -4,6 +4,28 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 89 - Keep watch positions with the watched query - 26 November 2026
+
+- **W02 / 050 T010.** Bare watch and periodic runs keep a server position
+  with their watched SQL. The first literal companion query still maps into
+  its original editor buffer, including the server statement ordinal.
+  The editor identity covers the buffer ID and revision. Crash recovery
+  retires a prior editor source, and scheduled runs wait through a
+  parameter prompt or run confirmation.
+  [Feature 050 tasks](../specs/050-psql-metacommands-and-watch-mode/tasks.md)
+- **Focused verification.** Six regressions failed on the baseline. The
+  corrected build passed 16 watch checks, seven error-location checks
+  and 17 refresh checks, plus workspace lint across all features and
+  targets. The checks include failed history, stopped watch, prompt
+  ownership and tabs at equal revisions.
+- **Owned macOS arm64 PTY with PostgreSQL 18.7.** A 12-second watch first
+  read a synthetic row. Renaming its source column caused the next tick
+  to report a real PostgreSQL position. The baseline moved the unrelated
+  draft's caret from column 3 to column 8 and focused the editor. The
+  corrected build showed the watched-query note, kept the caret at
+  column 3 and kept focus out of the editor. The watch stopped and both
+  PTYs exited zero. The unrelated draft bytes stayed intact.
+
 ## Wave 88 - Bound cloud provider output capture - 26 November 2026
 
 - **W10 / 011 T006.** Direct and Windows Azure CLI MSI launches share 1 MiB

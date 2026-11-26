@@ -101,3 +101,18 @@ it was refused and pointing to `\?`, `ignatius query -f`, or `ignatius import`.
   variable expansion (`\set`), and `\copy` (covered by `ignatius export` and
   `ignatius import`).
 - Unbounded background polling without an explicit iteration ceiling.
+
+## Watch error positions
+
+A failure from standalone `\watch` or a timer tick keeps the server
+diagnostic and failed history outcome. A reported position belongs to the
+watched query. Display that association and preserve the current editor
+caret and focus. The first execution of literal SQL submitted alongside
+`\watch` maps to that editor submission while the original buffer and
+revision are current, using the server statement ordinal when applicable.
+Ordinary editor queries retain their normal position mapping even when a
+watch timer is active. Replacing the workspace through crash recovery
+retires the prior editor association for a running query.
+
+The watch waits while a named-parameter prompt or run confirmation owns
+another submission. A later eligible tick resumes the watched query.

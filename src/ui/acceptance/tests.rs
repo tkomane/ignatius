@@ -654,7 +654,7 @@ fn reference_journeys_j1_through_j8_preserve_safety_recovery_and_visual_cues() {
         job: JobId(2),
         statements: 1,
     };
-    model.running_editor_revision = Some(model.editor.revision());
+    model.running_source = Some(model.editor_submission(None));
     model.running_sql = Some(sql_with_error.to_owned());
     let diagnostic = Diagnostic::new(
         DiagnosticKind::Query,
