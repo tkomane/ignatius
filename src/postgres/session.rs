@@ -248,45 +248,72 @@ pub(crate) fn import_session_changed() -> Diagnostic {
     .next_action("open the import wizard and review the current destination")
 }
 
-/// COPY and deferred checks during commit can expose input values in server
-/// diagnostic text.
-fn from_import_error(err: &tokio_postgres::Error, phase: &str) -> Diagnostic {
-    if let Some(db) = err.as_db_error() {
-        let (kind, headline) = if *db.code() == tokio_postgres::error::SqlState::QUERY_CANCELED {
-            (
-                DiagnosticKind::Cancelled,
-                format!("PostgreSQL cancelled {phase}"),
-            )
-        } else {
-            (DiagnosticKind::Query, format!("{phase} failed"))
+/// Transfer failures can contain copied values in any server-supplied field.
+enum TransferOperation {
+    Import,
+    Sync,
+}
+
+impl TransferOperation {
+    fn error(self, err: &tokio_postgres::Error, phase: &'static str) -> Diagnostic {
+        let (attempted, unknown_outcome, next_action) = match self {
+            Self::Import => (
+                "importing data",
+                "whether the import committed is not known from this connection",
+                "reconnect and check the data; no import is retried automatically",
+            ),
+            Self::Sync => (
+                "synchronizing data",
+                "the transfer outcome is unknown from this connection",
+                "reconnect and check the destination before continuing; no transfer is retried automatically",
+            ),
         };
-        let mut diagnostic = Diagnostic::new(kind, headline, "importing data")
-            .in_statement(1)
-            .technical(
+        use tokio_postgres::error::Severity;
+
+        let db = err.as_db_error();
+        let connection_lost = err.is_closed()
+            || (matches!(self, Self::Sync)
+                && matches!(
+                    db.and_then(tokio_postgres::error::DbError::parsed_severity),
+                    Some(Severity::Fatal | Severity::Panic)
+                ));
+        let mut diagnostic = if connection_lost {
+            Diagnostic::new(
+                DiagnosticKind::Connection,
+                format!("the connection closed during {phase}"),
+                attempted,
+            )
+            .likely_cause(unknown_outcome)
+            .next_action(next_action)
+        } else if let Some(db) = db {
+            let (kind, headline) = if *db.code() == tokio_postgres::error::SqlState::QUERY_CANCELED
+            {
+                (
+                    DiagnosticKind::Cancelled,
+                    format!("PostgreSQL cancelled {phase}"),
+                )
+            } else {
+                (DiagnosticKind::Query, format!("{phase} failed"))
+            };
+            Diagnostic::new(kind, headline, attempted).technical(
                 "Privacy",
                 "server diagnostic text omitted to protect input values",
-            );
-        if let Some(state) = safe_sqlstate(db.code().code()) {
+            )
+        } else {
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                format!("{phase} failed (driver diagnostic text omitted to protect input values)"),
+                attempted,
+            )
+        };
+        if let Some(state) = db.and_then(|db| safe_sqlstate(db.code().code())) {
             diagnostic = diagnostic.technical("SQLSTATE", state);
         }
-        return diagnostic;
+        match self {
+            Self::Import => diagnostic.in_statement(1),
+            Self::Sync => diagnostic,
+        }
     }
-    if err.is_closed() {
-        return Diagnostic::new(
-            DiagnosticKind::Connection,
-            format!("the connection closed during {phase}"),
-            "importing data",
-        )
-        .in_statement(1)
-        .likely_cause("whether the import committed is not known from this connection")
-        .next_action("reconnect and check the data; no import is retried automatically");
-    }
-    Diagnostic::new(
-        DiagnosticKind::Query,
-        format!("{phase} failed (driver diagnostic text omitted to protect input values)"),
-        "importing data",
-    )
-    .in_statement(1)
 }
 
 impl Session {
@@ -820,7 +847,7 @@ impl Session {
                 .client
                 .query_one(&count_sql, &[])
                 .await
-                .map_err(|e| from_query_error(&e, 0))?;
+                .map_err(|e| TransferOperation::Sync.error(&e, "source dry-run count"))?;
             let count: i64 = row.get(0);
             return Ok(crate::sync::SyncTableProgress {
                 key: table.clone(),
@@ -839,7 +866,7 @@ impl Session {
                 .client
                 .batch_execute(&trunc_sql)
                 .await
-                .map_err(|e| from_query_error(&e, 0))?;
+                .map_err(|e| TransferOperation::Sync.error(&e, "destination truncate"))?;
         }
 
         let copy_out_sql = format!("COPY {} TO STDOUT (FORMAT BINARY)", table.qualified_sql());
@@ -849,26 +876,30 @@ impl Session {
             .client
             .copy_out(&copy_out_sql)
             .await
-            .map_err(|e| from_query_error(&e, 0))?;
+            .map_err(|e| TransferOperation::Sync.error(&e, "source COPY startup"))?;
         let sink = target_session
             .client
             .copy_in(&copy_in_sql)
             .await
-            .map_err(|e| from_query_error(&e, 0))?;
+            .map_err(|e| TransferOperation::Sync.error(&e, "destination COPY startup"))?;
 
         let mut stream = std::pin::pin!(stream);
         let mut sink = std::pin::pin!(sink);
 
         let mut bytes_transferred: u64 = 0;
         while let Some(chunk_res) = stream.next().await {
-            let chunk = chunk_res.map_err(|e| from_query_error(&e, 0))?;
+            let chunk =
+                chunk_res.map_err(|e| TransferOperation::Sync.error(&e, "source COPY read"))?;
             bytes_transferred += chunk.len() as u64;
             sink.as_mut()
                 .send(chunk)
                 .await
-                .map_err(|e| from_query_error(&e, 0))?;
+                .map_err(|e| TransferOperation::Sync.error(&e, "destination COPY write"))?;
         }
-        let rows_copied = sink.finish().await.map_err(|e| from_query_error(&e, 0))?;
+        let rows_copied = sink
+            .finish()
+            .await
+            .map_err(|e| TransferOperation::Sync.error(&e, "destination COPY completion"))?;
 
         Ok(crate::sync::SyncTableProgress {
             key: table.clone(),
@@ -931,7 +962,7 @@ impl Session {
                     .client
                     .batch_execute(&trunc_sql)
                     .await
-                    .map_err(|e| from_query_error(&e, 0))?;
+                    .map_err(|e| TransferOperation::Sync.error(&e, "destination truncate"))?;
             }
         }
 
@@ -1271,7 +1302,7 @@ impl Session {
         let copied = if current() {
             self.copy_import(options, data)
                 .await
-                .map_err(|error| from_import_error(&error, "COPY import"))
+                .map_err(|error| TransferOperation::Import.error(&error, "COPY import"))
         } else {
             Err(import_session_changed())
         };
@@ -1305,7 +1336,7 @@ impl Session {
             self.client
                 .batch_execute("COMMIT;")
                 .await
-                .map_err(|error| from_import_error(&error, "import commit"))?;
+                .map_err(|error| TransferOperation::Import.error(&error, "import commit"))?;
             format!("Committed {rows} rows")
         } else {
             format!("Imported {rows} rows")

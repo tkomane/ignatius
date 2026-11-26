@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 100 - Protect copied values in binary sync diagnostics - 26 November 2026
+
+- **W04 / 039 T011.** Binary COPY, source dry-run counts and destination
+  truncation use fixed failure phases and retain validated SQLSTATE when
+  available. Connection loss advises checking the destination before
+  continuing. [Feature 039 tasks](../specs/039-cross-database-copy-and-sync-pipelines/tasks.md)
+- **Focused macOS arm64 verification with PostgreSQL 18.7.** The regression
+  detected disclosure on a synthetic destination uniqueness refusal on the
+  baseline. The fix preserved SQLSTATE 23505 while omitting the copied value
+  from plain, JSON and debug diagnostic representations. The existing import
+  commit-failure privacy test also passed.
+- **Executable verification.** The CLI preserved query exit 7 and retained
+  SQLSTATE 23505 for a duplicate row and 42P01 for a missing truncate target.
+  Verbose stderr and trace logging omitted the copied value. A successful
+  transfer recorded one row and the exact binary byte count, and an
+  independent PostgreSQL session saw the expected destination row.
+
 ## Wave 99 - Index completion catalogue column assembly - 26 November 2026
 
 - **W10 / 012 T032.** Catalogue assembly looks up each exact schema and

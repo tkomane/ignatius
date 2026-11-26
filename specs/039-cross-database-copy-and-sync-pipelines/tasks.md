@@ -10,3 +10,4 @@
 - [x] T008: Add CLI contract integration tests in `tests/sync_pipeline_contract.rs`.
 - [x] T009: Run documentation contract tests and full verification battery (`cargo xtask verify`).
 - [x] T010: Update `docs/status.md` and `CHANGELOG.md` with Wave 31 delivery evidence.
+- [x] T011: Keep copied data out of sync failure diagnostics. Verify a destination uniqueness failure and exact successful transfer counts on a disposable PostgreSQL fixture.
