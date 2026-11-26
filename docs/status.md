@@ -4,6 +4,18 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 108 - Verify restricted completion over plain and TLS - 26 November 2026
+
+- **W05 / 012 T035.** Two independent transport cases compare real SELECT
+  permissions with the same session's completion snapshot and candidates.
+  The granted table is readable. The denied table returns SQLSTATE 42501
+  and is marked `not readable by this role` in schema completion.
+  [Feature 012 tasks](../specs/012-schema-completion/tasks.md)
+- **Focused verification on macOS arm64 and PostgreSQL 18.7.** Both
+  cases ran against the disposable fixtures. One established a plain
+  connection and the other asserted active `verify-full` transport.
+  Three related restricted-role checks also passed.
+
 ## Wave 107 - Resolve completion qualifiers by SQL scope - 26 November 2026
 
 - **W02 / 012 T034.** An in-scope relation alias takes precedence over a

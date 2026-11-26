@@ -1427,16 +1427,10 @@ fn requiring_tls_against_a_server_without_it_fails_rather_than_downgrading() {
 #[test]
 fn a_restricted_role_can_still_connect_and_read_what_it_is_granted() {
     let uri = target_or_skip!();
-    // Rebuild the URI for the restricted role defined in docker/init/01-demo.sql.
-    let Some((prefix, rest)) = uri.split_once("://") else {
-        panic!("expected a URI");
-    };
-    let Some((_, host_and_db)) = rest.split_once('@') else {
+    let Some(restricted) = restricted_reader_uri(&uri) else {
         eprintln!("skipping: the test URI has no userinfo to replace");
         return;
     };
-    let restricted =
-        format!("{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}");
 
     let fx = fixture(&restricted);
 
@@ -1476,16 +1470,10 @@ fn a_restricted_role_can_still_connect_and_read_what_it_is_granted() {
 #[test]
 fn a_restricted_role_reads_orders_but_the_server_refuses_a_generated_update() {
     let uri = target_or_skip!();
-    // Rebuild the URI for the restricted role defined in docker/init/01-demo.sql.
-    let Some((prefix, rest)) = uri.split_once("://") else {
-        panic!("expected a URI");
-    };
-    let Some((_, host_and_db)) = rest.split_once('@') else {
+    let Some(restricted) = restricted_reader_uri(&uri) else {
         eprintln!("skipping: the test URI has no userinfo to replace");
         return;
     };
-    let restricted =
-        format!("{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}");
     let fx = fixture(&restricted);
 
     let source_sql = "SELECT order_id, note FROM orders ORDER BY order_id";
@@ -2087,18 +2075,93 @@ fn a_definition_that_is_not_there_fails_with_something_to_do() {
     assert!(error.next_action.is_some(), "a failure must say what to do");
 }
 
+fn restricted_reader_uri(uri: &str) -> Option<String> {
+    let (scheme, rest) = uri.split_once("://")?;
+    let (_, host_and_db) = rest.split_once('@')?;
+    Some(format!(
+        "{scheme}://restricted_reader:not-a-real-password-restricted@{host_and_db}"
+    ))
+}
+
+fn assert_restricted_completion(fx: &Fixture) {
+    let allowed = fx.block_on(fx.session.execute(
+        "SELECT * FROM public.orders WHERE false",
+        20,
+        JobId(12_035),
+    ));
+    assert_eq!(allowed.status, ExecutionStatus::Succeeded, "{allowed:?}");
+
+    let denied = fx.block_on(fx.session.execute(
+        "SELECT * FROM public.secrets_of_the_realm WHERE false",
+        20,
+        JobId(12_036),
+    ));
+    assert_eq!(denied.status, ExecutionStatus::Failed, "{denied:?}");
+    assert!(denied.error.as_ref().is_some_and(|error| {
+        error
+            .technical
+            .iter()
+            .any(|field| field.label == "SQLSTATE" && field.value == "42501")
+    }));
+
+    let catalog = fx
+        .block_on(fx.session.completion_catalog())
+        .expect("restricted completion catalogue");
+    for (name, readable) in [("orders", true), ("secrets_of_the_realm", false)] {
+        let object = catalog
+            .objects
+            .iter()
+            .find(|object| object.schema == "public" && object.name == name)
+            .unwrap_or_else(|| panic!("completion catalogue omitted public.{name}"));
+        assert_eq!(object.readable, readable, "public.{name}");
+    }
+
+    for (name, readable) in [("orders", true), ("secrets_of_the_realm", false)] {
+        let sql = format!("SELECT * FROM public.{name}");
+        let completion = ignatius::query::completion::complete(&sql, sql.len(), Some(&catalog));
+        assert_eq!(
+            completion.scope,
+            ignatius::query::completion::CompletionScope::Schema("public".to_owned())
+        );
+        let candidate = completion
+            .candidates
+            .iter()
+            .find(|candidate| candidate.label == name)
+            .unwrap_or_else(|| panic!("completion omitted public.{name}"));
+        assert_eq!(candidate.schema.as_deref(), Some("public"));
+        assert_eq!(
+            candidate.detail.as_deref(),
+            (!readable).then_some("not readable by this role"),
+            "only unreadable candidates carry the policy label"
+        );
+    }
+}
+
 #[test]
-fn a_restricted_role_sees_objects_it_cannot_read_and_they_are_marked_as_such() {
+fn restricted_completion_marks_readability_over_plain_transport() {
     let uri = target_or_skip!();
-    let Some((prefix, rest)) = uri.split_once("://") else {
-        panic!("expected a URI");
-    };
-    let Some((_, host_and_db)) = rest.split_once('@') else {
+    let Some(uri) = restricted_reader_uri(&uri) else {
         eprintln!("skipping: the test URI has no userinfo to replace");
         return;
     };
-    let restricted =
-        format!("{prefix}://restricted_reader:not-a-real-password-restricted@{host_and_db}");
+    let fx = fixture(&uri);
+    let tls = &fx.session.info().tls;
+    assert!(!tls.is_encrypted());
+    match tls {
+        TlsState::Disabled => assert_eq!(tls.label(), "TLS off"),
+        TlsState::NotNegotiated => assert_eq!(tls.label(), "TLS not negotiated"),
+        state => panic!("expected an unencrypted plain fixture, got {state:?}"),
+    }
+    assert_restricted_completion(&fx);
+}
+
+#[test]
+fn a_restricted_role_sees_objects_it_cannot_read_and_they_are_marked_as_such() {
+    let uri = target_or_skip!();
+    let Some(restricted) = restricted_reader_uri(&uri) else {
+        eprintln!("skipping: the test URI has no userinfo to replace");
+        return;
+    };
     let fx = fixture(&restricted);
     use ignatius::postgres::ObjectKind;
 
@@ -2337,6 +2400,36 @@ fn verify_full_succeeds_against_a_trusted_certificate_with_a_matching_name() {
         "verify-full must state the guarantee it gave: {description}"
     );
     assert!(tls.label().contains("verify-full"), "{}", tls.label());
+}
+
+#[test]
+fn restricted_completion_marks_readability_over_verified_tls() {
+    let uri = tls_target_or_skip!();
+    let Some(uri) = restricted_reader_uri(&uri) else {
+        eprintln!("skipping: the TLS test URI has no userinfo to replace");
+        return;
+    };
+    let target = tls_target(
+        &uri,
+        &format!("sslmode=verify-full&sslrootcert={}", certificate("ca.crt")),
+    );
+    let runtime = runtime();
+    let session = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("restricted TLS fixture connects with verified server identity");
+    let fx = Fixture { runtime, session };
+    match &fx.session.info().tls {
+        TlsState::Active {
+            version,
+            mode: SslMode::VerifyFull,
+            ..
+        } => assert_eq!(
+            fx.session.info().tls.label(),
+            format!("TLS {version} verify-full")
+        ),
+        state => panic!("expected encrypted verify-full transport, got {state:?}"),
+    }
+    assert_restricted_completion(&fx);
 }
 
 #[test]

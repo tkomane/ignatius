@@ -171,6 +171,9 @@ explicit rather than per-keystroke.
 - [x] T034 Resolve an in-scope relation qualifier before a same-named schema
   in expressions, retain schema completion in relation-name slots, and
   verify the shared engine and real plain-mode command.
+- [x] T035 Verify restricted-role completion against the plain and
+  verified-TLS fixtures. Compare the granted and denied SELECT outcomes
+  with the catalogue and visible candidate readability.
 
 ## Dependencies and execution order
 

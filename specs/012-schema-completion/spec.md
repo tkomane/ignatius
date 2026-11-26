@@ -98,8 +98,8 @@ Principle I, applied to the one feature most tempted to bluff.
 - A CTE: names defined by `WITH` are in scope and are offered.
 - A subquery with its own alias.
 - Typing inside a string literal or a comment: nothing is offered.
-- A table the user has no privilege to read: it is in the catalogue, and whether
-  it is offered is decided explicitly rather than by accident.
+- A table the user has no privilege to read: it remains in the catalogue.
+  The schema-qualified candidate says `not readable by this role`.
 
 ## Requirements
 
