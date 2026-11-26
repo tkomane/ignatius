@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 99 - Index completion catalogue column assembly - 26 November 2026
+
+- **W10 / 012 T032.** Catalogue assembly looks up each exact schema and
+  relation pair once per column through an index. The same queries, metadata,
+  privileges, relation order and column order feed completion and the ER
+  preview.
+  [Feature 012 tasks](../specs/012-schema-completion/tasks.md)
+- **Matched release-build measurements on macOS arm64 and PostgreSQL 18.7.**
+  Seven timed loads per case followed one warmup. On the 2,100-relation,
+  24,600-column and 200-function fixture, median fetch-and-assembly fell
+  from 161.0 ms (159.4-171.5 ms) to 70.4 ms (61.4-76.8 ms). On the
+  40-relation, 360-column and 20-function control, the medians were 7.3
+  and 7.0 ms. Both builds retained all expected rows per schema and the
+  final test relation with its ordered columns.
+- **Focused verification.** Ten completion tests, the live catalogue
+  metadata snapshot, and all four existing resource-bound contracts passed.
+  The timing samples cover PostgreSQL fetch plus assembly.
+
 ## Wave 98 - Verify explicit rollback after Unix-socket cancellation - 26 November 2026
 
 - **W05 / 001 T061.** The existing hosted Linux socket job now has a second

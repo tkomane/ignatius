@@ -155,6 +155,13 @@ explicit rather than per-keystroke.
 - [x] T031 Re-run `git diff --check`, inspect the final diff/status, and leave
   changes unpushed on the feature branch for owner review.
 
+- [x] T032 Index relation positions during catalogue column assembly.
+  Retain exact schema and relation identity, relation order and column order.
+  Compare release-build acquisition with the same live control and scaled
+  PostgreSQL catalogues and verify existing completion contracts.
+
+[Catalogue evidence](../../docs/status.md#wave-99---index-completion-catalogue-column-assembly---26-november-2026)
+
 ## Dependencies and execution order
 
 - T001-T004 are foundational; T007-T010 depend on the pure types and lexer
