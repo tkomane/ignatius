@@ -23,8 +23,9 @@ use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::time::Instant;
 
@@ -380,6 +381,62 @@ fn capture_command_output(command: &mut Command) -> &mut Command {
         .stderr(Stdio::piped())
 }
 
+const STDOUT_LIMIT: usize = 1024 * 1024;
+const STDERR_LIMIT: usize = 64 * 1024;
+
+struct ProviderOutput {
+    status: ExitStatus,
+    // None means the stream exceeded its limit. Never display or parse a prefix.
+    stdout: Option<Vec<u8>>,
+    stderr: Option<Vec<u8>>,
+}
+
+/// Drain even after overflow so the child can finish writing and report its status.
+async fn read_complete(
+    reader: &mut (impl AsyncRead + Unpin),
+    limit: usize,
+) -> io::Result<Option<Vec<u8>>> {
+    let mut complete = Some(Vec::new());
+    let mut chunk = [0; 4096];
+    loop {
+        let count = match reader.read(&mut chunk).await {
+            Ok(0) => return Ok(complete),
+            Ok(count) => count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        if let Some(bytes) = &mut complete {
+            if count > limit - bytes.len() {
+                complete = None;
+            } else {
+                bytes.extend_from_slice(&chunk[..count]);
+            }
+        }
+    }
+}
+
+async fn collect_provider_output(mut child: Child) -> io::Result<ProviderOutput> {
+    // Keep both pipe handles owned here until the wait and both drains complete.
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("provider stdout pipe unavailable"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("provider stderr pipe unavailable"))?;
+    let (status, stdout, stderr) = tokio::try_join!(
+        child.wait(),
+        read_complete(&mut stdout, STDOUT_LIMIT),
+        read_complete(&mut stderr, STDERR_LIMIT),
+    )?;
+    Ok(ProviderOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
 fn spawn_provider(
     program: &str,
     arguments: &[String],
@@ -435,7 +492,7 @@ async fn fetch_selected(
         if expired() {
             return Err(timed_out(provider, &program));
         }
-        let wait = started.map_err(io_diagnostic)?.wait_with_output();
+        let wait = collect_provider_output(started.map_err(io_diagnostic)?);
         match deadline {
             Some(end) => tokio::time::timeout_at(end, wait).await,
             // Preserve Tokio's timeout behavior outside the clock's range.
@@ -443,21 +500,46 @@ async fn fetch_selected(
         }
     } else {
         let mut command = Command::new(&program);
-        let started = capture_command_output(command.args(&arguments)).output();
-        tokio::time::timeout(provider.timeout, started).await
+        let child = capture_command_output(command.args(&arguments))
+            .spawn()
+            .map_err(io_diagnostic)?;
+        tokio::time::timeout(provider.timeout, collect_provider_output(child)).await
     }
     .map_err(|_| timed_out(provider, &program))?
     .map_err(io_diagnostic)?;
 
+    credential_from_output(provider, &program, output)
+}
+
+fn credential_from_output(
+    provider: &Provider,
+    program: &str,
+    output: ProviderOutput,
+) -> Result<SecretString, Box<Diagnostic>> {
     if !output.status.success() {
-        // The program's own words are the most useful thing here and the least
-        // trustworthy: they are text from elsewhere heading for a terminal, and
-        // they may quote a credential back at us.
-        let reason = redaction::redact_text(&String::from_utf8_lossy(&output.stderr));
-        return Err(refused(provider, &program, output.status, reason.trim()));
+        return Err(refused(
+            provider,
+            program,
+            output.status,
+            output.stderr.as_deref(),
+        ));
     }
 
-    let printed = String::from_utf8_lossy(&output.stdout);
+    let stdout = output.stdout.ok_or_else(|| {
+        Box::new(
+            Diagnostic::new(
+                DiagnosticKind::Authentication,
+                format!("{} exceeded the 1 MiB provider stdout limit", provider.name),
+                "reading the credential from the provider",
+            )
+            .next_action(format!(
+                "configure the provider to print only the required credential or JSON. {}",
+                provider.remedy
+            ))
+            .technical("Program", program),
+        )
+    })?;
+    let printed = String::from_utf8_lossy(&stdout);
     let token = match &provider.extract {
         Extract::Raw => {
             let trimmed = printed.trim();
@@ -491,7 +573,7 @@ async fn fetch_selected(
             }
             trimmed.to_owned()
         }
-        Extract::JsonField(field) => extract_field(&printed, field, provider, &program)?,
+        Extract::JsonField(field) => extract_field(&printed, field, provider, program)?,
     };
 
     if token.is_empty() {
@@ -659,8 +741,8 @@ fn could_not_run(provider: &Provider, program: &str, reason: &str) -> Box<Diagno
 fn refused(
     provider: &Provider,
     program: &str,
-    status: std::process::ExitStatus,
-    reason: &str,
+    status: ExitStatus,
+    stderr: Option<&[u8]>,
 ) -> Box<Diagnostic> {
     let mut diagnostic = Diagnostic::new(
         DiagnosticKind::Authentication,
@@ -671,8 +753,14 @@ fn refused(
     .technical("Provider", provider.name.clone())
     .technical("Program", program.to_owned())
     .technical("Exit status", status.to_string());
-    if !reason.is_empty() {
-        diagnostic = diagnostic.likely_cause(format!("the tool said: {reason}"));
+    if let Some(bytes) = stderr {
+        let redacted = redaction::redact_text(&String::from_utf8_lossy(bytes));
+        let reason = redacted.trim();
+        if !reason.is_empty() {
+            diagnostic = diagnostic.likely_cause(format!("the tool said: {reason}"));
+        }
+    } else {
+        diagnostic = diagnostic.likely_cause("provider stderr exceeded 64 KiB and was discarded");
     }
     Box::new(diagnostic)
 }

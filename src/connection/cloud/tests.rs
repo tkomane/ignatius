@@ -368,6 +368,127 @@ async fn a_program_that_does_not_exist_is_a_missing_prerequisite_not_a_refusal()
 }
 
 #[tokio::test]
+async fn a_provider_stream_is_retained_only_if_complete_and_drained_through_eof() {
+    assert_eq!((STDOUT_LIMIT, STDERR_LIMIT), (1_048_576, 65_536));
+    for text in ["", "abc", "abcd", "abcde"] {
+        let retained = read_complete(&mut text.as_bytes(), 4).await.unwrap();
+        assert_eq!(
+            retained.as_deref(),
+            (text.len() <= 4).then_some(text.as_bytes())
+        );
+    }
+
+    let mut tail = b"more text".as_slice();
+    let mut reader = b"abcd".as_slice().chain(b"e".as_slice()).chain(&mut tail);
+    assert!(read_complete(&mut reader, 4).await.unwrap().is_none());
+    assert!(
+        tail.is_empty(),
+        "bytes after the overflowing read must also be consumed"
+    );
+}
+
+#[tokio::test]
+async fn an_interrupted_provider_read_resumes_and_retains_the_complete_stream() {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::ReadBuf;
+
+    struct InterruptedOnce {
+        interrupted: bool,
+        bytes: &'static [u8],
+    }
+
+    impl AsyncRead for InterruptedOnce {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Poll::Ready(Err(io::ErrorKind::Interrupted.into()));
+            }
+            Pin::new(&mut self.bytes).poll_read(cx, buf)
+        }
+    }
+
+    let mut reader = InterruptedOnce {
+        interrupted: false,
+        bytes: b"sample",
+    };
+    let retained = read_complete(&mut reader, 6).await.unwrap();
+    assert_eq!(retained.as_deref(), Some(b"sample".as_slice()));
+}
+
+#[test]
+fn complete_stdout_can_supply_a_credential_after_stderr_overflows() {
+    for provider in built_in() {
+        let stdout = match &provider.extract {
+            Extract::Raw => b"sample".to_vec(),
+            Extract::JsonField(field) => format!(r#"{{"{field}":"sample"}}"#).into_bytes(),
+        };
+        let result = credential_from_output(
+            &provider,
+            "fixture",
+            ProviderOutput {
+                status: ExitStatus::default(),
+                stdout: Some(stdout),
+                stderr: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(secrecy::ExposeSecret::expose_secret(&result), "sample");
+
+        let error = credential_from_output(
+            &provider,
+            "fixture",
+            ProviderOutput {
+                status: ExitStatus::default(),
+                stdout: None,
+                stderr: Some(b"sample warning".to_vec()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, DiagnosticKind::Authentication);
+        assert!(error.headline.contains("1 MiB"));
+        assert!(!format!("{error:?}").contains("sample warning"));
+    }
+}
+
+#[test]
+fn a_failed_provider_keeps_its_exit_status_and_remedy_after_output_overflow() {
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+    let status = ExitStatus::from_raw(256);
+    let provider = built_in().remove(0);
+    let error = credential_from_output(
+        &provider,
+        "fixture",
+        ProviderOutput {
+            status,
+            stdout: None,
+            stderr: None,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, DiagnosticKind::Authentication);
+    assert_eq!(error.headline, "fixture could not provide a credential");
+    assert_eq!(error.next_action.as_ref(), Some(&provider.remedy));
+    assert_eq!(
+        error.likely_cause.as_deref(),
+        Some("provider stderr exceeded 64 KiB and was discarded")
+    );
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|f| f.label == "Exit status" && f.value == status.to_string())
+    );
+}
+
+#[tokio::test]
 async fn a_raw_token_is_read_from_standard_output() {
     let provider = Provider {
         name: "test".into(),
@@ -805,8 +926,7 @@ async fn missing_native_builtin_can_start_exactly_one_package_child() {
     // The substitute interpreter is this test binary; libtest rejects Python's
     // flags. Its nonzero exit is the final outcome of a successfully started child.
     assert!(
-        !child
-            .wait_with_output()
+        !collect_provider_output(child)
             .await
             .expect("child output")
             .status

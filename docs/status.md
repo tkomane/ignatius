@@ -4,6 +4,27 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 88 - Bound cloud provider output capture - 26 November 2026
+
+- **W10 / 011 T006.** Direct and Windows Azure CLI MSI launches share 1 MiB
+  stdout and 64 KiB stderr capture limits. Both pipes drain concurrently
+  through the existing timeout. A successful command with oversized stdout
+  refuses credential extraction. Failed commands retain their exit status
+  and remedy, and incomplete stderr is discarded.
+  [Feature 011 tasks](../specs/011-cloud-identity/tasks.md)
+- **Local verification.** Thirty-two provider checks passed, covering byte
+  boundaries, interrupted reads, timeout and diagnostic behavior. Four
+  integration checks passed, including authentication on disposable
+  PostgreSQL 18.7 over TLS using a synthetic configured provider.
+- **Hosted version probe.** The exact `5f509ca` dispatch passed 17 CI jobs.
+  On Windows Server 2025 x64 (`windows-2025-vs2026`, image `20261116.315.1`,
+  OS build `10.0.26100.0`), the registered Azure CLI MSI `2.93.0` matched
+  both the package control and automatic Entra fallback. The bare program
+  reported `missing-program`. The provider code, lockfile, CI workflow
+  and version probe match the integrated branch. Live cloud authentication
+  remains open.
+  [Windows version receipt](https://github.com/tkomane/ignatius/actions/runs/45726234438/job/139596697655)
+
 ## Wave 87 - Keep drafts cleared while recovery is pending - 26 November 2026
 
 - **W10 / 043 T013.** Accepting a pending crash journal preserves a live

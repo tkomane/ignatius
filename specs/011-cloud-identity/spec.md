@@ -183,6 +183,16 @@ sentences, each naming what to do.
   original argument elements. A configured provider always uses its configured
   program. A process that starts has one outcome under the existing timeout.
 
+- **FR-1110**: Built-in and configured providers share a 1 MiB raw standard
+  output limit and a 64 KiB standard error retention limit. Apply the
+  limits before decoding or extraction. If the child succeeds and stdout
+  exceeds its limit, refuse the credential with an authentication diagnostic
+  that names the limit. A successful child with complete stdout may still
+  supply a credential when stderr exceeds its retention limit. When the
+  child exits unsuccessfully, report its exit status and remedy. Redact
+  complete stderr or give a fixed explanation when stderr was discarded.
+  Keep the existing launch, I/O and timeout failure classifications.
+
 ### Security
 
 - **SEC-1101**: The credential is a bearer token. It lives in `SecretString`,
@@ -206,7 +216,7 @@ No new codes:
 | Situation | Code |
 | --- | --- |
 | Unknown provider name, program absent, or `sslmode` forbids the route | 3, config |
-| The program failed, or the server refused the credential | 5, authentication |
+| The program failed, successful stdout exceeded its limit, or the server refused the credential | 5, authentication |
 | The program timed out | 4, connection |
 | TLS could not be established | 6, tls |
 
