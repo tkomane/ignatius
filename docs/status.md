@@ -4,6 +4,20 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 98 - Verify explicit rollback after Unix-socket cancellation - 26 November 2026
+
+- **W05 / 001 T061.** The existing hosted Linux socket job now has a second
+  cancellation case inside a caller-owned transaction. It observes the exact
+  running statement from an independent socket session before cancelling.
+  It requires SQLSTATE 57014 and a failed transaction, then 25P02 on a
+  subsequent query. An explicit ROLLBACK must restore useful autocommit on
+  the original backend, with PostgreSQL's client address still NULL.
+  [Foundation tasks](../specs/001-foundation-vertical-slice/tasks.md)
+- **Local scope.** All three socket cases compiled on macOS arm64 and reported
+  skips because the socket URI was unset. Live acceptance uses the pinned
+  PostgreSQL 18 socket job on hosted Linux. T052 still tracks Linux desktop
+  hand use.
+
 ## Wave 97 - Preserve PostgreSQL dollar-quote boundaries - 26 November 2026
 
 - **W03 / 022 T031.** Statement splitting, named-parameter discovery,
