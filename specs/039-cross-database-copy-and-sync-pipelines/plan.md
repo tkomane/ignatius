@@ -27,3 +27,4 @@ Source Database                   Target Database
    - Tabbed view: `[1] Dependency Graph & Plan`, `[2] Live Transfer Telemetry`.
 4. **CLI**:
    - `ignatius sync --source <SRC> --target <DST> [--schema <SCHEMA>] [--table <TABLE>] [--truncate] [--cascade] [--dry-run] [--format table|json|plain]`.
+   - Resolve source and destination independently. Apply `--target-environment` to a literal destination and read the environment from a named destination profile. Refuse an unconfirmed production write before either endpoint authenticates or connects.

@@ -34,3 +34,15 @@ The source and destination must be different databases. Two independent
 sessions may use the explicit `pg_temp` alias in the single-table helper
 for their distinct temporary tables. Source reads use the existing session's
 isolation, and destination constraints are enforced as configured.
+
+## Production confirmation
+
+Appending or truncating a production-classified destination requires
+`--confirm-production`. Resolve both endpoint configurations before any
+provider authentication or database connection. An unconfirmed write
+returns a usage error without an output report. Dry runs require no
+production confirmation.
+
+A destination profile supplies its own environment. Literal destinations
+can use `--target-environment`. The source connection options, including
+`--environment`, apply to the source.

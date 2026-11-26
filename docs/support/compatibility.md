@@ -533,6 +533,13 @@ together. An omitted foreign-key dependent causes a refusal unless
 `--cascade` explicitly includes it. Dry runs and empty plans start no
 destination transaction.
 
+Appends and truncation require `--confirm-production` for a
+production-classified destination. An unconfirmed write stops before the
+source or destination authenticates or connects. Dry runs are available
+without that confirmation. `--target @profile` uses the profile's
+environment. For a literal destination, use `--target-environment`.
+The existing `--environment` flag classifies the source.
+
 If a transfer fails, the destination transaction rolls back. If PostgreSQL
 does not acknowledge rollback or the outcome of commit is unknown, check
 the destination before another attempt.
