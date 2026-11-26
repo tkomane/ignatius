@@ -12,3 +12,11 @@ Enables direct, high-throughput streaming data synchronization between two Postg
    Users inspect discovered table dependencies, cycle warnings, and live transfer progress (rows/sec, transfer rate, progress bars) within a tactile Field Industrial dashboard.
 4. **Scriptable CLI (`ignatius sync`)**:
    CI/CD pipelines and automated seed scripts invoke `ignatius sync --source <SRC> --target <DST> --truncate` to hydrate test environments deterministically.
+
+## Failure diagnostics
+
+Failures during a source dry-run count, destination truncate or binary COPY
+identify the affected side and operation. Diagnostics preserve a valid SQLSTATE
+when available and omit server and driver text that could contain row values.
+A connection loss reports that the outcome is unknown and advises checking the
+destination before continuing.

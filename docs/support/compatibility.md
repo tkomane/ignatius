@@ -524,6 +524,14 @@ becomes unreadable after preview, the wizard stops before COPY and returns
 to the source step. A readable header-only CSV remains a valid zero-row
 import.
 
+## Binary sync diagnostics
+
+`ignatius sync` reports the source or destination phase for failures during
+binary COPY, the source dry-run count and destination truncation. It keeps a
+validated SQLSTATE when available and omits server and driver text that could
+contain copied values. After a connection loss, reconnect and check the
+destination before continuing.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson

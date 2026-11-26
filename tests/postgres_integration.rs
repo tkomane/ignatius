@@ -3442,6 +3442,71 @@ fn import_commit_failure_preserves_sqlstate_without_disclosing_input() {
 }
 
 #[test]
+fn binary_sync_keeps_conflicting_values_out_of_diagnostics_and_counts_copied_bytes() {
+    let uri = target_or_skip!();
+    let source = fixture(&uri);
+    let destination = fixture(&uri);
+    let value = "synthetic-sync-conflicting-key";
+    let table = ignatius::sync::TableKey::new("pg_temp", "sync_private_key");
+    let setup = format!(
+        "CREATE TEMP TABLE sync_private_key (id text PRIMARY KEY); \
+         INSERT INTO pg_temp.sync_private_key VALUES ('{value}')"
+    );
+    for fx in [&source, &destination] {
+        let execution = fx.block_on(fx.session.execute(&setup, 1, JobId(9620)));
+        assert_eq!(execution.status, ExecutionStatus::Succeeded);
+    }
+
+    let copy = |truncate| {
+        source.block_on(source.session.copy_table_to_target(
+            &destination.session,
+            &table,
+            truncate,
+            false,
+            false,
+        ))
+    };
+    let error = copy(false).expect_err("destination rejects its duplicate key");
+    for rendered in [
+        error.render_plain(true),
+        error.to_json().to_string(),
+        format!("{error:?}"),
+    ] {
+        assert!(
+            !rendered.contains(value),
+            "diagnostic included a copied value"
+        );
+    }
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(error.statement_number, None);
+    assert!(error.headline.contains("destination COPY"));
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|field| { field.label == "SQLSTATE" && field.value == "23505" })
+    );
+
+    let progress = copy(true).expect("sync into the cleared destination");
+    assert_eq!(progress.rows_copied, 1);
+    // Binary COPY header (19), one field count (2), text length (4), and trailer (2).
+    assert_eq!(
+        progress.bytes_transferred,
+        19 + 2 + 4 + value.len() as u64 + 2
+    );
+    let read = destination.block_on(destination.session.execute(
+        "SELECT id FROM pg_temp.sync_private_key",
+        1,
+        JobId(9621),
+    ));
+    assert_eq!(read.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        read.statements[0].result_set.as_ref().unwrap().rows,
+        vec![vec![Cell::Text(value.to_owned())]]
+    );
+}
+
+#[test]
 fn plpgsql_routine_runner_and_profiler_integration() {
     let uri = target_or_skip!();
     let fx = fixture(&uri);

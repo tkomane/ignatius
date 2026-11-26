@@ -18,6 +18,7 @@ Source Database                   Target Database
 2. **Stream Execution**:
    - If `--truncate`: execute `TRUNCATE TABLE ...` in reverse topological order.
    - For each table in topological order: execute `COPY <table> TO STDOUT` on source and `COPY <table> FROM STDIN` on target, streaming chunks with backpressure.
+   - Map COPY startup, streaming and completion, source dry-run count and destination truncate failures through the value-free transfer diagnostic. Provide a fixed phase and validated SQLSTATE without a SQL statement ordinal.
 3. **Field Industrial TUI Cockpit**:
    - Hardware status capsules: `[SOURCE]`, `[TARGET]`, `[TABLES]`, `[SYNC STATE]`, `[THROUGHPUT]`.
    - Tabbed view: `[1] Dependency Graph & Plan`, `[2] Live Transfer Telemetry`.
