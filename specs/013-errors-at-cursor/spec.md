@@ -161,7 +161,10 @@ request.
   buffer.
 - **FR-008**: Editing the buffer after an error MUST invalidate the old editor
   marker so a diagnostic for an earlier submission cannot be mistaken for a
-  diagnostic for the current text.
+  diagnostic for the current text. Switching to another editor tab, closing
+  the source, or replacing the workspace through recovery also retires a
+  mapped marker. The server diagnostic stays visible with an explanation.
+  A fresh submission can map a new location in that editor.
 - **FR-009**: The client MUST NOT retry, rewrite, downgrade transport security,
   or execute another statement automatically as part of locating or displaying
   an error.

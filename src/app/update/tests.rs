@@ -6322,6 +6322,214 @@ fn an_error_from_a_changed_buffer_is_not_applied_to_the_new_text() {
     assert_eq!(model.editor.cursor(), before + 1);
 }
 
+fn complete_mapped_editor_error(model: &mut Model) -> Diagnostic {
+    let source = "SELECT bad FROM table_name;";
+    model.editor.set_text(source);
+    model.sync_active_buffer_from_editor();
+    let effects = update(model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected one editor execution");
+    };
+    let diagnostic = Diagnostic::new(
+        DiagnosticKind::Query,
+        "syntax error near table_name",
+        "running statement 1",
+    )
+    .in_statement(1)
+    .at_position(8);
+    update(
+        model,
+        Message::ExecutionFinished(failed_execution(*job, diagnostic.clone())),
+    );
+    assert!(
+        model.error_location.is_some(),
+        "the source marker is mapped"
+    );
+    diagnostic
+}
+
+#[test]
+fn switching_to_a_same_revision_tab_retires_only_the_mapped_marker() {
+    let mut model = connected();
+    model.editor.set_text("SELECT bad FROM table_name;");
+    model.sync_active_buffer_from_editor();
+    model.buffers.new_buffer(Some("draft.sql".into()), None);
+    model
+        .buffers
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT unrelated_draft;");
+    model.buffers.active_buffer_mut().editor.set_cursor(4);
+    model.buffers.switch_to(0);
+    model.sync_editor_from_active_buffer();
+    let source_revision = model.editor.revision();
+    let draft_text = model.buffers.buffers[1].editor.text().to_owned();
+    let draft_cursor = model.buffers.buffers[1].editor.cursor();
+    assert_eq!(model.buffers.buffers[1].editor.revision(), source_revision);
+
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    assert_eq!(model.editor.revision(), source_revision);
+    let effects = update(&mut model, Message::Action(Action::NextEditorBuffer));
+
+    assert!(effects.is_empty());
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+    assert_eq!(model.editor.text(), draft_text);
+    assert_eq!(model.editor.cursor(), draft_cursor);
+    assert_eq!(model.editor.revision(), source_revision);
+
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected a fresh editor submission");
+    };
+    update(
+        &mut model,
+        Message::ExecutionFinished(failed_execution(
+            *job,
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "new draft error",
+                "running statement 1",
+            )
+            .in_statement(1)
+            .at_position(8),
+        )),
+    );
+    assert!(
+        model.error_location.is_some(),
+        "only a new mapped submission restores the marker"
+    );
+    assert!(model.error_location_note.is_none());
+}
+
+#[test]
+fn no_op_tab_motion_keeps_the_marker_and_existing_note_without_one() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    let location = model.error_location.clone();
+    let editor = model.editor.clone();
+
+    for action in [Action::NextEditorBuffer, Action::PrevEditorBuffer] {
+        assert!(update(&mut model, Message::Action(action)).is_empty());
+        assert_eq!(model.error_location, location);
+        assert_eq!(model.error_location_note, None);
+        assert_eq!(model.error, Some(diagnostic.clone()));
+        assert_eq!(model.editor, editor);
+    }
+
+    model.error_location = None;
+    model.error_location_note = Some("existing location note".to_owned());
+    assert!(update(&mut model, Message::Action(Action::NewEditorBuffer)).is_empty());
+    assert_eq!(
+        model.error_location_note.as_deref(),
+        Some("existing location note")
+    );
+}
+
+#[test]
+fn creating_a_new_tab_retires_a_mapped_marker_without_clearing_the_error() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+
+    assert!(update(&mut model, Message::Action(Action::NewEditorBuffer)).is_empty());
+
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+    assert_eq!(model.editor.text(), "");
+    assert_eq!(model.editor.cursor(), 0);
+}
+
+#[test]
+fn creating_a_snippet_tab_retires_a_mapped_marker() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    model.snippet_library = Some(crate::app::model::SnippetLibraryState::new());
+
+    assert!(update(&mut model, Message::Action(Action::Insert('n'))).is_empty());
+
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+    assert_eq!(model.buffers.active_buffer().title, "cache-hit-ratio.sql");
+    assert!(model.editor.text().contains("pg_statio_user_indexes"));
+}
+
+#[test]
+fn closing_the_only_tab_retires_a_marker_even_when_the_index_stays_zero() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    let old_id = model.buffers.active_buffer().id;
+    assert_eq!(model.buffers.active_idx, 0);
+
+    assert!(update(&mut model, Message::Action(Action::CloseEditorBuffer)).is_empty());
+
+    assert_eq!(model.buffers.active_idx, 0);
+    assert_ne!(model.buffers.active_buffer().id, old_id);
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+}
+
+#[test]
+fn restoring_a_nonempty_tab_with_a_reused_id_retires_the_mapped_marker() {
+    let mut model = connected();
+    let source = "SELECT bad FROM table_name;";
+    model.buffers.active_buffer_mut().editor.set_text(source);
+    model.sync_editor_from_active_buffer();
+    let old_id = model.buffers.active_buffer().id;
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    assert!(model.error_location.is_some());
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let mut recovered = crate::buffer::BufferManager::new();
+    recovered
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT restored_draft;");
+    recovered.active_buffer_mut().editor.set_cursor(6);
+    let journal =
+        crate::recovery::RecoveryJournal::from_buffers(&recovered, "marker-source-recovery", false);
+    journal.save_to_disk(&recovery_dir).expect("seed journal");
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    assert!(update(&mut model, Message::Action(Action::RestoreSession)).is_empty());
+
+    assert_eq!(model.buffers.active_buffer().id, old_id);
+    assert_eq!(model.editor.text(), "SELECT restored_draft;");
+    assert_eq!(model.editor.cursor(), 6);
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+}
+
 #[test]
 fn editing_after_a_mapped_error_removes_its_marker_and_says_why() {
     let mut model = connected();
