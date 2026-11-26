@@ -162,6 +162,12 @@ explicit rather than per-keystroke.
 
 [Catalogue evidence](../../docs/status.md#wave-99---index-completion-catalogue-column-assembly---26-november-2026)
 
+- [x] T033 Stream relation, function and column rows into the existing
+  catalogue snapshot. Compare content, order, observed process memory and
+  latency on matched live control and scaled fixtures.
+
+[Streaming evidence](../../docs/status.md#wave-101---stream-completion-catalogue-rows---26-november-2026)
+
 ## Dependencies and execution order
 
 - T001-T004 are foundational; T007-T010 depend on the pure types and lexer

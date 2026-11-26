@@ -5,8 +5,10 @@
 ## Summary
 
 Implement one schema-aware completion engine for the full-screen editor and
-plain mode. A read-only metadata session loads a bounded catalogue snapshot at
-the same time as the object tree. A pure query module reuses the existing SQL
+plain mode. A read-only metadata session loads the catalogue snapshot at the
+same time as the object tree. It maps relation, function and column rows as
+each parameterized query streams them and publishes the snapshot after all
+three queries complete. A pure query module reuses the existing SQL
 lexer and statement boundaries to identify the word being completed, the
 relation or schema scope, aliases, CTEs, literals, and comments. The reducer
 owns loading, stale, unavailable, and menu state; the runtime only performs the

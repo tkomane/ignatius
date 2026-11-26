@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: Completion catalogue loading uses less peak memory by mapping
+  rows as PostgreSQL returns them.
 - Fixed: Binary sync failure diagnostics retain the transfer phase and
   SQLSTATE while keeping copied values out of error output.
 - Improved: Completion catalogue loading indexes relation names while assembling
