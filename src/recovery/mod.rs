@@ -99,6 +99,9 @@ pub struct RecoveryJournal {
     pub clean_exit: bool,
     /// The zero-based index of the active buffer.
     pub active_buffer_idx: usize,
+    /// The secondary pane's zero-based index in the original buffer order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_buffer_idx: Option<usize>,
     /// The active split view mode ("none", "vertical", "horizontal").
     pub split_mode: String,
     /// All saved buffer snapshots.
@@ -135,6 +138,9 @@ impl RecoveryJournal {
             saved_at: chrono::Local::now().to_rfc3339(),
             clean_exit,
             active_buffer_idx: buffers.active_idx,
+            secondary_buffer_idx: buffers
+                .secondary_idx
+                .filter(|_| buffers.split_mode != EditorSplitMode::None),
             split_mode,
             buffers: buffers
                 .buffers
@@ -193,8 +199,8 @@ impl RecoveryJournal {
 
     /// Restores the journal's snapshots into a target `BufferManager`.
     ///
-    /// Empty scratch tabs are omitted. The active position refers to the
-    /// original journal order.
+    /// Empty scratch tabs are omitted. Pane positions refer to the original
+    /// journal order.
     pub fn restore_into(&self, target: &mut BufferManager) -> usize {
         let valid_buffers: Vec<(usize, &RecoveredBuffer)> = self
             .buffers
@@ -233,15 +239,22 @@ impl RecoveryJournal {
             // A split needs two panes; a single restored tab cannot fill one.
             target.split_mode = EditorSplitMode::None;
         }
-        // A split with no distinct second pane renders a blank half. The
-        // journal does not name the secondary tab, so choose one.
-        target.secondary_idx = target
-            .secondary_idx
-            .filter(|idx| *idx < target.buffers.len() && *idx != target.active_idx)
-            .or_else(|| {
-                (target.split_mode != EditorSplitMode::None && target.buffers.len() > 1)
-                    .then(|| (target.active_idx + 1) % target.buffers.len())
+        target.secondary_idx = if target.split_mode == EditorSplitMode::None {
+            None
+        } else {
+            // Older journals omit the secondary position. Use the next tab
+            // when the saved position is absent or no longer distinct.
+            let secondary = self.secondary_buffer_idx.and_then(|saved_idx| {
+                valid_buffers
+                    .iter()
+                    .position(|(original_idx, _)| *original_idx == saved_idx)
             });
+            Some(
+                secondary
+                    .filter(|idx| *idx != target.active_idx)
+                    .unwrap_or((target.active_idx + 1) % valid_buffers.len()),
+            )
+        };
         target.next_id = target
             .buffers
             .iter()

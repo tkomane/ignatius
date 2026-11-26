@@ -25,6 +25,13 @@ tab was omitted, select the first retained tab after it, or the last retained
 tab when none follows. An out-of-range active position also selects the last
 retained tab. If no tab can be restored, keep the current workspace.
 
+For a split workspace, recovery keeps the saved secondary tab when it
+survives filtering and differs from the active tab. For older journals
+or an unavailable secondary tab, use the next retained tab in tab order,
+wrapping at the end. A split with one surviving tab becomes unsplit.
+Accepting recovery keeps the previous journal until an atomic checkpoint
+replaces it. A refused checkpoint leaves that copy available.
+
 An empty or whitespace-only file-backed tab is an editor draft. Recovery
 retains its exact text, file association and modified marker. Opening and
 restoring the draft leaves the original file on disk, ready for the operator

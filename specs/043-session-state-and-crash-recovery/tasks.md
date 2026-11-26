@@ -37,3 +37,9 @@ clean quit. [Wave 79](../../docs/status.md#wave-79---recover-cleared-file-backed
   draft and file state, and the ordinary interactive merge.
 
 [Focused tests and macOS PTY evidence](../../docs/status.md#wave-87---keep-drafts-cleared-while-recovery-is-pending---26-november-2026)
+
+- [x] T014 Restore the exact split pane pair through a v1 checkpoint and
+  filter empty scratch tabs. Verify legacy fallback and preserve the
+  previous checkpoint until an atomic replacement succeeds.
+
+[Focused tests and macOS PTY evidence](../../docs/status.md#wave-111---restore-both-editor-panes-after-a-crash---26-november-2026)

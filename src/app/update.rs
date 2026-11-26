@@ -5423,7 +5423,7 @@ fn snippet_library_open(model: &mut Model) -> Vec<Effect> {
     Vec::new()
 }
 
-/// Restores crash-recovered buffers into the workspace and clears the journal.
+/// Restores crash-recovered buffers for the runtime to checkpoint atomically.
 ///
 /// The banner is the only route in: without an unrecovered journal on screen
 /// there is nothing to restore, and the action is a no-op rather than a guess.
@@ -5455,6 +5455,8 @@ fn restore_session_action(model: &mut Model) -> Vec<Effect> {
         return Vec::new();
     }
     if restorable > 0 {
+        // Keep the previous checkpoint until the runtime successfully writes
+        // the restored workspace. A refused checkpoint can then be retried.
         let preserved_in_flight: Vec<_> = in_flight.cloned().collect();
         banner.journal.restore_into(&mut model.buffers);
         retire_error_location(
@@ -5470,15 +5472,14 @@ fn restore_session_action(model: &mut Model) -> Vec<Effect> {
             model.buffers.next_id = model.buffers.next_id.wrapping_add(1);
             model.buffers.buffers.push(buffer);
         }
+    } else if let Err(diagnostic) = crate::recovery::RecoveryJournal::discard(&banner.recovery_dir)
+    {
+        model.error = Some(diagnostic);
     }
     // A journal can legitimately yield zero restorable buffers (every tab was
     // empty). The editor still has to follow whatever the workspace holds now,
     // or the screen would show text the buffers do not.
     model.sync_editor_from_active_buffer();
-    // The buffers now live in the workspace; the journal has done its job.
-    if let Err(diagnostic) = crate::recovery::RecoveryJournal::discard(&banner.recovery_dir) {
-        model.error = Some(diagnostic);
-    }
     Vec::new()
 }
 

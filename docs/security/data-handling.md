@@ -233,11 +233,11 @@ a statement; the journal is a scratchpad, not a secret store, and
 execution and does not add an entry to the statement history. A session started
 with `history.enabled = false` or `--no-history` writes no recovery state at
 all, so the mode that keeps less stays the mode that keeps less. `ignatius
-recovery restore` prints the journal and leaves it in place; only a clean exit,
-an explicit discard, or a restore through the interactive capsule removes it. The
-journal is per data directory, not per process, so two clients sharing one data
-directory share one recovery slot; run them with different `IGNATIUS_DATA_DIR`
-values if that matters.
+recovery restore` prints the journal and leaves it in place. Interactive
+restore keeps the old journal until the next atomic checkpoint replaces it.
+Explicit discard removes it immediately. A clean exit marks it for removal
+at the next launch. Two clients sharing one data directory share one recovery
+slot. Use different `IGNATIUS_DATA_DIR` values for independent sessions.
 
 Configuration writes, saved-query replacements, history trimming and session
 recovery checkpoints reserve new sibling temporary files exclusively, with Unix

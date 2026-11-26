@@ -16,6 +16,7 @@
     - `saved_at: String` (RFC3339)
     - `clean_exit: bool`
     - `active_buffer_idx: usize`
+    - `secondary_buffer_idx: Option<usize>` (optional in v1 JSON)
     - `split_mode: String`
     - `buffers: Vec<RecoveredBuffer>`
   - Functions:
@@ -46,7 +47,9 @@
 - `src/app/discovery.rs`:
   - Add availability and grouping rules for recovery actions.
 - `src/app/update.rs`:
-  - Handle `Action::RestoreSession`: restores buffers into `model.buffers`, syncs active editor, dismisses banner, and clears journal.
+  - `Action::RestoreSession` restores both pane selections, synchronizes
+    the active editor and dismisses the banner. The runtime replaces the
+    previous journal through the next atomic checkpoint.
   - Handle `Action::DiscardRecovery`: dismisses banner and discards recovery journal from disk.
   - Hook auto-save logic on changes or clean exit on `Action::Quit`.
 - `src/ui/widgets/banner.rs` or `src/ui/widgets/editor.rs`:
