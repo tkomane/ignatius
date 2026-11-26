@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 106 - Preserve transaction ownership for direct seed inserts - 26 November 2026
+
+- **W03 / 040 T013.** Nonempty direct seeding requires an idle session
+  and owns one transaction for all generated INSERT batches. Active and
+  failed caller transactions remain under caller control. The CLI reports
+  PostgreSQL's affected-row count after commit.
+  [Feature 040 tasks](../specs/040-synthetic-test-fixture-generator/tasks.md)
+- **Focused verification.** Four live regressions failed on the baseline
+  and passed on the fix. Five related sync and import checks and seven
+  seed unit tests also passed.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** A trigger
+  skipped one of 101 generated rows. Independent SQL found 100 inserts,
+  matching the fixed CLI's count. The quoted standalone SQL script matched
+  the baseline byte for byte. Existing rows and output survived a later
+  INSERT refusal, and a deferred constraint rejected the commit without
+  adding rows. A lost commit acknowledgment was source-reviewed.
+
 ## Wave 105 - Confirm production-classified seed inserts - 26 November 2026
 
 - **W04 / 040 T012.** Direct seed insertion requires

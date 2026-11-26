@@ -12,3 +12,4 @@
 - [x] T010: Update `docs/status.md` and `CHANGELOG.md` with Wave 32 delivery evidence.
 - [x] T011: Hold seed discovery to the sync graph's permanent and unlogged table scope. Verify that the generated fixture omits both endpoints of a separate session's temporary foreign key.
 - [x] T012: Confirm direct production-classified inserts before provider authentication or connection. Verify refused, render-only, and confirmed execution against synthetic targets.
+- [x] T013: Own the direct seed transaction, preserve caller transactions, and report committed server row counts. Verify late INSERT and deferred COMMIT failures, trigger-suppressed rows, and compatible SQL export.

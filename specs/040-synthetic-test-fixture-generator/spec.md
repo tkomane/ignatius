@@ -18,3 +18,11 @@ With `--insert`, a production-classified target requires
 returns a usage error and emits no fixture report. Fixture generation
 without `--insert` can read the catalogue and render output without
 production confirmation.
+
+A nonempty direct insert requires an idle session and owns one transaction
+for all generated INSERT batches. Preserve active and failed caller
+transactions. Roll back earlier batches after an INSERT failure. Report
+an unconfirmed rollback or uncertain commit outcome and preserve the
+validated SQLSTATE when available. Successful execution reports the
+server's affected-row count after commit. Exported SQL remains a
+standalone transactional script, and fixture reports describe generation.

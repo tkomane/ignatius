@@ -560,6 +560,13 @@ authentication or connection and leaves the report path untouched.
 Fixture rendering without `--insert` remains available without
 production confirmation.
 
+Direct inserts require an idle session and commit all generated INSERT
+batches together. A failed batch rolls back the owned transaction.
+Check the target before retrying if the rollback or commit outcome is
+uncertain. The CLI success count comes from PostgreSQL after commit.
+The fixture report still describes the generated rows, and SQL export
+includes its own `BEGIN` and `COMMIT`.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson

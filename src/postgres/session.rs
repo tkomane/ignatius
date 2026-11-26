@@ -255,6 +255,7 @@ pub(crate) fn import_session_changed() -> Diagnostic {
 enum TransferOperation {
     Import,
     Sync,
+    Seed,
 }
 
 impl TransferOperation {
@@ -270,12 +271,17 @@ impl TransferOperation {
                 "the transfer outcome is unknown from this connection",
                 "reconnect and check the destination before continuing; no transfer is retried automatically",
             ),
+            Self::Seed => (
+                "inserting synthetic fixtures",
+                "the server did not acknowledge the operation",
+                "reconnect and check the destination before continuing; no insert is retried automatically",
+            ),
         };
         use tokio_postgres::error::Severity;
 
         let db = err.as_db_error();
         let connection_lost = err.is_closed()
-            || (matches!(self, Self::Sync)
+            || (matches!(self, Self::Sync | Self::Seed)
                 && matches!(
                     db.and_then(tokio_postgres::error::DbError::parsed_severity),
                     Some(Severity::Fatal | Severity::Panic)
@@ -314,15 +320,19 @@ impl TransferOperation {
         }
         match self {
             Self::Import => diagnostic.in_statement(1),
-            Self::Sync => diagnostic,
+            Self::Sync | Self::Seed => diagnostic,
         }
     }
 }
 
 /// A definitive server rejection can be reported as such. Any missing or
 /// ambiguous COMMIT acknowledgment requires the caller to verify the destination.
-fn sync_commit_error(error: &tokio_postgres::Error) -> Diagnostic {
-    let mut diagnostic = TransferOperation::Sync.error(error, "destination commit");
+fn transfer_commit_error(
+    error: &tokio_postgres::Error,
+    operation: TransferOperation,
+    phase: &'static str,
+) -> Diagnostic {
+    let mut diagnostic = operation.error(error, phase);
     let unknown = diagnostic.kind == DiagnosticKind::Connection
         || error
             .code()
@@ -330,7 +340,7 @@ fn sync_commit_error(error: &tokio_postgres::Error) -> Diagnostic {
             .is_none_or(|state| state.starts_with("08") || state == "40003");
     if unknown {
         diagnostic.kind = DiagnosticKind::Connection;
-        diagnostic.headline = "destination commit outcome is unknown".to_owned();
+        diagnostic.headline = format!("{phase} outcome is unknown");
         diagnostic = diagnostic
             .likely_cause("the destination did not confirm whether the transaction committed")
             .next_action("reconnect and check the destination before retrying; no transfer is retried automatically");
@@ -837,18 +847,53 @@ impl Session {
         crate::postgres::metadata::analyze_seed_plan(&self.client, schema).await
     }
 
-    /// Executes synthetic seeding by inserting generated fixtures into the database within a transaction.
+    /// Commits the generated inserts together and returns their server-reported row count.
     pub async fn execute_synthetic_seed(
-        &self,
+        &mut self,
         report: &crate::seed::FixtureReport,
     ) -> Result<u64, Diagnostic> {
-        let _guard = self.user_sql_gate.lock().await;
-        let sql = report.render_sql();
-        self.client
-            .batch_execute(&sql)
+        if report.tables.iter().all(|table| table.rows.is_empty()) {
+            return Ok(0);
+        }
+        self.require_autocommit(
+            "the synthetic seed insert",
+            "inserting synthetic fixtures",
+            "INSERT",
+        )
+        .await?;
+        let transaction = self
+            .client
+            .transaction()
             .await
-            .map_err(|e| from_query_error(&e, 1))?;
-        Ok(report.total_rows as u64)
+            .map_err(|e| TransferOperation::Seed.error(&e, "synthetic seed begin"))?;
+        let mut inserted = 0;
+        for statement in report
+            .tables
+            .iter()
+            .flat_map(|table| table.insert_statements())
+        {
+            match transaction.execute_typed(&statement, &[]).await {
+                Ok(rows) => inserted += rows,
+                Err(error) => {
+                    let diagnostic = TransferOperation::Seed.error(&error, "synthetic seed insert");
+                    return Err(if transaction.rollback().await.is_ok() {
+                        diagnostic.likely_cause("PostgreSQL confirmed the synthetic seed rollback")
+                    } else {
+                        diagnostic
+                            .likely_cause(
+                                "PostgreSQL did not acknowledge the synthetic seed rollback",
+                            )
+                            .next_action(
+                                "check the destination and its transaction state before continuing",
+                            )
+                    });
+                }
+            }
+        }
+        transaction.commit().await.map_err(|error| {
+            transfer_commit_error(&error, TransferOperation::Seed, "synthetic seed commit")
+        })?;
+        Ok(inserted)
     }
 
     /// Copies one table in an owned destination transaction, or counts source rows in dry-run.
@@ -1013,10 +1058,9 @@ impl Session {
                 return Err(diagnostic);
             }
         };
-        transaction
-            .commit()
-            .await
-            .map_err(|error| sync_commit_error(&error))?;
+        transaction.commit().await.map_err(|error| {
+            transfer_commit_error(&error, TransferOperation::Sync, "destination commit")
+        })?;
         Ok(progress)
     }
 

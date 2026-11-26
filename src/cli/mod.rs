@@ -4925,7 +4925,7 @@ fn run_seed(
     let target = authenticate_target(target, &loaded.config)?;
 
     let rt = runtime()?;
-    let session = rt.block_on(crate::postgres::session::connect(
+    let mut session = rt.block_on(crate::postgres::session::connect(
         &target,
         std::time::Duration::from_secs(30),
     ))?;
@@ -4947,12 +4947,10 @@ fn run_seed(
     let report = crate::seed::generate_fixtures(&filtered_tables, args.rows, args.seed);
 
     if args.insert {
-        rt.block_on(session.execute_synthetic_seed(&report))?;
+        let inserted = rt.block_on(session.execute_synthetic_seed(&report))?;
         writeln!(
             err,
-            "Successfully inserted {} synthetic rows across {} tables into database",
-            report.total_rows,
-            report.tables.len()
+            "Successfully inserted {inserted} synthetic rows into database"
         )
         .map_err(io_diagnostic)?;
     }
