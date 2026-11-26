@@ -156,3 +156,16 @@ cross-platform, and screen-reader gaps separately.
 ## Complexity Tracking
 
 No constitution violations or new architectural components require an exception.
+
+## W02 retire the marker on editor replacement
+
+Keep the existing marker invalidation on text edits. Apply the same
+retirement on an actual active buffer change or a restored replacement,
+including when recovery reuses an identifier. Preserve the existing server
+diagnostic, location note when no marker is present, draft text and caret.
+
+Use reducer checks for tab cycling, source close, recovery and unchanged
+active tabs. In an owned terminal with disposable PostgreSQL, report a
+position on one tab, change tabs, and verify the error remains visible
+without a marker or excerpt referring to the new draft. Run local, hosted
+PR and post-merge gates.

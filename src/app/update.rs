@@ -1563,6 +1563,23 @@ fn clear_error_location(model: &mut Model) {
     model.error_location_note = None;
 }
 
+/// Retires a mapped location while keeping its server diagnostic visible.
+fn retire_error_location(model: &mut Model, note: &str) {
+    if model.error_location.take().is_some() {
+        model.error_location_note = Some(note.to_owned());
+    }
+}
+
+fn sync_editor_after_buffer_change(model: &mut Model, previous_buffer_id: u64) {
+    model.sync_editor_from_active_buffer();
+    if model.buffers.active_buffer().id != previous_buffer_id {
+        retire_error_location(
+            model,
+            "The editor tab changed. This error location belongs to the previous submission.",
+        );
+    }
+}
+
 /// Applies an editor text mutation and invalidates an old server marker if it
 /// actually changed the buffer.
 fn edit_editor<F>(model: &mut Model, edit: F)
@@ -1572,12 +1589,10 @@ where
     let before = model.editor.revision();
     edit(&mut model.editor);
     if model.editor.revision() != before {
-        if model.error_location.take().is_some() {
-            model.error_location_note = Some(
-                "The buffer changed; this error location belongs to the previous submission."
-                    .to_owned(),
-            );
-        }
+        retire_error_location(
+            model,
+            "The buffer changed. This error location belongs to the previous submission.",
+        );
         model.format_notice = None;
         model.paste_notice = None;
     }
@@ -2099,9 +2114,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::NewEditorBuffer => {
             let previous_count = model.buffers.count();
             let previous_focus = model.focus;
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
             model.buffers.new_buffer(None, None);
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             model.focus = Focus::Editor;
             if model.allows_motion() {
                 if model.buffers.count() > previous_count {
@@ -2115,8 +2131,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::CloseEditorBuffer => {
             let previous_count = model.buffers.count();
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.buffers.close_active();
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             if previous_count > 1 && model.allows_motion() {
                 model.motion.begin_tab_glide();
             }
@@ -2124,9 +2141,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::NextEditorBuffer => {
             let previous_idx = model.buffers.active_idx;
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
             model.buffers.next_buffer();
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             if model.buffers.active_idx != previous_idx && model.allows_motion() {
                 model.motion.begin_tab_glide();
             }
@@ -2134,9 +2152,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::PrevEditorBuffer => {
             let previous_idx = model.buffers.active_idx;
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
             model.buffers.prev_buffer();
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             if model.buffers.active_idx != previous_idx && model.allows_motion() {
                 model.motion.begin_tab_glide();
             }
@@ -5328,6 +5347,10 @@ fn restore_session_action(model: &mut Model) -> Vec<Effect> {
     if restorable > 0 {
         let preserved_in_flight: Vec<_> = in_flight.cloned().collect();
         banner.journal.restore_into(&mut model.buffers);
+        retire_error_location(
+            model,
+            "The editor tabs were restored. This error location belongs to the previous submission.",
+        );
         // Restored tabs can reuse an ID from the workspace they replace.
         if matches!(model.running_source, Some(SubmissionSource::Editor { .. })) {
             model.running_source = None;
@@ -5468,9 +5491,10 @@ fn snippet_library_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 let title = format!("{}.sql", snippet.name);
                 let previous_count = model.buffers.count();
                 let previous_focus = model.focus;
+                let previous_buffer_id = model.buffers.active_buffer().id;
                 model.sync_active_buffer_from_editor();
                 model.buffers.new_buffer(Some(title), Some(sql));
-                model.sync_editor_from_active_buffer();
+                sync_editor_after_buffer_change(model, previous_buffer_id);
                 model.snippet_library = None;
                 model.focus = Focus::Editor;
                 if model.allows_motion() {
