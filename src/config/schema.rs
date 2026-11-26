@@ -255,6 +255,9 @@ pub struct Profile {
     /// Transport protection: disable, prefer, require, verify-ca, verify-full.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sslmode: Option<String>,
+    /// Session routing policy: any, read-write, read-only, primary, standby.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_session_attrs: Option<String>,
     /// How this database is classified, for example production.
     ///
     /// This is the reason profiles exist: a classification that is remembered
@@ -287,6 +290,7 @@ pub const PROFILE_FIELDS: &[&str] = &[
     "dbname",
     "user",
     "sslmode",
+    "target-session-attrs",
     "environment",
     "read-only",
     "description",
@@ -348,6 +352,18 @@ impl Profile {
                 PROFILE_FIELDS.join(", ")
             ))
             .next_action("correct the field name, or remove it"));
+        }
+
+        if let Some(value) = &self.target_session_attrs
+            && let Err(message) = crate::connection::target::TargetSessionAttrs::parse(value)
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} has a target-session-attrs this build does not know"),
+                "reading connection profiles",
+            )
+            .likely_cause(message)
+            .next_action("use any, read-write, read-only, primary, or standby"));
         }
 
         Ok(())

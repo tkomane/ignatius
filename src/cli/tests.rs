@@ -379,6 +379,10 @@ fn implicit_interactive_start_is_kept_only_when_no_route_option_was_typed() {
             ..ConnectionOptions::default()
         },
         ConnectionOptions {
+            target_session_attrs: Some("read-write".into()),
+            ..ConnectionOptions::default()
+        },
+        ConnectionOptions {
             read_only: true,
             ..ConnectionOptions::default()
         },
@@ -2201,4 +2205,72 @@ fn bench_production_write_guard_requires_allow_write_for_non_read_statements() {
         None,
     )
     .expect("non-production writes need no --allow-write");
+}
+
+#[test]
+fn target_session_attrs_cli_flag_validates_and_overrides_profile() {
+    Cli::command().debug_assert();
+
+    let cli = Cli::try_parse_from([
+        "ignatius",
+        "query",
+        "-c",
+        "SELECT 1",
+        "--target-session-attrs",
+        "read-only",
+    ])
+    .expect("parse --target-session-attrs");
+    let Some(Command::Query { connection, .. }) = cli.command else {
+        panic!("expected query command");
+    };
+    assert_eq!(
+        connection.target_session_attrs.as_deref(),
+        Some("read-only")
+    );
+    let args = connection.to_args().expect("to_args");
+    assert_eq!(
+        args.target_session_attrs,
+        Some(TargetSessionAttrs::ReadOnly)
+    );
+
+    let bad_options = ConnectionOptions {
+        target_session_attrs: Some("bogus".into()),
+        ..ConnectionOptions::default()
+    };
+    let err = bad_options.to_args().expect_err("invalid flag must fail");
+    assert_eq!(err.kind, DiagnosticKind::Usage);
+    assert_eq!(err.exit_code(), ExitCode::Usage);
+    assert!(err.next_action.is_some());
+
+    let config = with_profiles(
+        "[profiles.replica]\n\
+         host = \"replica.example.net\"\n\
+         target-session-attrs = \"standby\"\n",
+    );
+    let (_, profile_args) =
+        resolve_target_and_profile(Some("@replica"), &options(None), &config).expect("profile");
+    assert_eq!(
+        profile_args.target_session_attrs,
+        Some(TargetSessionAttrs::Standby)
+    );
+
+    let cli_override = ConnectionOptions {
+        target_session_attrs: Some("primary".into()),
+        ..options(Some("replica"))
+    };
+    let (_, override_args) =
+        resolve_target_and_profile(None, &cli_override, &config).expect("cli overrides profile");
+    assert_eq!(
+        override_args.target_session_attrs,
+        Some(TargetSessionAttrs::Primary)
+    );
+
+    let bad_profile = with_profiles(
+        "[profiles.broken]\n\
+         host = \"db.example.net\"\n\
+         target-session-attrs = \"invalid\"\n",
+    );
+    let err = resolve_target_and_profile(Some("@broken"), &options(None), &bad_profile)
+        .expect_err("invalid profile target-session-attrs must fail");
+    assert_eq!(err.kind, DiagnosticKind::Config);
 }

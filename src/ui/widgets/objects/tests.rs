@@ -64,6 +64,7 @@ fn profile() -> ConnectionProfileSummary {
         database: "orders".into(),
         user: "app".into(),
         transport: "disable".into(),
+        target_session_attrs: None,
         environment: "local".into(),
         read_only: false,
         auth: None,

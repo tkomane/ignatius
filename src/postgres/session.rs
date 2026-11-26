@@ -13,7 +13,7 @@
 //! - Whether the connection is really encrypted is read back from the server
 //!   through `pg_stat_ssl` rather than assumed from the requested mode.
 
-use crate::connection::{ConnectionTarget, Host, SslMode};
+use crate::connection::{ConnectionTarget, Host, SslMode, TargetSessionAttrs};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::{
     from_connect_error, from_parameterized_query_error, from_query_error, safe_sqlstate,
@@ -2729,7 +2729,11 @@ pub async fn connect_reported(
                 .map_err(|err| from_query_error(&err, 0))?;
         }
 
-        let info = bootstrap(&client, target).await?;
+        let (info, in_recovery) = bootstrap(&client, target).await?;
+        if let Err(diagnostic) = verify_target_session_attrs(target, info.read_only, in_recovery) {
+            drop(client);
+            return Err(diagnostic);
+        }
         Ok(Session {
             client,
             user_sql_gate: tokio::sync::Mutex::new(()),
@@ -2891,18 +2895,23 @@ fn build_config(target: &ConnectionTarget) -> tokio_postgres::Config {
 }
 
 /// Reads back the facts about the session from the server itself.
-async fn bootstrap(client: &Client, target: &ConnectionTarget) -> Result<SessionInfo, Diagnostic> {
+async fn bootstrap(
+    client: &Client,
+    target: &ConnectionTarget,
+) -> Result<(SessionInfo, bool), Diagnostic> {
     const FULL: &str = "SELECT current_setting('server_version') AS server_version, \
          pg_backend_pid()::text AS backend_pid, \
          current_setting('search_path') AS search_path, \
          current_setting('transaction_read_only') AS read_only, \
+         pg_is_in_recovery()::text AS in_recovery, \
          coalesce((SELECT ssl::text FROM pg_stat_ssl WHERE pid = pg_backend_pid()), 'unknown') AS ssl, \
          coalesce((SELECT version FROM pg_stat_ssl WHERE pid = pg_backend_pid()), '') AS ssl_version, \
          coalesce((SELECT cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid()), '') AS ssl_cipher";
     const MINIMAL: &str = "SELECT current_setting('server_version') AS server_version, \
          pg_backend_pid()::text AS backend_pid, \
          current_setting('search_path') AS search_path, \
-         current_setting('transaction_read_only') AS read_only";
+         current_setting('transaction_read_only') AS read_only, \
+         pg_is_in_recovery()::text AS in_recovery";
 
     // pg_stat_ssl can be restricted on a hardened server. Falling back keeps the
     // session usable, and the TLS state is then reported as unknown rather than
@@ -2944,7 +2953,7 @@ async fn bootstrap(client: &Client, target: &ConnectionTarget) -> Result<Session
         }
     };
 
-    Ok(SessionInfo {
+    let info = SessionInfo {
         target: target.safe_display(),
         database: target.database.clone(),
         user: target.user.clone(),
@@ -2954,7 +2963,45 @@ async fn bootstrap(client: &Client, target: &ConnectionTarget) -> Result<Session
         read_only: matches!(get("read_only").as_str(), "on" | "t" | "true"),
         tls,
         environment: target.environment.clone(),
-    })
+    };
+    let in_recovery = matches!(get("in_recovery").as_str(), "t" | "true");
+
+    Ok((info, in_recovery))
+}
+
+fn verify_target_session_attrs(
+    target: &ConnectionTarget,
+    read_only: bool,
+    in_recovery: bool,
+) -> Result<(), Diagnostic> {
+    let observed = match target.target_session_attrs {
+        TargetSessionAttrs::Any => return Ok(()),
+        TargetSessionAttrs::ReadWrite if !read_only => return Ok(()),
+        TargetSessionAttrs::ReadOnly if read_only => return Ok(()),
+        TargetSessionAttrs::Primary if !in_recovery => return Ok(()),
+        TargetSessionAttrs::Standby if in_recovery => return Ok(()),
+        TargetSessionAttrs::ReadWrite => "read-only",
+        TargetSessionAttrs::ReadOnly => "read-write",
+        TargetSessionAttrs::Primary => "standby",
+        TargetSessionAttrs::Standby => "primary",
+    };
+    let requested = target.target_session_attrs.as_str();
+    Err(Diagnostic::new(
+        DiagnosticKind::Connection,
+        format!(
+            "server is {observed}, refusing connection because target_session_attrs={requested} was requested"
+        ),
+        format!("verifying session attributes on {}", target.safe_display()),
+    )
+    .likely_cause(format!(
+        "the connected PostgreSQL session reported {observed} state (transaction_read_only={}, pg_is_in_recovery={in_recovery})",
+        if read_only { "on" } else { "off" }
+    ))
+    .next_action(format!(
+        "connect to a {requested} server, or change target_session_attrs (for example --target-session-attrs any)"
+    ))
+    .technical("target_session_attrs", requested)
+    .technical("Observed state", observed))
 }
 
 /// Runs a query expected to return exactly one row.

@@ -14,7 +14,7 @@ pub mod prompt;
 use crate::ExitCode;
 use crate::branding;
 use crate::config::{self, Paths};
-use crate::connection::{ConnectionArgs, EnvSnapshot, Environment, SslMode};
+use crate::connection::{ConnectionArgs, EnvSnapshot, Environment, SslMode, TargetSessionAttrs};
 use crate::diagnostics::doctor;
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
@@ -629,6 +629,9 @@ pub struct ConnectionOptions {
     /// Transport protection: disable, prefer, require, verify-ca, verify-full.
     #[arg(long, value_name = "MODE")]
     pub sslmode: Option<String>,
+    /// Session routing policy: any, read-write, read-only, primary, standby.
+    #[arg(long, value_name = "ATTRS")]
+    pub target_session_attrs: Option<String>,
     /// How this database is classified, for example production.
     ///
     /// Classification is never inferred from a host name.
@@ -668,6 +671,7 @@ impl ConnectionOptions {
             || self.dbname.is_some()
             || self.username.is_some()
             || self.sslmode.is_some()
+            || self.target_session_attrs.is_some()
             || self.environment.is_some()
             || self.read_only
             || self.auth.is_some()
@@ -680,6 +684,17 @@ impl ConnectionOptions {
             Some(text) => Some(SslMode::parse(text).map_err(|message| {
                 Diagnostic::new(DiagnosticKind::Usage, message, "reading --sslmode")
                     .next_action("use verify-full for remote databases")
+            })?),
+            None => None,
+        };
+        let target_session_attrs = match &self.target_session_attrs {
+            Some(text) => Some(TargetSessionAttrs::parse(text).map_err(|message| {
+                Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    message,
+                    "reading --target-session-attrs",
+                )
+                .next_action("use any, read-write, read-only, primary, or standby")
             })?),
             None => None,
         };
@@ -699,6 +714,7 @@ impl ConnectionOptions {
             dbname: self.dbname.clone(),
             username: self.username.clone(),
             sslmode,
+            target_session_attrs,
             environment,
             auth: self.auth.clone(),
         })
@@ -740,6 +756,22 @@ impl ConnectionOptions {
                 .likely_cause(message)
                 .next_action("use verify-full for remote databases")
             })?);
+        }
+        if args.target_session_attrs.is_none()
+            && let Some(text) = &profile.target_session_attrs
+        {
+            args.target_session_attrs =
+                Some(TargetSessionAttrs::parse(text).map_err(|message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        format!(
+                            "profile {name:?} has a target-session-attrs this build does not know"
+                        ),
+                        "reading connection profiles",
+                    )
+                    .likely_cause(message)
+                    .next_action("use any, read-write, read-only, primary, or standby")
+                })?);
         }
         if args.environment.is_none()
             && let Some(text) = &profile.environment

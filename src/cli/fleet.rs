@@ -151,6 +151,7 @@ pub(super) fn run(
         "PGSERVICEFILE",
         "PGPASSWORD",
         "PGSSLMODE",
+        "PGTARGETSESSIONATTRS",
         "PGSSLCERT",
         "PGSSLKEY",
     ] {

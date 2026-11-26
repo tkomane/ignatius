@@ -406,3 +406,32 @@ fn atelier_and_paper_theme_choices_round_trip_labels_and_parse() {
         assert_eq!(ThemeChoice::parse(bad), None, "{bad:?}");
     }
 }
+
+#[test]
+fn profile_target_session_attrs_round_trips_and_validates() {
+    assert!(PROFILE_FIELDS.contains(&"target-session-attrs"));
+    for value in ["any", "read-write", "read-only", "primary", "standby"] {
+        let config: Config = toml::from_str(&format!(
+            "[profiles.p]\nhost = \"localhost\"\ntarget-session-attrs = \"{value}\"\n"
+        ))
+        .expect("parse profile");
+        let profile = &config.profiles["p"];
+        assert_eq!(profile.target_session_attrs.as_deref(), Some(value));
+        assert!(profile.validate("p").is_ok(), "{value}");
+        let serialized = toml::to_string(&config).expect("serialize");
+        assert!(
+            serialized.contains(&format!("target-session-attrs = \"{value}\"")),
+            "{serialized}"
+        );
+    }
+
+    let invalid: Config = toml::from_str(
+        "[profiles.bad]\nhost = \"localhost\"\ntarget-session-attrs = \"prefer-standby\"\n",
+    )
+    .expect("parse profile");
+    let err = invalid.profiles["bad"]
+        .validate("bad")
+        .expect_err("invalid target-session-attrs must fail validation");
+    assert_eq!(err.kind, crate::diagnostics::DiagnosticKind::Config);
+    assert!(err.headline.contains("target-session-attrs"));
+}

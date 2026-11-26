@@ -33,6 +33,8 @@ pub struct ConnectionProfileSummary {
     /// Configured TLS mode, or an explicit statement that the target default
     /// will decide it.
     pub transport: String,
+    /// Requested session routing policy when set and not `any`.
+    pub target_session_attrs: Option<String>,
     /// Configured classification, or the default unclassified state.
     pub environment: String,
     /// Whether the profile asks PostgreSQL to make the session read-only.
@@ -78,6 +80,12 @@ impl ConnectionProfileSummary {
                 || "TLS from target defaults".to_owned(),
                 |value| format!("TLS {value}"),
             )),
+            target_session_attrs: profile
+                .target_session_attrs
+                .as_deref()
+                .and_then(|value| crate::connection::TargetSessionAttrs::parse(value).ok())
+                .filter(|attrs| *attrs != crate::connection::TargetSessionAttrs::Any)
+                .map(|attrs| attrs.as_str().to_owned()),
             environment: bounded(&profile.environment.as_deref().map_or_else(
                 || "environment unclassified".to_owned(),
                 |value| format!("environment {value}"),
@@ -99,6 +107,9 @@ impl ConnectionProfileSummary {
             self.transport.clone(),
             self.environment.clone(),
         ];
+        if let Some(attrs) = &self.target_session_attrs {
+            parts.push(format!("target-session-attrs {attrs}"));
+        }
         if self.read_only {
             parts.push("read-only".to_owned());
         }
