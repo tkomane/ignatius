@@ -47,6 +47,8 @@ pub fn update(model: &mut Model, message: Message) -> Vec<Effect> {
 const fn settles_motion(message: &Message) -> bool {
     match message {
         Message::Action(_) | Message::InputAtSize { .. } | Message::Pasted(_) => true,
+        #[cfg(unix)]
+        Message::TerminalTermination => true,
         Message::Mouse { kind, .. } => !matches!(kind, crate::app::message::MouseKind::Moved),
         _ => false,
     }
@@ -70,6 +72,8 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.mouse.last_click = None;
             apply_action(model, action)
         }
+        #[cfg(unix)]
+        Message::TerminalTermination => quit(model),
         Message::InputAtSize {
             action,
             columns,
@@ -1766,6 +1770,11 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.result_filtering
 }
 
+fn quit(model: &mut Model) -> Vec<Effect> {
+    model.should_quit = true;
+    vec![Effect::Quit]
+}
+
 fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     if matches!(action, Action::SwitchTheme) {
         return switch_theme_action(model);
@@ -1926,10 +1935,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
 
     match action {
-        Action::Quit => {
-            model.should_quit = true;
-            vec![Effect::Quit]
-        }
+        Action::Quit => quit(model),
         Action::SwitchTheme => switch_theme_action(model),
         Action::ToggleHelp => {
             model.help_open = !model.help_open;

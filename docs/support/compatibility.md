@@ -777,6 +777,10 @@ preserves the terminal's native text selection even when mouse capture is active
 Bracketed paste is enabled during full-screen sessions and cleanly restored on exit,
 with pasted payloads capped at 1 MiB.
 
+Unix SIGTERM routes to normal workbench shutdown while a key chord or modal
+is active. The owned macOS PTY check confirmed a clean exit, mode restoration
+and cooked input on the same terminal after a single signal.
+
 On macOS, owned-PTY children prove error-return and caught-panic cleanup through
 the actual terminal guard/hook for all mouse/paste/alternate-screen options.
 The hook attempts acquired-mode restoration before previous-hook details and

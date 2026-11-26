@@ -428,3 +428,16 @@ query on the same backend.
 Reuse the pinned PostgreSQL 18 Linux socket job in standard CI. Record
 actual hosted execution independently of a local skip or Linux desktop
 hand use. Keep T052 open for its existing manual acceptance.
+
+## W07 verify signal restoration with an active key chord
+
+Route registered Unix SIGTERM straight to the existing quit bookkeeping
+and terminal guard. Keep keyboard dispatch, query cancel, registration
+ordering and Windows handling intact.
+
+Use a real Unix PTY with isolated local state and a synthetic saved
+profile. Wait for the connection picker to render, dismiss it, then
+open the Ctrl+K chord. Send one SIGTERM only to the owned client.
+Prove normal exit, the teardown order, restored canonical input, echo
+and signal flags, and one cooked line on the same PTY without reset.
+Keep native hand-use acceptance separate.

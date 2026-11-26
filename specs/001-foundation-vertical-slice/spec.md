@@ -199,7 +199,9 @@ assert the exit code for both success and failure.
   registration failure MUST return an ordinary safe diagnostic before any
   terminal mode is taken. A signal received during startup remains queued for
   the existing quit path when the event loop starts; it does not replay SQL or
-  introduce transaction recovery. Windows signal handling is unchanged.
+  introduce transaction recovery. A registered Unix SIGTERM reaches the
+  quit path while a key chord or modal is pending. Windows signal handling
+  follows its existing contract.
   Panic restoration MUST use the options actually acquired, before the panic
   details are printed, rather than assuming default mouse/paste/screen options.
   Report attempted restoration truthfully if an output/raw-mode restore fails;
