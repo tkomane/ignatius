@@ -10,3 +10,4 @@
 - [x] T008: Add CLI contract integration tests in `tests/synthetic_seed_contract.rs`.
 - [x] T009: Run documentation contract tests and full verification battery (`cargo xtask verify`).
 - [x] T010: Update `docs/status.md` and `CHANGELOG.md` with Wave 32 delivery evidence.
+- [x] T011: Hold seed discovery to the sync graph's permanent and unlogged table scope. Verify that the generated fixture omits both endpoints of a separate session's temporary foreign key.

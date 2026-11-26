@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Sync plans and synthetic seed fixtures omit session-local
+  temporary tables and keep permanent and unlogged tables in dependency
+  order.
 - Fixed: Sync writes to a production-classified destination require
   `--confirm-production` before either connection starts.
 - Fixed: Binary sync commits all destination writes together. Truncation
