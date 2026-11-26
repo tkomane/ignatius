@@ -825,6 +825,10 @@ fn cell_update_review_shows_the_exact_bound_statement_and_no_send_claim() {
     assert!(text.contains("Exact bound statement"), "{text}");
     assert!(text.contains("UPDATE \"public\".\"orders\""), "{text}");
     assert!(text.contains("new note"), "{text}");
+    assert!(
+        text.contains("verifies the observed cell value is still unchanged"),
+        "{text}"
+    );
     assert!(text.contains("Nothing has been sent yet"), "{text}");
     assert!(text.contains("will not be rerun automatically"), "{text}");
 }

@@ -577,7 +577,7 @@ fn review_does_not_lock_the_row_a_concurrent_delete_reports_zero_rows() {
 }
 
 #[test]
-fn review_does_not_lock_the_row_a_concurrent_change_is_overwritten() {
+fn review_does_not_lock_the_row_a_concurrent_change_reports_zero_rows() {
     let uri = target_or_skip!();
     let fx = fixture(&uri);
     let table = "cell_update_concurrent_change";
@@ -613,8 +613,8 @@ fn review_does_not_lock_the_row_a_concurrent_change_is_overwritten() {
     assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
     assert_eq!(
         applied.statements[0].rows_affected,
-        Some(1),
-        "the reviewed statement matches the row and overwrites the concurrent change"
+        Some(0),
+        "a row changed concurrently after review must match zero rows without retry"
     );
 
     let after = fx.block_on(fx.session.execute(
@@ -631,15 +631,135 @@ fn review_does_not_lock_the_row_a_concurrent_change_is_overwritten() {
     assert_eq!(
         rows,
         vec![
-            vec![Cell::Text("1".into()), Cell::Text("reviewed-value".into())],
+            vec![
+                Cell::Text("1".into()),
+                Cell::Text("concurrent-sentinel".into())
+            ],
             vec![Cell::Text("2".into()), Cell::Text("other".into())],
         ],
-        "the concurrent non-key change is overwritten, not detected"
+        "the concurrent non-key change must be preserved without overwriting or retrying"
     );
 
     let cleanup = fx.block_on(
         fx.session
             .execute(&format!("DROP TABLE {table}"), 10, JobId(315)),
+    );
+    assert_eq!(cleanup.status, ExecutionStatus::Succeeded, "{cleanup:?}");
+}
+
+#[test]
+fn cell_update_optimistic_guard_handles_null_cells_and_concurrent_null_transitions() {
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let table = "cell_update_null_guard";
+    let setup = fx.block_on(fx.session.execute(
+        &format!(
+            "DROP TABLE IF EXISTS {table}; \
+             CREATE TABLE {table} (id integer PRIMARY KEY, note text); \
+             INSERT INTO {table} VALUES (1, NULL), (2, NULL), (3, 'initial')"
+        ),
+        100,
+        JobId(316),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let source_sql = format!("SELECT id, note FROM {table} ORDER BY id");
+
+    // 1. Unchanged NULL cell updates 1 row cleanly.
+    let (_relation, null_ok_plan) =
+        plan_live_cell_update(&fx, &source_sql, table, 1, 0, "filled-from-null");
+    assert!(null_ok_plan.sql_template.contains("IS NULL"));
+    let applied = fx.block_on(fx.session.execute_with_parameters(
+        &null_ok_plan.sql_template,
+        &null_ok_plan.parameters,
+        10,
+        JobId(317),
+    ));
+    assert_eq!(applied.status, ExecutionStatus::Succeeded, "{applied:?}");
+    assert_eq!(applied.statements[0].rows_affected, Some(1));
+
+    // 2. Concurrent NULL -> non-NULL write causes planned NULL update to match 0 rows.
+    let (_relation, null_conflict_plan) =
+        plan_live_cell_update(&fx, &source_sql, table, 1, 1, "stale-fill");
+    let peer = peer_session(&fx, &uri);
+    let peer_fill = fx.block_on(peer.execute(
+        &format!("UPDATE {table} SET note = 'concurrent-fill' WHERE id = 2"),
+        10,
+        JobId(318),
+    ));
+    assert_eq!(
+        peer_fill.status,
+        ExecutionStatus::Succeeded,
+        "{peer_fill:?}"
+    );
+    assert_eq!(peer_fill.statements[0].rows_affected, Some(1));
+    let conflict_null = fx.block_on(fx.session.execute_with_parameters(
+        &null_conflict_plan.sql_template,
+        &null_conflict_plan.parameters,
+        10,
+        JobId(319),
+    ));
+    assert_eq!(
+        conflict_null.status,
+        ExecutionStatus::Succeeded,
+        "{conflict_null:?}"
+    );
+    assert_eq!(conflict_null.statements[0].rows_affected, Some(0));
+
+    // 3. Concurrent non-NULL -> NULL write causes planned non-NULL update to match 0 rows.
+    let (_relation, text_conflict_plan) =
+        plan_live_cell_update(&fx, &source_sql, table, 1, 2, "stale-overwrite");
+    let peer_null = fx.block_on(peer.execute(
+        &format!("UPDATE {table} SET note = NULL WHERE id = 3"),
+        10,
+        JobId(320),
+    ));
+    assert_eq!(
+        peer_null.status,
+        ExecutionStatus::Succeeded,
+        "{peer_null:?}"
+    );
+    assert_eq!(peer_null.statements[0].rows_affected, Some(1));
+    let conflict_text = fx.block_on(fx.session.execute_with_parameters(
+        &text_conflict_plan.sql_template,
+        &text_conflict_plan.parameters,
+        10,
+        JobId(321),
+    ));
+    assert_eq!(
+        conflict_text.status,
+        ExecutionStatus::Succeeded,
+        "{conflict_text:?}"
+    );
+    assert_eq!(conflict_text.statements[0].rows_affected, Some(0));
+
+    let after = fx.block_on(fx.session.execute(
+        &format!("SELECT id, note FROM {table} ORDER BY id"),
+        10,
+        JobId(322),
+    ));
+    let rows = after.statements[0]
+        .result_set
+        .as_ref()
+        .expect("rows after optimistic guard checks")
+        .rows
+        .clone();
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                Cell::Text("1".into()),
+                Cell::Text("filled-from-null".into())
+            ],
+            vec![Cell::Text("2".into()), Cell::Text("concurrent-fill".into())],
+            vec![Cell::Text("3".into()), Cell::Null],
+        ],
+        "unchanged NULL updates cleanly while concurrent changes are preserved"
+    );
+
+    let cleanup = fx.block_on(
+        fx.session
+            .execute(&format!("DROP TABLE {table}"), 10, JobId(323)),
     );
     assert_eq!(cleanup.status, ExecutionStatus::Succeeded, "{cleanup:?}");
 }

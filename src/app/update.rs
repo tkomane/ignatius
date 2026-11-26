@@ -345,6 +345,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                             .first()
                             .and_then(|statement| statement.rows_affected);
                         match affected {
+                            Some(0) => "UPDATE matched 0 rows: the row was deleted or the observed cell value changed concurrently. Nothing was retried; refresh (F6) to read current data.".to_owned(),
                             Some(affected) => format!(
                                 "UPDATE completed once; PostgreSQL reported {affected} row(s) affected. The prior result is a snapshot; run the SELECT again to read fresh data."
                             ),

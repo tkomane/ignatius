@@ -41,7 +41,10 @@ fn plan(replacement: &str) -> UpdatePlan {
         "public",
         "orders",
         &result_columns,
-        &[Cell::Text("1".into()), Cell::Text("old".into())],
+        &[
+            Cell::Text("1".into()),
+            Cell::Text("prior-cell-value".into()),
+        ],
         &columns(),
         replacement,
     )
@@ -199,7 +202,10 @@ fn primary_key_cell_is_not_an_editable_target() {
             "public",
             "orders",
             &["order_id".into(), "note".into()],
-            &[Cell::Text("1".into()), Cell::Text("old".into())],
+            &[
+                Cell::Text("1".into()),
+                Cell::Text("prior-cell-value".into())
+            ],
             &columns(),
             "2",
         ),
@@ -213,15 +219,104 @@ fn plan_quotes_identifiers_binds_literal_values_and_keeps_debug_safe() {
     let plan = plan(value);
     assert_eq!(
         plan.sql_template,
-        "UPDATE \"public\".\"orders\" SET \"note\" = :__ignatius_new_value WHERE \"order_id\" = :__ignatius_key_0"
+        "UPDATE \"public\".\"orders\" SET \"note\" = :__ignatius_new_value WHERE \"order_id\" = :__ignatius_key_0 AND \"note\" IS NOT NULL AND pg_catalog.format('%s', \"note\") COLLATE pg_catalog.\"C\" OPERATOR(pg_catalog.=) :__ignatius_old_value"
+    );
+    assert!(plan.optimistic_guard);
+    assert!(!plan.guarded);
+    assert_eq!(
+        plan.parameters.names(),
+        &[
+            "__ignatius_new_value",
+            "__ignatius_key_0",
+            "__ignatius_old_value"
+        ]
     );
     let bound = plan.bound_sql().expect("bound SQL");
     assert!(bound.contains("new \\\' note"), "{bound}");
     assert!(bound.contains("\\\\ line\\n"), "{bound}");
+    assert!(bound.contains("E'prior-cell-value'"), "{bound}");
     let debug = format!("{plan:?}");
     assert!(debug.contains("sql_template"));
+    assert!(debug.contains("optimistic_guard"));
     assert!(!debug.contains("new ' note"));
-    assert!(!debug.contains("old"));
+    assert!(!debug.contains("prior-cell-value"));
+}
+
+#[test]
+fn null_and_non_null_observed_cells_produce_optimistic_predicates_and_respect_limits() {
+    let selected = source(
+        "SELECT order_id, note FROM public.orders WHERE order_id = 1",
+        &["order_id", "note"],
+        1,
+    );
+    let null_plan = plan_update(
+        &selected,
+        "public",
+        "orders",
+        &["order_id".into(), "note".into()],
+        &[Cell::Text("1".into()), Cell::Null],
+        &columns(),
+        "filled",
+    )
+    .expect("null observed plan");
+    assert_eq!(
+        null_plan.sql_template,
+        "UPDATE \"public\".\"orders\" SET \"note\" = :__ignatius_new_value WHERE \"order_id\" = :__ignatius_key_0 AND \"note\" IS NULL"
+    );
+    assert_eq!(
+        null_plan.parameters.names(),
+        &["__ignatius_new_value", "__ignatius_key_0"]
+    );
+    assert!(null_plan.optimistic_guard);
+    assert!(!null_plan.guarded);
+
+    let secret_old = "super-secret-observed-cell";
+    let secret_plan = plan_update(
+        &selected,
+        "public",
+        "orders",
+        &["order_id".into(), "note".into()],
+        &[Cell::Text("1".into()), Cell::Text(secret_old.into())],
+        &columns(),
+        "replacement-value",
+    )
+    .expect("non-null observed plan");
+    assert!(!secret_plan.sql_template.contains(secret_old));
+    assert!(!format!("{secret_plan:?}").contains(secret_old));
+    assert!(
+        secret_plan
+            .bound_sql()
+            .expect("bound sql")
+            .contains(secret_old)
+    );
+
+    // Combined replacement + observed value exceeding 16 KiB after binding is refused.
+    let half_limit = MAX_UPDATE_SQL_BYTES / 2 + 128;
+    let combined_too_large = plan_update(
+        &selected,
+        "public",
+        "orders",
+        &["order_id".into(), "note".into()],
+        &[Cell::Text("1".into()), Cell::Text("a".repeat(half_limit))],
+        &columns(),
+        &"b".repeat(half_limit),
+    )
+    .expect_err("combined bound statement exceeds limit");
+    assert!(matches!(combined_too_large, UpdateRefusal::TooLarge { .. }));
+
+    // A NUL byte in the observed value is refused without disclosing the value.
+    let nul_observed = plan_update(
+        &selected,
+        "public",
+        "orders",
+        &["order_id".into(), "note".into()],
+        &[Cell::Text("1".into()), Cell::Text("hidden\0old".into())],
+        &columns(),
+        "clean",
+    )
+    .expect_err("NUL in observed value");
+    assert_eq!(nul_observed, UpdateRefusal::NulValue);
+    assert!(!format!("{nul_observed:?}").contains("hidden"));
 }
 
 #[test]
@@ -243,7 +338,10 @@ fn empty_values_are_valid_but_nul_and_oversized_values_are_refused() {
         "public",
         "orders",
         &["order_id".into(), "note".into()],
-        &[Cell::Text("1".into()), Cell::Text("old".into())],
+        &[
+            Cell::Text("1".into()),
+            Cell::Text("prior-cell-value".into()),
+        ],
         &columns(),
         "safe\0marker",
     )
@@ -259,7 +357,10 @@ fn empty_values_are_valid_but_nul_and_oversized_values_are_refused() {
         "public",
         "orders",
         &["order_id".into(), "note".into()],
-        &[Cell::Text("1".into()), Cell::Text("old".into())],
+        &[
+            Cell::Text("1".into()),
+            Cell::Text("prior-cell-value".into()),
+        ],
         &columns(),
         &"x".repeat(MAX_UPDATE_SQL_BYTES),
     )

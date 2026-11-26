@@ -798,6 +798,7 @@ fn review_privacy_exact_update_keeps_intentionally_reviewed_literal_values() {
                 "postgresql://audit:synthetic-update-secret@localhost/audit".to_owned(),
             ),
             secrecy::SecretString::from("7".to_owned()),
+            secrecy::SecretString::from("old".to_owned()),
         ],
     )
     .unwrap();
@@ -6822,7 +6823,11 @@ fn cell_update_reads_metadata_then_reviews_and_sends_one_parameterized_effect() 
     assert_eq!(sql, &pending_template());
     assert_eq!(
         parameters.names(),
-        &["__ignatius_new_value", "__ignatius_key_0"]
+        &[
+            "__ignatius_new_value",
+            "__ignatius_key_0",
+            "__ignatius_old_value"
+        ]
     );
     let independently_bound = crate::query::discover_parameters(sql)
         .expect("the emitted template is discoverable")
@@ -6837,7 +6842,7 @@ fn cell_update_reads_metadata_then_reviews_and_sends_one_parameterized_effect() 
 }
 
 fn pending_template() -> String {
-    "UPDATE \"public\".\"orders\" SET \"note\" = :__ignatius_new_value WHERE \"order_id\" = :__ignatius_key_0".into()
+    "UPDATE \"public\".\"orders\" SET \"note\" = :__ignatius_new_value WHERE \"order_id\" = :__ignatius_key_0 AND \"note\" IS NOT NULL AND pg_catalog.format('%s', \"note\") COLLATE pg_catalog.\"C\" OPERATOR(pg_catalog.=) :__ignatius_old_value".into()
 }
 
 #[test]
@@ -7050,11 +7055,111 @@ fn a_generated_update_completion_keeps_the_snapshot_and_never_reruns_the_select(
     assert_eq!(model.retained_data_loss, loss);
     assert_eq!(model.last_sql, source_sql);
     assert!(model.visible_result().is_some());
-    assert!(model.cell_update_notice.as_deref().is_some_and(|notice| {
-        notice.contains("0 row(s) affected")
-            && notice.contains("snapshot")
-            && notice.contains("again")
-    }));
+    assert_eq!(
+        model.cell_update_notice.as_deref(),
+        Some(
+            "UPDATE matched 0 rows: the row was deleted or the observed cell value changed concurrently. Nothing was retried; refresh (F6) to read current data."
+        )
+    );
+}
+
+#[test]
+fn cell_update_zero_rows_and_positive_rows_report_distinct_truthful_notices() {
+    let mut conflict_model = cell_update_model();
+    let effects = update(
+        &mut conflict_model,
+        Message::Action(Action::GenerateCellUpdate),
+    );
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("expected metadata lookup, got {effects:?}");
+    };
+    update(
+        &mut conflict_model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+            transaction: None,
+        },
+    );
+    update(&mut conflict_model, Message::Action(Action::Activate));
+    let pending = conflict_model.pending_update.as_ref().expect("review");
+    assert!(pending.plan.optimistic_guard);
+    assert!(!pending.plan.guarded);
+    let review_view = crate::ui::review::build(
+        &conflict_model,
+        crate::ui::review::Kind::Update,
+        &conflict_model.presentation,
+        ratatui::layout::Rect::new(0, 0, 120, 34),
+    )
+    .expect("update review view");
+    let review_text = review_view
+        .rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        review_text.contains("verifies the observed cell value is still unchanged"),
+        "{review_text}"
+    );
+    assert!(
+        review_text.contains("Nothing has been sent yet."),
+        "{review_text}"
+    );
+    let effects = update(&mut conflict_model, Message::Action(Action::Activate));
+    let [Effect::ExecuteParameterized { job, .. }] = effects.as_slice() else {
+        panic!("expected generated update, got {effects:?}");
+    };
+    let zero_exec = execution(*job, ExecutionStatus::Succeeded, &[]);
+    let zero_effects = update(&mut conflict_model, Message::ExecutionFinished(zero_exec));
+    assert!(zero_effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::Execute { .. } | Effect::ExecuteParameterized { .. }
+    )));
+    assert_eq!(
+        conflict_model.cell_update_notice.as_deref(),
+        Some(
+            "UPDATE matched 0 rows: the row was deleted or the observed cell value changed concurrently. Nothing was retried; refresh (F6) to read current data."
+        )
+    );
+
+    let mut applied_model = cell_update_model();
+    let effects = update(
+        &mut applied_model,
+        Message::Action(Action::GenerateCellUpdate),
+    );
+    let [Effect::LoadUpdateTarget { request, .. }] = effects.as_slice() else {
+        panic!("expected metadata lookup, got {effects:?}");
+    };
+    update(
+        &mut applied_model,
+        Message::UpdateTargetLoaded {
+            request: *request,
+            result: Box::new(Ok(update_relation())),
+            transaction: None,
+        },
+    );
+    update(&mut applied_model, Message::Action(Action::Activate));
+    let effects = update(&mut applied_model, Message::Action(Action::Activate));
+    let [Effect::ExecuteParameterized { job, .. }] = effects.as_slice() else {
+        panic!("expected generated update, got {effects:?}");
+    };
+    let one_exec = execution(*job, ExecutionStatus::Succeeded, &["one"]);
+    let one_effects = update(&mut applied_model, Message::ExecutionFinished(one_exec));
+    assert!(one_effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::Execute { .. } | Effect::ExecuteParameterized { .. }
+    )));
+    assert!(
+        applied_model
+            .cell_update_notice
+            .as_deref()
+            .is_some_and(|notice| {
+                notice.contains("1 row(s) affected")
+                    && notice.contains("snapshot")
+                    && notice.contains("run the SELECT again")
+            })
+    );
 }
 
 #[test]
