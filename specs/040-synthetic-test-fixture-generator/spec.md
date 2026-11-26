@@ -12,3 +12,9 @@ Feature 040 delivers a catalog-grounded synthetic test data and fixture generato
 
 Fixture discovery covers permanent and unlogged user tables. Temporary
 tables and their column and dependency metadata are excluded from plans.
+
+With `--insert`, a production-classified target requires
+`--confirm-production` before authentication or connection. Refusal
+returns a usage error and emits no fixture report. Fixture generation
+without `--insert` can read the catalogue and render output without
+production confirmation.

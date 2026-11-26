@@ -2,12 +2,17 @@
 
 #![allow(clippy::print_stderr)]
 
+use std::path::Path;
 use std::process::{Command, Output};
 
 fn binary() -> Command {
+    binary_in(&temp_config_dir())
+}
+
+fn binary_in(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ignatius"));
-    command.env("IGNATIUS_CONFIG_DIR", temp_config_dir());
-    command.env("IGNATIUS_DATA_DIR", temp_config_dir().join("data"));
+    command.env("IGNATIUS_CONFIG_DIR", root);
+    command.env("IGNATIUS_DATA_DIR", root.join("data"));
     command.env_remove("IGNATIUS_LOG");
     for key in [
         "PGHOST",
@@ -79,6 +84,7 @@ fn seed_help_and_options_are_complete() {
     assert!(help.contains("--rows"));
     assert!(help.contains("--seed"));
     assert!(help.contains("--insert"));
+    assert!(help.contains("--confirm-production"));
     assert!(help.contains("--format"));
     assert!(help.contains("--output"));
     assert!(help.contains("--force"));
@@ -96,6 +102,9 @@ fn seed_protects_existing_output_file_without_force() {
     let output = binary()
         .args([
             "seed",
+            "--insert",
+            "--environment",
+            "production",
             "-o",
             temp_file.to_str().unwrap(),
             "postgres://localhost:5432/postgres",
@@ -107,6 +116,90 @@ fn seed_protects_existing_output_file_without_force() {
     let err = stderr(&output);
     assert!(err.contains("refusing to overwrite existing file"));
     assert!(err.contains("--force"));
+    assert_eq!(
+        std::fs::read_to_string(&temp_file).expect("read protected seed output"),
+        "pre-existing seed data"
+    );
+}
+
+fn assert_production_refusal(output: &Output) {
+    let message = stderr(output);
+    assert_eq!(code(output), 2, "{message}");
+    assert!(
+        message.contains("the target is classified as production"),
+        "{message}"
+    );
+    assert!(message.contains("--confirm-production"), "{message}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn seed_refuses_production_profile_insert_before_authentication() {
+    let root = tempfile::tempdir().expect("create isolated seed config");
+    std::fs::write(
+        root.path().join("config.toml"),
+        r#"
+[profiles.fixture]
+host = "127.0.0.1"
+port = 1
+dbname = "fixture"
+user = "seed"
+environment = "prod"
+auth = "seed_provider_does_not_exist"
+"#,
+    )
+    .expect("write a production-classified seed profile");
+    let report = root.path().join("seed.sql");
+    std::fs::write(&report, "previous output").expect("write an existing seed report");
+
+    let refused = binary_in(root.path())
+        .args(["seed", "@fixture", "--insert", "--force", "--output"])
+        .arg(&report)
+        .output()
+        .expect("run an unconfirmed production seed insert");
+    assert_production_refusal(&refused);
+    assert_eq!(
+        std::fs::read_to_string(&report).expect("read previous seed output"),
+        "previous output"
+    );
+
+    for options in [&["--insert", "--confirm-production"][..], &[][..]] {
+        let allowed = binary_in(root.path())
+            .args(["seed", "@fixture"])
+            .args(options)
+            .output()
+            .expect("reach auth for confirmed insert or fixture rendering");
+        let message = stderr(&allowed);
+        assert_eq!(code(&allowed), 3, "{message}");
+        assert!(
+            message.contains("unknown authentication provider")
+                && message.contains("seed_provider_does_not_exist"),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn seed_refuses_explicit_production_insert_before_connecting() {
+    let root = tempfile::tempdir().expect("create isolated seed config");
+    let report = root.path().join("seed.sql");
+    let target = "postgres://seed@127.0.0.1:1/fixture?sslmode=disable&connect_timeout=2";
+    let args = ["seed", target, "--insert", "--environment", "production"];
+    let refused = binary_in(root.path())
+        .args(args)
+        .arg("--output")
+        .arg(&report)
+        .output()
+        .expect("run an unconfirmed seed insert with explicit classification");
+    assert_production_refusal(&refused);
+    assert!(!report.exists());
+
+    let confirmed = binary_in(root.path())
+        .args(args)
+        .arg("--confirm-production")
+        .output()
+        .expect("reach connection with confirmation");
+    assert_eq!(code(&confirmed), 4, "{}", stderr(&confirmed));
 }
 
 #[test]

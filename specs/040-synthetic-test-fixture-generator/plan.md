@@ -24,7 +24,8 @@
    - Tab 0: Table Generator Strategies (columns, inferred strategy, constraints).
    - Tab 1: Generated Fixture Preview (SQL statements or tabular preview).
 6. **CLI Subcommand `ignatius seed` (`src/cli/mod.rs`)**:
-   - Flags: `--schema`, `--table`, `-n, --rows`, `--seed`, `-f, --format`, `-o, --output`, `--force`, `--insert`.
+   - Flags: `--schema`, `--table`, `-n, --rows`, `--seed`, `-f, --format`, `-o, --output`, `--force`, `--insert`, `--confirm-production`.
+   - After resolving the target environment, refuse an unconfirmed production insert before provider authentication, connection, or report writes.
 7. **Verification & Testing**:
    - Sidecar unit tests in `src/seed/tests.rs`.
    - CLI contract tests in `tests/synthetic_seed_contract.rs`.
