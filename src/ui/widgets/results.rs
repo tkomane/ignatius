@@ -48,6 +48,7 @@ pub(crate) fn grid_column_header_row(
     let notice = model.cell_update_notice.is_some()
         || model.clipboard_notice.is_some()
         || model.refresh_notice.is_some()
+        || model.result_diff_notice.is_some()
         || model.result_grid.note.is_some();
     retention_warning_lines(model, area).len()
         + 2
@@ -340,6 +341,12 @@ pub(crate) fn render_results(
             )));
         }
         if let Some(notice) = &model.refresh_notice {
+            lines.push(Line::from(Span::styled(
+                sanitize_for_display(notice),
+                theme.style(Token::Info),
+            )));
+        }
+        if let Some(notice) = &model.result_diff_notice {
             lines.push(Line::from(Span::styled(
                 sanitize_for_display(notice),
                 theme.style(Token::Info),
@@ -1009,6 +1016,12 @@ fn render_results_placeholder(
             theme.style(Token::Info),
         )));
     }
+    if let Some(notice) = &model.result_diff_notice {
+        prose_lines.push(Line::from(Span::styled(
+            sanitize_for_display(notice),
+            theme.style(Token::Info),
+        )));
+    }
     hint_lines.push(Line::from(vec![
         Span::styled(format!(" {palette_key} "), keycap),
         Span::styled(
@@ -1424,6 +1437,7 @@ fn render_grid(
         .as_deref()
         .or(clipboard_note.as_deref())
         .or(model.refresh_notice.as_deref())
+        .or(model.result_diff_notice.as_deref())
         .or(model.result_grid.note.as_deref())
     {
         lines.push(Line::from(Span::styled(

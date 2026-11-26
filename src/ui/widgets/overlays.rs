@@ -12771,5 +12771,380 @@ fn render_sql_runbook_dry_run(
     Paragraph::new(lines).render(body_area, buf);
 }
 
+/// Renders the Pinned Result Snapshot A/B Diff overlay (`067` Slice 2).
+pub(crate) fn render_result_diff(
+    state: &crate::app::model::ResultDiffState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    render_fitted_modal(area, buf, 0, |fit, target| {
+        render_result_diff_frame(state, presentation, area, target, fit);
+    });
+}
+
+fn render_result_diff_frame(
+    state: &crate::app::model::ResultDiffState,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+    fit: &ModalFit,
+) {
+    use crate::app::model::ResultDiffFilter;
+    use crate::query::value::Cell;
+    use crate::result_diff::{AlignmentMode, DiffRowKind};
+
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let title = format!(" {} RESULT SNAPSHOT DIFF ", presentation.icon(Icon::Rows));
+    let Some((capsule_area, tab_area, body_area, status_area, footer_area)) =
+        modal_inner_layout(title, presentation, area, buf, fit)
+    else {
+        return;
+    };
+
+    let diff = &state.diff;
+    let mut capsules = vec![Span::raw(" ")];
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "+ADDED: ",
+        diff.added_count.to_string(),
+        count_token(diff.added_count, Token::Success),
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "-REMOVED: ",
+        diff.removed_count.to_string(),
+        count_token(diff.removed_count, Token::Danger),
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "~CHANGED: ",
+        diff.changed_count.to_string(),
+        count_token(diff.changed_count, Token::Warning),
+    );
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "=SAME: ",
+        diff.unchanged_count.to_string(),
+        Token::Muted,
+    );
+    if diff.schema_delta.has_changes() {
+        push_kv_capsule(
+            &mut capsules,
+            presentation,
+            "SCHEMA: ",
+            format!(
+                "+{}/-{}",
+                diff.schema_delta.added_columns.len(),
+                diff.schema_delta.removed_columns.len()
+            ),
+            Token::Info,
+        );
+    }
+    let (align_label, align_token) = match &diff.alignment {
+        AlignmentMode::Keyed { column } => (
+            format!("KEY:{}", fit_cell(column, 12, unicode)),
+            Token::Success,
+        ),
+        AlignmentMode::Positional { reason: Some(_) } => {
+            ("POSITIONAL (FALLBACK)".to_owned(), Token::Warning)
+        }
+        AlignmentMode::Positional { reason: None } => ("POSITIONAL".to_owned(), Token::Text),
+    };
+    push_kv_capsule(
+        &mut capsules,
+        presentation,
+        "ALIGN: ",
+        align_label,
+        align_token,
+    );
+    if diff.is_truncated() {
+        push_pill_capsule(
+            &mut capsules,
+            presentation,
+            "[TRUNCATED]".to_owned(),
+            Token::Warning,
+        );
+    }
+    render_capsule_bar(capsules, capsule_area, buf);
+
+    let active_filter_tab = match state.filter {
+        ResultDiffFilter::All => 0,
+        ResultDiffFilter::DifferencesOnly => 1,
+        ResultDiffFilter::Added => 2,
+        ResultDiffFilter::Removed => 3,
+        ResultDiffFilter::Changed => 4,
+    };
+    let key_badge = match &state.selected_key {
+        Some(col) => format!("[Key: {}]", fit_cell(col, 14, unicode)),
+        None => "[Key: Positional]".to_owned(),
+    };
+    render_overlay_tabs(
+        &[
+            " [1] All ",
+            " [2] Diffs ",
+            " [3] Added ",
+            " [4] Removed ",
+            " [5] Changed ",
+        ],
+        active_filter_tab,
+        Some((key_badge, Token::Info)),
+        presentation,
+        tab_area,
+        buf,
+    );
+
+    let body_width = usize::from(body_area.width);
+    let body_height = usize::from(body_area.height);
+    let mut lines = Vec::new();
+
+    let schema_summary = if diff.schema_delta.has_changes() {
+        format!(
+            "Schema: +[{}] -[{}]",
+            diff.schema_delta.added_columns.join(", "),
+            diff.schema_delta.removed_columns.join(", ")
+        )
+    } else {
+        format!(
+            "Schema: {} shared col(s)",
+            diff.schema_delta.shared_columns.len()
+        )
+    };
+    lines.push(bounded_row(
+        vec![
+            ("  Baseline: ".to_owned(), theme.style(Token::Muted)),
+            (
+                fit_cell(&diff.baseline_sql_summary, 30, unicode),
+                theme.style(Token::Text),
+            ),
+            (
+                format!(
+                    " ({} rows)  vs  Current: {} rows  |  ",
+                    diff.baseline_rows, diff.current_rows
+                ),
+                theme.style(Token::Muted),
+            ),
+            (
+                sanitize_for_display(&schema_summary),
+                theme.style(Token::Info),
+            ),
+        ],
+        body_width,
+        unicode,
+        None,
+    ));
+
+    let visible_cols: Vec<(usize, &String)> = diff
+        .display_columns
+        .iter()
+        .enumerate()
+        .skip(state.horizontal_scroll)
+        .take(6)
+        .collect();
+    let col_width = 16usize;
+
+    let mut header_segments = vec![(
+        format!("  {:<5} {:<16} ", "STAT", "ROW/KEY"),
+        theme.style(Token::Header).add_modifier(Modifier::BOLD),
+    )];
+    if state.horizontal_scroll > 0 {
+        header_segments.push((
+            "< ".to_owned(),
+            theme.style(Token::Info).add_modifier(Modifier::BOLD),
+        ));
+    }
+    for (_, col_name) in &visible_cols {
+        let marker = if diff.schema_delta.added_columns.contains(col_name) {
+            "+"
+        } else if diff.schema_delta.removed_columns.contains(col_name) {
+            "-"
+        } else {
+            ""
+        };
+        let label = format!("{marker}{col_name}");
+        header_segments.push((
+            format!("{} ", fit_cell(&label, col_width, unicode)),
+            theme.style(Token::Header).add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.push(bounded_row(header_segments, body_width, unicode, None));
+
+    let filtered = state.filtered_entries();
+    let data_budget = body_height.saturating_sub(2).max(1);
+    if filtered.is_empty() {
+        lines.push(bounded_row(
+            vec![(
+                format!("  No rows match filter '{}'.", state.filter.label()),
+                theme.style(Token::Muted),
+            )],
+            body_width,
+            unicode,
+            None,
+        ));
+    } else {
+        for (_, row) in filtered
+            .iter()
+            .skip(state.vertical_scroll)
+            .take(data_budget)
+        {
+            let (badge, badge_token) = match &row.kind {
+                DiffRowKind::Added => (row.kind.badge(), Token::Success),
+                DiffRowKind::Removed => (row.kind.badge(), Token::Danger),
+                DiffRowKind::Changed { .. } => (row.kind.badge(), Token::Warning),
+                DiffRowKind::Unchanged => (row.kind.badge(), Token::Muted),
+            };
+            let id_label = if let Some(key) = &row.key_value {
+                key.clone()
+            } else {
+                match (row.baseline_index, row.current_index) {
+                    (Some(b), Some(c)) if b == c => format!("#{}", b + 1),
+                    (Some(b), Some(c)) => format!("#{}->#{}", b + 1, c + 1),
+                    (Some(b), None) => format!("#{} (base)", b + 1),
+                    (None, Some(c)) => format!("#{} (curr)", c + 1),
+                    (None, None) => "#?".to_owned(),
+                }
+            };
+
+            let mut row_segments = vec![
+                ("  ".to_owned(), theme.style(Token::Muted)),
+                (
+                    format!("{badge:<5} "),
+                    theme.style(badge_token).add_modifier(Modifier::BOLD),
+                ),
+                (
+                    format!("{} ", fit_cell(&id_label, 16, unicode)),
+                    theme.style(Token::Info),
+                ),
+            ];
+            if state.horizontal_scroll > 0 {
+                row_segments.push(("  ".to_owned(), theme.style(Token::Muted)));
+            }
+
+            for (col_idx, _) in &visible_cols {
+                let (cell_text, cell_token) = match &row.kind {
+                    DiffRowKind::Added => {
+                        let txt = fmt_diff_opt_cell(
+                            row.current_cells.get(*col_idx).and_then(|c| c.as_ref()),
+                        );
+                        (txt, Token::Success)
+                    }
+                    DiffRowKind::Removed => {
+                        let txt = fmt_diff_opt_cell(
+                            row.baseline_cells.get(*col_idx).and_then(|c| c.as_ref()),
+                        );
+                        (txt, Token::Danger)
+                    }
+                    DiffRowKind::Changed { .. } => {
+                        let b_val = row.baseline_cells.get(*col_idx).and_then(|c| c.as_ref());
+                        let c_val = row.current_cells.get(*col_idx).and_then(|c| c.as_ref());
+                        if b_val != c_val {
+                            let b_txt = fmt_diff_opt_cell(b_val);
+                            let c_txt = fmt_diff_opt_cell(c_val);
+                            (format!("{b_txt}->{c_txt}"), Token::Warning)
+                        } else {
+                            (fmt_diff_opt_cell(c_val), Token::Muted)
+                        }
+                    }
+                    DiffRowKind::Unchanged => {
+                        let txt = fmt_diff_opt_cell(
+                            row.current_cells.get(*col_idx).and_then(|c| c.as_ref()),
+                        );
+                        (txt, Token::Muted)
+                    }
+                };
+                row_segments.push((
+                    format!("{} ", fit_cell(&cell_text, col_width, unicode)),
+                    theme.style(cell_token),
+                ));
+            }
+            lines.push(bounded_row(row_segments, body_width, unicode, None));
+        }
+    }
+    Paragraph::new(lines).render(body_area, buf);
+
+    let (status_text, status_token) = if let Some(msg) = &state.status_message {
+        (sanitize_for_display(msg), Token::Info)
+    } else if let AlignmentMode::Positional { reason: Some(why) } = &diff.alignment {
+        (
+            format!("Positional fallback: {}", sanitize_for_display(why)),
+            Token::Warning,
+        )
+    } else {
+        let total = filtered.len();
+        let shown_start = if total == 0 {
+            0
+        } else {
+            state.vertical_scroll.saturating_add(1).min(total)
+        };
+        let shown_end = state.vertical_scroll.saturating_add(data_budget).min(total);
+        (
+            format!(
+                "Rows {shown_start}-{shown_end} of {total} ({})  |  Col offset {} of {}",
+                state.filter.label(),
+                state
+                    .horizontal_scroll
+                    .saturating_add(1)
+                    .min(diff.display_columns.len().max(1)),
+                diff.display_columns.len()
+            ),
+            Token::Muted,
+        )
+    };
+    Paragraph::new(Line::from(Span::styled(
+        truncate_to_width(&status_text, usize::from(status_area.width), unicode),
+        theme.style(status_token),
+    )))
+    .render(status_area, buf);
+
+    let footer_segments = vec![
+        (
+            "[f] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Filter  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[k] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Key col  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Up/Down] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Scroll  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Left/Right] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Cols  ".to_owned(), theme.style(Token::Muted)),
+        (
+            "[Esc] ".to_owned(),
+            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+        ),
+        ("Close".to_owned(), theme.style(Token::Muted)),
+    ];
+    Paragraph::new(bounded_row(
+        footer_segments,
+        usize::from(footer_area.width),
+        unicode,
+        None,
+    ))
+    .render(footer_area, buf);
+
+    fn fmt_diff_opt_cell(cell: Option<&Cell>) -> String {
+        match cell {
+            None => "-".to_owned(),
+            Some(Cell::Null) => "[null]".to_owned(),
+            Some(Cell::Text(s)) if s.is_empty() => "\"\"".to_owned(),
+            Some(Cell::Text(s)) => sanitize_for_display(s),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -384,6 +384,10 @@ pub enum Command {
 
     /// Compare named PostgreSQL profiles with read-only catalog probes.
     Fleet(FleetArgs),
+
+    /// Compare two local JSON or NDJSON result exports completely offline.
+    #[command(name = "result-diff")]
+    ResultDiff(ResultDiffArgs),
 }
 
 /// Arguments for the audit command.
@@ -1035,6 +1039,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Snapshot(args)) => run_snapshot(args, &paths, out, err),
         Some(Command::Runbook(args)) => run_runbook(args, &paths, out, err),
         Some(Command::Fleet(args)) => fleet::run(args, &paths, out, err),
+        Some(Command::ResultDiff(args)) => run_result_diff(args, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -8596,6 +8601,82 @@ fn run_runbook(
     }
 
     Ok(ExitCode::Success)
+}
+
+/// Output format for offline `ignatius result-diff`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliResultDiffFormat {
+    /// Deterministic plain text with `[+]`/`[-]`/`[~]`/`[=]` badges (default).
+    #[default]
+    Text,
+    /// Structured JSON report (`schema_version: 1`).
+    Json,
+    /// Markdown summary and pipe table with `[+]`/`[-]`/`[~]`/`[=]` badges.
+    Markdown,
+}
+
+/// Arguments for the offline `result-diff` command (`067` Slice 2).
+#[derive(Debug, Args, Clone)]
+pub struct ResultDiffArgs {
+    /// Baseline result export file (JSON or NDJSON).
+    #[arg(value_name = "BASELINE")]
+    pub baseline: PathBuf,
+    /// Current result export file (JSON or NDJSON).
+    #[arg(value_name = "CURRENT")]
+    pub current: PathBuf,
+    /// Optional key column name for keyed row alignment.
+    #[arg(short = 'k', long, value_name = "COLUMN")]
+    pub key: Option<String>,
+    /// Output format: text (default), json, or markdown.
+    #[arg(short = 'f', long, value_enum, default_value_t = CliResultDiffFormat::Text)]
+    pub format: CliResultDiffFormat,
+    /// Write the diff report to a file instead of standard output.
+    #[arg(short = 'o', long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+}
+
+fn run_result_diff(
+    args: &ResultDiffArgs,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let baseline_set = crate::result_diff::parse_result_file(&args.baseline)?;
+    let current_set = crate::result_diff::parse_result_file(&args.current)?;
+    let baseline_label = args.baseline.display().to_string();
+    let pinned = crate::result_diff::PinnedResult::capture(
+        &baseline_set,
+        Some(&baseline_label),
+        args.key.clone(),
+        None,
+    )
+    .map_err(|reason| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            reason,
+            "capturing baseline result for diff",
+        )
+        .next_action("provide an available baseline JSON or NDJSON result file")
+    })?;
+
+    let diff = crate::result_diff::diff_results(&pinned, &current_set, args.key.as_deref());
+    let rendered = match args.format {
+        CliResultDiffFormat::Text => diff.render_text(),
+        CliResultDiffFormat::Json => diff.render_json(),
+        CliResultDiffFormat::Markdown => diff.render_markdown(),
+    };
+
+    write_report_output(
+        rendered,
+        args.output.as_deref(),
+        args.force,
+        "Result diff report",
+        out,
+        err,
+    )
 }
 
 #[cfg(test)]

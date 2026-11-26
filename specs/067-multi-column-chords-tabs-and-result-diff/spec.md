@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m21-chords-and-buffer-tabs` (PR 2A) and `feat/m21-result-snapshot-diff` (PR 2B)
 **Created**: 2026-11-26
-**Status**: In Progress (PR 2A in progress; PR 2B pending)
+**Status**: Complete (PR 2B merged on `main`; PR 2A ready)
 **Milestone**: M21 - Adaptive Chord Layout, Buffer Tab Management, and Result Snapshot Diffing
 
 ## Problem Statement

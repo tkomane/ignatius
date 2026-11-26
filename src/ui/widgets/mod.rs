@@ -19,9 +19,9 @@ pub(crate) use overlays::{
     render_lint_findings, render_logical_replication, render_maintenance_ops, render_name_prompt,
     render_parameter_prompt, render_password_prompt, render_plan_confirmation, render_plan_diff,
     render_query_bench_with_motion, render_query_performance, render_result_analytics,
-    render_routine_runner, render_schema_diagram, render_schema_diff, render_schema_snapshot,
-    render_security_audit, render_server_activity, render_snippet_library, render_sql_runbook,
-    render_synthetic_seed, render_update_review, render_update_value_prompt,
+    render_result_diff, render_routine_runner, render_schema_diagram, render_schema_diff,
+    render_schema_snapshot, render_security_audit, render_server_activity, render_snippet_library,
+    render_sql_runbook, render_synthetic_seed, render_update_review, render_update_value_prompt,
     render_wal_observability,
 };
 pub(crate) use palette::{render_connection_details, render_palette};
@@ -509,6 +509,7 @@ pub fn region_at(model: &Model, area: Rect, column: u16, row: u16) -> Option<Reg
         || model.data_browser.is_some()
         || model.plan_diff.is_some()
         || model.result_analytics.is_some()
+        || model.result_diff.is_some()
         || model.query_bench.is_some()
         || model.schema_snapshot.is_some()
         || model.sql_runbook.is_some()
@@ -592,6 +593,7 @@ pub const fn overlay_blocks_panes(model: &Model) -> bool {
         || model.data_browser.is_some()
         || model.plan_diff.is_some()
         || model.result_analytics.is_some()
+        || model.result_diff.is_some()
         || model.query_bench.is_some()
         || model.schema_snapshot.is_some()
         || model.sql_runbook.is_some()

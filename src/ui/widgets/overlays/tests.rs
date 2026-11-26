@@ -2847,3 +2847,58 @@ fn result_analytics_tab_two_renders_fractional_unicode_and_ascii_meters() {
         "ASCII top value meter: {ascii_top}"
     );
 }
+
+#[test]
+fn result_diff_overlay_renders_kpi_strip_badges_and_ascii_fallback() {
+    use crate::query::Cell;
+    let mut base_set =
+        crate::query::result::ResultSet::new(vec!["id".into(), "status".into()], 100);
+    base_set.push(vec![Cell::Text("1".into()), Cell::Text("pending".into())]);
+    base_set.push(vec![Cell::Text("2".into()), Cell::Text("old".into())]);
+    let pinned = crate::result_diff::PinnedResult::capture(
+        &base_set,
+        Some("SELECT id, status FROM orders"),
+        Some("id".into()),
+        Some("local".into()),
+    )
+    .unwrap();
+
+    let mut curr_set = crate::query::result::ResultSet::new(
+        vec!["id".into(), "status".into(), "note".into()],
+        100,
+    );
+    curr_set.push(vec![
+        Cell::Text("1".into()),
+        Cell::Text("paid".into()),
+        Cell::Null,
+    ]);
+    curr_set.push(vec![
+        Cell::Text("3".into()),
+        Cell::Text("new".into()),
+        Cell::Text("rush".into()),
+    ]);
+
+    let state = crate::app::model::ResultDiffState::new(&pinned, &curr_set);
+    let area = Rect::new(0, 0, 130, 30);
+
+    let ascii = ascii_presentation();
+    let mut abuf = Buffer::empty(area);
+    render_result_diff(&state, &ascii, area, &mut abuf);
+    let atext = buffer_to_string(&abuf);
+    assert!(atext.is_ascii(), "{atext}");
+    assert!(atext.contains("+ADDED: 1"), "{atext}");
+    assert!(atext.contains("-REMOVED: 1"), "{atext}");
+    assert!(atext.contains("~CHANGED: 1"), "{atext}");
+    assert!(atext.contains("[~]"), "{atext}");
+    assert!(atext.contains("[-]"), "{atext}");
+    assert!(atext.contains("[+]"), "{atext}");
+    assert!(atext.contains("KEY:id"), "{atext}");
+    assert!(atext.contains("pending->paid"), "{atext}");
+
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut ubuf = Buffer::empty(area);
+    render_result_diff(&state, &pres, area, &mut ubuf);
+    let utext = buffer_to_string(&ubuf);
+    assert!(utext.contains("RESULT SNAPSHOT DIFF"), "{utext}");
+    assert!(utext.contains("SCHEMA: +1/-0"), "{utext}");
+}

@@ -14,7 +14,7 @@
 
 ## Phase 2: PR 2B - Pinned Result Snapshot & Diffing (`feat/m21-result-snapshot-diff`)
 
-- [ ] T007 Implement pure bounded domain module `src/result_diff/mod.rs` (`PinnedResult`, `ResultDiff`, `diff_results`, text/Markdown/JSON formatters) and sidecar `src/result_diff/tests.rs`.
-- [ ] T008 Wire `PinResultSnapshot` (`"pin-result"`), `CompareResultSnapshot` (`"compare-result"`), connection/disconnect clearing, and the interactive `ResultDiff` overlay into `src/app/*`, `src/ui/keymap.rs`, `src/ui/widgets/overlays.rs`, and `src/ui/layout.rs`.
-- [ ] T009 Implement offline CLI `ignatius result-diff` in `src/cli/mod.rs` and `src/cli/output.rs` with bounded JSON/NDJSON ingestion, symlink/non-regular file rejection, and atomic `--output`.
-- [ ] T010 Add unit, reducer, UI, and CLI contract tests for result diffing and verify with `cargo --locked xtask verify`.
+- [x] T007 Implement pure bounded domain module `src/result_diff/mod.rs` (`PinnedResult`, `ResultDiff`, `diff_results`, text/Markdown/JSON formatters) and sidecar `src/result_diff/tests.rs`.
+- [x] T008 Wire `PinResultSnapshot` (`"pin-result"`), `CompareResultSnapshot` (`"compare-result"`), connection/disconnect clearing, and the interactive `ResultDiff` overlay into `src/app/*`, `src/ui/keymap.rs`, `src/ui/widgets/overlays.rs`, and `src/ui/layout.rs`.
+- [x] T009 Implement offline CLI `ignatius result-diff` in `src/cli/mod.rs` and `src/cli/output.rs` with bounded JSON/NDJSON ingestion, symlink/non-regular file rejection, and atomic `--output`.
+- [x] T010 Add unit, reducer, UI, and CLI contract tests for result diffing and verify with `cargo --locked xtask verify`.
