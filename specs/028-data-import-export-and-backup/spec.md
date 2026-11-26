@@ -35,6 +35,12 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   completion keeps both output routes unpublished. Explicit replacement
   applies after confirmed completion and successful local writing. The
   caller's transaction remains under caller control.
+- **FR-2807.** A named bulk COPY export streams chunks to an exclusively
+  owned partial file without retaining the whole result. It opens the
+  partial when data first arrives, or after confirmation of a zero-byte
+  result. After a late failure, the final path stays untouched and the
+  diagnostic identifies the incomplete file without claiming a row count.
+  Standard output remains buffered until PostgreSQL confirms completion.
 - **SC-2801.** With disposable PostgreSQL, valid dry-run returns the row count
   and leaves zero imported rows. Contradictory options leave zero rows.
   A refused nested import leaves the caller's transaction and its sentinel
@@ -51,3 +57,10 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   destination retains its original bytes. The error carries SQLSTATE
   23505 without the duplicate value. The same session can run another
   query, and successful empty and nonempty CSV retain exact bytes.
+- **SC-2805.** A named export writes data to its partial before COPY
+  completes and leaves an existing destination unchanged while waiting.
+  Once the request completes, the file matches the expected byte count
+  and digest, including an empty result with headers disabled. A tenfold
+  increase in fixed-width output does not produce proportional resident
+  memory growth. A late server rejection retains the partial and preserves
+  the original file, and a failure before any payload leaves no partial.

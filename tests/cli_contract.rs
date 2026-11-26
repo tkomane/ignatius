@@ -1068,6 +1068,156 @@ mod with_server {
         };
     }
 
+    #[test]
+    fn streamed_export_publishes_only_after_copy_completion_and_keeps_prior_final() {
+        let uri = uri_or_skip!();
+        let state = tempfile::tempdir().expect("private subprocess state");
+        let suffix: String = state
+            .path()
+            .file_name()
+            .expect("tempdir basename")
+            .to_string_lossy()
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .collect();
+        let schema = format!("w114_export_{suffix}");
+        let duplicate = "synthetic-export-cli-duplicate";
+        let payload = "synthetic-export-cli-payload";
+        let command = || {
+            let mut command = binary();
+            command.env("IGNATIUS_CONFIG_DIR", state.path().join("config"));
+            command.env("IGNATIUS_DATA_DIR", state.path().join("data"));
+            command
+        };
+        let sql = |statement: &str| {
+            command()
+                .args(["query", &uri, "-c", statement])
+                .output()
+                .expect("run fixture SQL")
+        };
+        let export = |query: &str, destination: &std::path::Path, flags: &[&str]| {
+            command()
+                .args([
+                    "--verbose",
+                    "export",
+                    &uri,
+                    query,
+                    "--format",
+                    "csv",
+                    "--output",
+                ])
+                .arg(destination)
+                .args(flags)
+                .output()
+        };
+
+        let destination = state.path().join("late.csv");
+        let prior_final = b"prior final bytes\n";
+        std::fs::write(&destination, prior_final).expect("write prior final");
+        let partial = destination.with_extension("csv.partial");
+        let setup = sql(&format!(
+            "BEGIN; CREATE SCHEMA {schema}; \
+             CREATE TABLE {schema}.guard (id text UNIQUE DEFERRABLE INITIALLY DEFERRED); \
+             INSERT INTO {schema}.guard VALUES ('{duplicate}'); \
+             CREATE FUNCTION {schema}.copy_value() RETURNS text LANGUAGE plpgsql VOLATILE AS $$ \
+             BEGIN \
+                 INSERT INTO {schema}.guard VALUES ('{duplicate}'); \
+                 RETURN '{payload}'; \
+             END; $$; COMMIT"
+        ));
+        assert_eq!(code(&setup), 0, "{}", stderr(&setup));
+
+        let output = export(
+            &format!("SELECT {schema}.copy_value() AS value"),
+            &destination,
+            &["--force"],
+        );
+        let final_bytes = std::fs::read(&destination);
+        let partial_bytes = std::fs::read(&partial);
+
+        let missing_destination = state.path().join("missing.csv");
+        let missing_partial = missing_destination.with_extension("csv.partial");
+        let missing = export(
+            "SELECT synthetic_cli_missing_export_column",
+            &missing_destination,
+            &[],
+        );
+
+        let cleanup = sql(&format!("DROP SCHEMA {schema} CASCADE"));
+        assert_eq!(code(&cleanup), 0, "{}", stderr(&cleanup));
+
+        let output = output.expect("run late-failing export");
+        assert_eq!(code(&output), 7, "{}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "file export emitted stdout");
+        let message = stderr(&output);
+        assert!(message.contains("23505"), "SQLSTATE missing: {message}");
+        assert!(
+            message.contains(&partial.display().to_string()),
+            "partial path missing: {message}"
+        );
+        assert!(
+            !message.contains(duplicate),
+            "duplicate key leaked: {message}"
+        );
+        assert!(
+            !message.contains(payload),
+            "export payload leaked: {message}"
+        );
+        assert_eq!(final_bytes.expect("read prior final"), prior_final);
+        assert_eq!(
+            partial_bytes.expect("read server-emitted partial"),
+            b"value\nsynthetic-export-cli-payload\n"
+        );
+
+        let missing = missing.expect("run early missing-column export");
+        assert_eq!(code(&missing), 7, "{}", stderr(&missing));
+        assert!(
+            stdout(&missing).is_empty(),
+            "missing-column export emitted stdout"
+        );
+        let missing_message = stderr(&missing);
+        assert!(
+            missing_message.contains("42703"),
+            "SQLSTATE missing: {missing_message}"
+        );
+        assert!(
+            !missing_destination.exists(),
+            "early failure created final file"
+        );
+        assert!(
+            !missing_partial.exists(),
+            "early failure created partial file"
+        );
+    }
+
+    #[test]
+    fn streamed_export_publishes_a_confirmed_zero_byte_result() {
+        let uri = uri_or_skip!();
+        let state = tempfile::tempdir().expect("private export destination");
+        let destination = state.path().join("empty.csv");
+        std::fs::write(&destination, b"prior final bytes\n").expect("write prior final");
+        let output = binary()
+            .args([
+                "export",
+                &uri,
+                "SELECT 42 AS value WHERE false",
+                "--format",
+                "csv",
+                "--no-header",
+                "--force",
+                "--output",
+            ])
+            .arg(&destination)
+            .output()
+            .expect("run empty export");
+
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert!(stdout(&output).is_empty());
+        assert!(stderr(&output).contains("Exported 0 bytes"));
+        assert!(std::fs::read(&destination).expect("read export").is_empty());
+        assert!(!destination.with_extension("csv.partial").exists());
+    }
+
     mod buffered_retention {
         use super::*;
 

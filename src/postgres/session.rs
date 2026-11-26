@@ -1604,8 +1604,22 @@ impl Session {
         &self,
         options: &crate::transfer::ExportOptions,
     ) -> Result<Vec<u8>, Diagnostic> {
-        use futures_util::StreamExt;
+        let mut buffer = Vec::new();
+        self.execute_export_to(options, |chunk| {
+            buffer.extend_from_slice(chunk);
+            Ok(())
+        })
+        .await?;
+        Ok(buffer)
+    }
 
+    /// Delivers COPY chunks to a sink and returns the byte count after PostgreSQL
+    /// confirms completion. The sink must defer publication until success.
+    pub(crate) async fn execute_export_to(
+        &self,
+        options: &crate::transfer::ExportOptions,
+        mut write: impl FnMut(&[u8]) -> Result<(), Diagnostic>,
+    ) -> Result<u64, Diagnostic> {
         let _guard = self.user_sql_gate.lock().await;
         let copy_sql = crate::transfer::build_copy_to_sql(options);
         let stream = self
@@ -1615,16 +1629,19 @@ impl Session {
             .map_err(|e| TransferOperation::Export.error(&e, "COPY export startup"))?;
 
         let mut stream = std::pin::pin!(stream.with_completion());
-        let mut buffer = Vec::new();
+        let mut bytes_written = 0;
 
         while let Some(chunk_res) = stream.next().await {
             let chunk = chunk_res.map_err(|e| {
                 TransferOperation::Export.error(&e, "COPY export data or completion")
             })?;
-            buffer.extend_from_slice(&chunk);
+            if !chunk.is_empty() {
+                write(&chunk)?;
+                bytes_written += chunk.len() as u64;
+            }
         }
 
-        Ok(buffer)
+        Ok(bytes_written)
     }
 
     /// Indexes on a relation.

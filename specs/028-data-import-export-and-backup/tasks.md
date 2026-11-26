@@ -17,6 +17,9 @@
   Prove suppressed output and byte-preserved files after a deferred server
   error. Exercise value-free SQLSTATE reporting, same-session recovery
   and ordinary successful CSV bytes.
+- [x] T007 Stream named bulk COPY exports to the owned partial. Verify
+  publication after completion, failure recovery, exact zero-byte output
+  and peak resident memory across different fixed-width result sizes.
 
 [Local evidence](../../docs/status.md#wave-92---keep-bulk-import-transactions-under-caller-control---26-november-2026)
 
@@ -25,3 +28,5 @@
 [Source read and COPY evidence](../../docs/status.md#wave-96---report-import-source-file-failures-before-copy---26-november-2026)
 
 [Bulk export completion evidence](../../docs/status.md#wave-113---confirm-bulk-copy-before-publishing-exports---26-november-2026)
+
+[Named bulk export evidence](../../docs/status.md#wave-114---stream-bulk-copy-exports-to-named-files---26-november-2026)

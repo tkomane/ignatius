@@ -4,12 +4,38 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 114 - Stream bulk COPY exports to named files - 26 November 2026
+
+- **W05 and W10 / 028 T007.** Named exports feed COPY chunks to the
+  existing private partial writer. PostgreSQL must confirm completion
+  before the final file is published. An early failure leaves both paths
+  free, a late server failure identifies the retained partial, and a
+  confirmed zero-byte result publishes an empty file. Stdout still
+  buffers through confirmation. [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
+- **Focused verification.** Two executable contracts passed on macOS
+  arm64 with live PostgreSQL 18.7. They covered a deferred server error,
+  SQLSTATE and path disclosure without payload text, a missing column
+  before any payload, and confirmed zero-byte replacement. A separate
+  verified TLS run preserved the existing file, left exact incomplete
+  bytes with Unix mode 0600, kept stdout empty after the error, and then
+  matched successful CSV on both routes.
+- **Progress and memory evidence.** With the old final present, an
+  advisory lock paused COPY after the first rows. The baseline had no
+  partial. The streaming binary wrote more than 4.6 MB before the server
+  completed. Releasing the lock published 4,920,005 bytes with the same
+  SHA-256 on both builds. Each of three alternating macOS arm64 debug
+  runs at 8.2 MB and 82 MB produced the expected count and digest for
+  41-byte CSV rows on plain PostgreSQL 18.7. The median peak resident
+  memory moved from 28.7 to 99.1 MiB on the baseline and stayed near
+  19.8 MiB with streaming. Median elapsed time for 82 MB was 2.13 seconds
+  on the baseline and 2.43 seconds with streaming.
+
 ## Wave 113 - Confirm bulk COPY before publishing exports - 26 November 2026
 
 - **W05 / 028 T006.** Bulk export waits for the COPY command tag and
   ReadyForQuery on its original request. Startup, payload and completion
   errors preserve SQLSTATE and omit server-controlled diagnostic text.
-  The current file and stdout routes still buffer the COPY payload.
+  At this wave both routes still buffered the COPY payload.
   [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
 - **Focused verification.** Five live cases passed, covering a private
   missing-column diagnostic, deferred rejection and same-session reuse,
