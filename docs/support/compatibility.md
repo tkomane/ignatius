@@ -607,11 +607,18 @@ progress. Best-effort buffered recovery is preserved. A partial file may contain
 an incomplete final row; inspect it before continuing. No database write outcome
 or automatic retry is inferred from a file failure.
 
-The bulk `ignatius export` command buffers its COPY payload until PostgreSQL
-confirms the same request's command completion and readiness. A server failure
-keeps stdout empty and preserves any existing destination. The diagnostic
-retains SQLSTATE when available and omits server-controlled text that could
-contain result values or query inputs.
+The bulk `ignatius export --output` command writes COPY chunks to the
+exclusively owned partial as they arrive. A zero-byte result reserves the
+file on confirmed success. The final name is published after PostgreSQL
+confirms the same request's command completion and readiness, and the
+file is flushed and synced. Individual COPY frames and buffers use memory.
+The stdout route buffers the payload until the same confirmation.
+
+A server failure keeps stdout empty and preserves any existing final
+file. After data has arrived, the named route retains the partial and
+reports its path for inspection. The diagnostic retains SQLSTATE when
+available and omits server-controlled text that could contain result
+values or query inputs.
 
 `Ctrl+K e` in the client writes **what is on screen** through a small
 save-as flow. A searchable format palette offers CSV, TSV, JSON, NDJSON and

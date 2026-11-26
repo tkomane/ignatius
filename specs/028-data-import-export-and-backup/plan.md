@@ -27,12 +27,24 @@ Use opt-in completion-aware iteration on the existing COPY response stream.
 After the end-of-data message, require its COPY command tag and ReadyForQuery.
 Keep the same connection under the session's SQL gate while processing
 those messages. Report the first server, connection or protocol failure and
-return data only after confirmation. Reuse value-free transfer diagnostics
-from startup through completion. Keep the existing buffering and publication
-boundary on both CLI routes.
+return buffered data only after confirmation. Reuse value-free transfer
+diagnostics from startup through completion.
 
 Use a deferred unique constraint in a disposable database to distinguish
 data arrival from confirmed completion. Compare exact stdout and file
 results and verify recovery on the same session. Exercise successful
-nonempty and header-only CSV. The bounded-memory export work remains open.
+nonempty and header-only CSV.
 [PostgreSQL protocol flow](https://www.postgresql.org/docs/18/protocol-flow.html#PROTOCOL-COPY)
+
+Feed data from the confirmed COPY stream into the existing file writer for
+named destinations. Reserve the partial on the first nonempty chunk and
+publish through the writer only after this request confirms completion.
+Reserve on completion when no bytes arrive. On server failure, preserve
+the typed diagnostic and refer to the partial if one was opened.
+
+Use an independently held advisory lock to observe partial-file data
+before completion. Verify the prior final bytes, then release the lock
+and verify the new file. Measure peak process RSS across repeated runs
+using fixed-width CSV at two sizes and compare output digests on matched
+builds. Exercise startup and deferred failures and zero-byte publication
+through the real CLI.

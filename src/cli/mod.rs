@@ -2595,6 +2595,8 @@ fn run_export(
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> Result<ExitCode, Diagnostic> {
+    use crate::query::export::{Export, PartialFlush};
+
     let loaded = config::load(paths)?;
     let (requested, conn_args) =
         resolve_target_and_profile(args.target.as_deref(), &args.connection, &loaded.config)?;
@@ -2607,7 +2609,7 @@ fn run_export(
     let target = authenticate_target(target, &loaded.config)?;
 
     if let Some(destination) = &args.output {
-        crate::query::export::Export::check_destination(destination, args.force)?;
+        Export::check_destination(destination, args.force)?;
     }
 
     let query_or_table = match args
@@ -2648,33 +2650,64 @@ fn run_export(
         escape: b'"',
     };
 
-    let bytes = runtime()?.block_on(async {
-        let session = crate::postgres::session::connect_reported(
-            &target,
-            std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
-        )
-        .await
-        .value?;
-        let res = session.execute_export(&options).await;
-        drop(session);
-        res
-    })?;
+    let connect = crate::postgres::session::connect_reported(
+        &target,
+        std::time::Duration::from_secs(loaded.config.connection.connect_timeout_seconds),
+    );
 
-    if let Some(ref destination) = args.output {
-        let mut export = crate::query::export::Export::create(destination, args.force)?;
-        export
-            .writer()
-            .write_all(&bytes)
-            .map_err(|err| export.write_failure(&err))?;
+    if let Some(destination) = &args.output {
+        let mut export = None;
+        let copied = runtime()?.block_on(async {
+            let session = connect.await.value?;
+            session
+                .execute_export_to(&options, |chunk| {
+                    let active = match &mut export {
+                        Some(active) => active,
+                        slot @ None => slot.insert(Export::create(destination, args.force)?),
+                    };
+                    active
+                        .writer()
+                        .write_all(chunk)
+                        .map_err(|error| active.write_failure(&error))
+                })
+                .await
+        });
+        let bytes = match copied {
+            Ok(bytes) => bytes,
+            Err(mut diagnostic) => {
+                // A local write failure already identifies the recovery file.
+                if diagnostic.kind != DiagnosticKind::ExportInterrupted
+                    && let Some(export) = export
+                {
+                    let abandoned = export.abandon();
+                    let mut action = format!(
+                        "inspect the partial file at {} before continuing",
+                        abandoned.partial.display()
+                    );
+                    if abandoned.flush == PartialFlush::Unconfirmed {
+                        action.push_str(". The partial file flush could not be confirmed");
+                    }
+                    if let Some(existing) = &diagnostic.next_action {
+                        action.push_str(". ");
+                        action.push_str(existing);
+                    }
+                    diagnostic = diagnostic.next_action(action);
+                }
+                return Err(diagnostic);
+            }
+        };
+        let export = match export {
+            Some(export) => export,
+            None => Export::create(destination, args.force)?,
+        };
         let _ = export.finish()?;
-        writeln!(
-            err,
-            "Exported {} bytes to {}",
-            bytes.len(),
-            destination.display()
-        )
-        .map_err(io_diagnostic)?;
+        writeln!(err, "Exported {bytes} bytes to {}", destination.display())
+            .map_err(io_diagnostic)?;
     } else {
+        let bytes = runtime()?.block_on(async {
+            let session = connect.await.value?;
+            session.execute_export(&options).await
+        })?;
         out.write_all(&bytes).map_err(io_diagnostic)?;
     }
 

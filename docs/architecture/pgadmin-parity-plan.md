@@ -116,10 +116,11 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 
 ### Feature 028: Data Import/Export Wizard and Backup/Restore (`028-data-import-export-and-backup`)
 
-**Status: CLI commands and the import wizard are integrated.** Bulk export
-buffers COPY data through PostgreSQL completion before emitting stdout or
-publishing a file. Constant-memory file exports and the remaining format
-requirements below are open.
+**Status: CLI commands and the import wizard are integrated.** Named bulk
+exports stream COPY data into an owned partial file, then publish after
+PostgreSQL confirms completion. Standard output still buffers the COPY
+payload through confirmation. The remaining transfer targets and formats
+listed below are open.
 
 - **Objective:** Bring enterprise-grade bulk data movement and database backup/restore into the terminal with streaming memory safety and strict write guards.
 - **Streaming COPY workflow targets:**
