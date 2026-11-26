@@ -15,7 +15,8 @@ use crate::app::grid::GridCommand;
 use crate::app::message::{Action, Direction, Effect, Message};
 use crate::app::model::{
     ConnectingStep, ConnectionState, ExportFormat, Focus, LayoutNotice, Model, ParameterPrompt,
-    PasteNotice, PendingUpdate, QueryPhase, UpdateCandidate, UpdateLookup, UpdatePrompt,
+    PasteNotice, PendingUpdate, QueryPhase, SubmissionSource, UpdateCandidate, UpdateLookup,
+    UpdatePrompt,
 };
 use crate::query::error_location::{self, StatementSource};
 use crate::query::result::ExecutionStatus;
@@ -224,7 +225,6 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.running_sql = None;
             model.running_parameterized = false;
             model.running_cell_update = false;
-            model.running_editor_revision = None;
             model.running_source = None;
             model.update_lookup = None;
             model.update_prompt = None;
@@ -247,8 +247,6 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             if model.phase.job() != Some(execution.job) {
                 return Vec::new();
             }
-            let current_revision = model.editor.revision();
-            let running_revision = model.running_editor_revision.take();
             let running_source = model.running_source.take();
             let running_parameterized = model.running_parameterized;
             let running_cell_update = model.running_cell_update;
@@ -265,10 +263,8 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             let (location, location_note) = map_error_location(
                 model,
                 execution.error.as_ref(),
-                running_revision,
                 running_source,
                 running_parameterized,
-                running_refresh,
             );
             model.phase = QueryPhase::Idle;
             model.running_for = None;
@@ -278,9 +274,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.error_expanded = false;
             model.error_location = location;
             model.error_location_note = location_note;
-            if let Some(location) = model.error_location.as_ref()
-                && running_revision == Some(current_revision)
-            {
+            if let Some(location) = model.error_location.as_ref() {
                 model.editor.set_cursor(location.cursor);
                 model.focus = Focus::Editor;
             }
@@ -1472,10 +1466,8 @@ fn needs_safety_details(model: &Model) -> bool {
 fn map_error_location(
     model: &Model,
     error: Option<&crate::diagnostics::Diagnostic>,
-    running_revision: Option<u64>,
-    running_source: Option<StatementSource>,
+    source: Option<SubmissionSource>,
     running_parameterized: bool,
-    running_refresh: bool,
 ) -> (
     Option<crate::query::error_location::ErrorLocation>,
     Option<String>,
@@ -1486,39 +1478,60 @@ fn map_error_location(
     if error.kind != crate::diagnostics::DiagnosticKind::Query {
         return (None, None);
     }
-    if running_refresh && error.position.is_some() {
-        return (
-            None,
-            Some("The reported position belongs to the retained query.".to_owned()),
-        );
-    }
-    if running_revision != Some(model.editor.revision()) {
-        return (
-            None,
-            Some(
-                "The buffer changed while this statement was running; the reported position \
-                 belongs to the previous submission."
-                    .to_owned(),
-            ),
-        );
-    }
-    if running_parameterized && error.position.is_some() {
-        return (
-            None,
-            Some(
-                "This statement used prompted parameters; the server position belongs to the \
-                 expanded request, so no editor location was guessed."
-                    .to_owned(),
-            ),
-        );
-    }
     let Some(position) = error.position else {
         return (
             None,
             Some("PostgreSQL did not report an editor position for this error.".to_owned()),
         );
     };
-    let Some(statement_number) = running_source
+    let statement = match source {
+        Some(SubmissionSource::WatchedQuery) => {
+            return (
+                None,
+                Some("The reported position belongs to the watched query.".to_owned()),
+            );
+        }
+        Some(SubmissionSource::RetainedResult) => {
+            return (
+                None,
+                Some("The reported position belongs to the retained query.".to_owned()),
+            );
+        }
+        Some(SubmissionSource::Editor {
+            buffer_id,
+            revision,
+            ..
+        }) if buffer_id != model.buffers.active_buffer().id
+            || revision != model.editor.revision() =>
+        {
+            return (
+                None,
+                Some(
+                    "The buffer changed while this statement was running; the reported position \
+                     belongs to the previous submission."
+                        .to_owned(),
+                ),
+            );
+        }
+        _ if running_parameterized => {
+            return (
+                None,
+                Some(
+                    "This statement used prompted parameters; the server position belongs to the \
+                     expanded request, so no editor location was guessed."
+                        .to_owned(),
+                ),
+            );
+        }
+        Some(SubmissionSource::Editor { statement, .. }) => statement,
+        None => {
+            return (
+                None,
+                Some("There is no editor source for the reported position.".to_owned()),
+            );
+        }
+    };
+    let Some(statement_number) = statement
         .map(|source| source.number)
         .or(error.statement_number)
         .filter(|number| *number > 0)
@@ -1531,12 +1544,7 @@ fn map_error_location(
             ),
         );
     };
-    match error_location::locate(
-        model.editor.text(),
-        running_source,
-        statement_number,
-        position,
-    ) {
+    match error_location::locate(model.editor.text(), statement, statement_number, position) {
         Some(location) => (Some(location), None),
         None => (
             None,
@@ -1555,6 +1563,23 @@ fn clear_error_location(model: &mut Model) {
     model.error_location_note = None;
 }
 
+/// Retires a mapped location while keeping its server diagnostic visible.
+fn retire_error_location(model: &mut Model, note: &str) {
+    if model.error_location.take().is_some() {
+        model.error_location_note = Some(note.to_owned());
+    }
+}
+
+fn sync_editor_after_buffer_change(model: &mut Model, previous_buffer_id: u64) {
+    model.sync_editor_from_active_buffer();
+    if model.buffers.active_buffer().id != previous_buffer_id {
+        retire_error_location(
+            model,
+            "The editor tab changed. This error location belongs to the previous submission.",
+        );
+    }
+}
+
 /// Applies an editor text mutation and invalidates an old server marker if it
 /// actually changed the buffer.
 fn edit_editor<F>(model: &mut Model, edit: F)
@@ -1564,12 +1589,10 @@ where
     let before = model.editor.revision();
     edit(&mut model.editor);
     if model.editor.revision() != before {
-        if model.error_location.take().is_some() {
-            model.error_location_note = Some(
-                "The buffer changed; this error location belongs to the previous submission."
-                    .to_owned(),
-            );
-        }
+        retire_error_location(
+            model,
+            "The buffer changed. This error location belongs to the previous submission.",
+        );
         model.format_notice = None;
         model.paste_notice = None;
     }
@@ -2091,9 +2114,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::NewEditorBuffer => {
             let previous_count = model.buffers.count();
             let previous_focus = model.focus;
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
             model.buffers.new_buffer(None, None);
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             model.focus = Focus::Editor;
             if model.allows_motion() {
                 if model.buffers.count() > previous_count {
@@ -2107,8 +2131,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::CloseEditorBuffer => {
             let previous_count = model.buffers.count();
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.buffers.close_active();
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             if previous_count > 1 && model.allows_motion() {
                 model.motion.begin_tab_glide();
             }
@@ -2116,9 +2141,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::NextEditorBuffer => {
             let previous_idx = model.buffers.active_idx;
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
             model.buffers.next_buffer();
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             if model.buffers.active_idx != previous_idx && model.allows_motion() {
                 model.motion.begin_tab_glide();
             }
@@ -2126,9 +2152,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::PrevEditorBuffer => {
             let previous_idx = model.buffers.active_idx;
+            let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
             model.buffers.prev_buffer();
-            model.sync_editor_from_active_buffer();
+            sync_editor_after_buffer_change(model, previous_buffer_id);
             if model.buffers.active_idx != previous_idx && model.allows_motion() {
                 model.motion.begin_tab_glide();
             }
@@ -4090,7 +4117,7 @@ fn watch_tick(model: &mut Model) -> Vec<Effect> {
         model.watch = None;
         return Vec::new();
     }
-    if model.phase.is_busy() {
+    if model.phase.is_busy() || model.parameter_prompt.is_some() || model.pending_run.is_some() {
         return Vec::new();
     }
     let Some(mut watch) = model.watch.take() else {
@@ -4102,7 +4129,7 @@ fn watch_tick(model: &mut Model) -> Vec<Effect> {
     watch.iteration += 1;
     let sql = watch.sql.clone();
     model.watch = Some(watch);
-    start(model, sql, None)
+    start(model, sql, Some(SubmissionSource::WatchedQuery))
 }
 
 /// Opens the keyset-paginated data browser and batch CRUD overlay (`053`).
@@ -5320,6 +5347,14 @@ fn restore_session_action(model: &mut Model) -> Vec<Effect> {
     if restorable > 0 {
         let preserved_in_flight: Vec<_> = in_flight.cloned().collect();
         banner.journal.restore_into(&mut model.buffers);
+        retire_error_location(
+            model,
+            "The editor tabs were restored. This error location belongs to the previous submission.",
+        );
+        // Restored tabs can reuse an ID from the workspace they replace.
+        if matches!(model.running_source, Some(SubmissionSource::Editor { .. })) {
+            model.running_source = None;
+        }
         for mut buffer in preserved_in_flight {
             buffer.id = model.buffers.next_id;
             model.buffers.next_id = model.buffers.next_id.wrapping_add(1);
@@ -5456,9 +5491,10 @@ fn snippet_library_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 let title = format!("{}.sql", snippet.name);
                 let previous_count = model.buffers.count();
                 let previous_focus = model.focus;
+                let previous_buffer_id = model.buffers.active_buffer().id;
                 model.sync_active_buffer_from_editor();
                 model.buffers.new_buffer(Some(title), Some(sql));
-                model.sync_editor_from_active_buffer();
+                sync_editor_after_buffer_change(model, previous_buffer_id);
                 model.snippet_library = None;
                 model.focus = Focus::Editor;
                 if model.allows_motion() {
@@ -6859,7 +6895,7 @@ fn begin_refresh_result(model: &mut Model) -> Vec<Effect> {
         "Refreshing the retained result; the editor is unchanged and nothing is sent until any parameters are entered."
             .to_owned(),
     );
-    let effects = start(model, source, None);
+    let effects = start(model, source, Some(SubmissionSource::RetainedResult));
     if model.parameter_prompt.is_none() && effects.is_empty() {
         model.refresh_pending = false;
         model.refresh_notice =
@@ -7140,7 +7176,6 @@ fn start_plan(
     model.running_cell_update = false;
     model.running_refresh = false;
     model.refresh_pending = false;
-    model.running_editor_revision = None;
     model.running_source = None;
     let previous_focus = model.focus;
     model.focus = Focus::Results;
@@ -7213,10 +7248,11 @@ fn is_explain_statement(sql: &str) -> bool {
 /// Starts an execution, interpreting `psql`-style meta-commands first, refusing when
 /// there is nothing to run or nowhere to run it, and holding it back when the target is
 /// production and it is not a read.
-fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
+fn run(model: &mut Model, sql: String, statement: Option<StatementSource>) -> Vec<Effect> {
     if model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
     }
+    let source = Some(model.editor_submission(statement));
     if crate::metacommand::contains_metacommand(&sql) {
         match crate::metacommand::parse_input(&sql) {
             Some(Ok(cmd)) => return run_metacommand(model, cmd, source),
@@ -7235,7 +7271,7 @@ fn run(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<E
 fn run_metacommand(
     model: &mut Model,
     command: crate::metacommand::MetaCommand,
-    source: Option<StatementSource>,
+    source: Option<SubmissionSource>,
 ) -> Vec<Effect> {
     match command {
         crate::metacommand::MetaCommand::ToggleExpanded(explicit) => {
@@ -7303,7 +7339,11 @@ fn run_metacommand(
             if !model.connection.is_usable() {
                 return Vec::new();
             }
-            let Some(mut target_sql) = companion_sql.or_else(|| model.last_sql.clone()) else {
+            let (target_sql, mut source) = match companion_sql {
+                Some(sql) => (Some(sql), source),
+                None => (model.last_sql.clone(), Some(SubmissionSource::WatchedQuery)),
+            };
+            let Some(mut target_sql) = target_sql else {
                 model.error = Some(
                     crate::diagnostics::Diagnostic::new(
                         crate::diagnostics::DiagnosticKind::Usage,
@@ -7319,6 +7359,7 @@ fn run_metacommand(
                 match crate::metacommand::parse_input(&target_sql) {
                     Some(Ok(crate::metacommand::MetaCommand::CatalogQuery { sql, .. })) => {
                         target_sql = sql;
+                        source = Some(SubmissionSource::WatchedQuery);
                     }
                     Some(Ok(_)) => {
                         model.error = Some(
@@ -7362,7 +7403,7 @@ fn run_metacommand(
 fn run_sql_statement(
     model: &mut Model,
     sql: String,
-    source: Option<StatementSource>,
+    source: Option<SubmissionSource>,
 ) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
@@ -7395,7 +7436,7 @@ fn run_sql_statement(
 }
 
 /// Begins an execution that has already been allowed.
-fn start(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec<Effect> {
+fn start(model: &mut Model, sql: String, source: Option<SubmissionSource>) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
         return Vec::new();
     }
@@ -7428,7 +7469,7 @@ fn start(model: &mut Model, sql: String, source: Option<StatementSource>) -> Vec
 fn start_parameterized(
     model: &mut Model,
     sql: String,
-    source: Option<StatementSource>,
+    source: Option<SubmissionSource>,
     parameters: crate::query::ParameterBindings,
 ) -> Vec<Effect> {
     start_with_parameters(model, sql, source, Some(parameters))
@@ -7438,7 +7479,7 @@ fn start_parameterized(
 fn start_with_parameters(
     model: &mut Model,
     sql: String,
-    source: Option<StatementSource>,
+    source: Option<SubmissionSource>,
     parameters: Option<crate::query::ParameterBindings>,
 ) -> Vec<Effect> {
     if !model.connection.is_usable() || model.phase.is_busy() || sql.trim().is_empty() {
@@ -7468,7 +7509,6 @@ fn start_with_parameters(
     model.running_parameterized = parameters.is_some();
     model.running_cell_update = false;
     model.running_refresh = refreshing;
-    model.running_editor_revision = Some(model.editor.revision());
     model.running_source = source;
     model.phase = QueryPhase::Running {
         job,
@@ -8319,7 +8359,6 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.running_cell_update = false;
     model.running_refresh = false;
     model.refresh_pending = false;
-    model.running_editor_revision = None;
     model.running_source = None;
     model.notices.clear();
     model.transaction = crate::query::result::TransactionState::Unknown;

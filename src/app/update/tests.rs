@@ -2747,7 +2747,7 @@ fn connection_loss_clears_running_identity_before_the_late_execution_result() {
     assert!(model.running_sql.is_none());
     assert!(!model.running_parameterized);
     assert!(!model.running_cell_update);
-    assert!(model.running_editor_revision.is_none());
+    assert!(model.running_source.is_none());
     assert_eq!(model.last_execution, retained);
 
     update(
@@ -6320,6 +6320,214 @@ fn an_error_from_a_changed_buffer_is_not_applied_to_the_new_text() {
             .is_some_and(|note| note.contains("previous submission"))
     );
     assert_eq!(model.editor.cursor(), before + 1);
+}
+
+fn complete_mapped_editor_error(model: &mut Model) -> Diagnostic {
+    let source = "SELECT bad FROM table_name;";
+    model.editor.set_text(source);
+    model.sync_active_buffer_from_editor();
+    let effects = update(model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected one editor execution");
+    };
+    let diagnostic = Diagnostic::new(
+        DiagnosticKind::Query,
+        "syntax error near table_name",
+        "running statement 1",
+    )
+    .in_statement(1)
+    .at_position(8);
+    update(
+        model,
+        Message::ExecutionFinished(failed_execution(*job, diagnostic.clone())),
+    );
+    assert!(
+        model.error_location.is_some(),
+        "the source marker is mapped"
+    );
+    diagnostic
+}
+
+#[test]
+fn switching_to_a_same_revision_tab_retires_only_the_mapped_marker() {
+    let mut model = connected();
+    model.editor.set_text("SELECT bad FROM table_name;");
+    model.sync_active_buffer_from_editor();
+    model.buffers.new_buffer(Some("draft.sql".into()), None);
+    model
+        .buffers
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT unrelated_draft;");
+    model.buffers.active_buffer_mut().editor.set_cursor(4);
+    model.buffers.switch_to(0);
+    model.sync_editor_from_active_buffer();
+    let source_revision = model.editor.revision();
+    let draft_text = model.buffers.buffers[1].editor.text().to_owned();
+    let draft_cursor = model.buffers.buffers[1].editor.cursor();
+    assert_eq!(model.buffers.buffers[1].editor.revision(), source_revision);
+
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    assert_eq!(model.editor.revision(), source_revision);
+    let effects = update(&mut model, Message::Action(Action::NextEditorBuffer));
+
+    assert!(effects.is_empty());
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+    assert_eq!(model.editor.text(), draft_text);
+    assert_eq!(model.editor.cursor(), draft_cursor);
+    assert_eq!(model.editor.revision(), source_revision);
+
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected a fresh editor submission");
+    };
+    update(
+        &mut model,
+        Message::ExecutionFinished(failed_execution(
+            *job,
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "new draft error",
+                "running statement 1",
+            )
+            .in_statement(1)
+            .at_position(8),
+        )),
+    );
+    assert!(
+        model.error_location.is_some(),
+        "only a new mapped submission restores the marker"
+    );
+    assert!(model.error_location_note.is_none());
+}
+
+#[test]
+fn no_op_tab_motion_keeps_the_marker_and_existing_note_without_one() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    let location = model.error_location.clone();
+    let editor = model.editor.clone();
+
+    for action in [Action::NextEditorBuffer, Action::PrevEditorBuffer] {
+        assert!(update(&mut model, Message::Action(action)).is_empty());
+        assert_eq!(model.error_location, location);
+        assert_eq!(model.error_location_note, None);
+        assert_eq!(model.error, Some(diagnostic.clone()));
+        assert_eq!(model.editor, editor);
+    }
+
+    model.error_location = None;
+    model.error_location_note = Some("existing location note".to_owned());
+    assert!(update(&mut model, Message::Action(Action::NewEditorBuffer)).is_empty());
+    assert_eq!(
+        model.error_location_note.as_deref(),
+        Some("existing location note")
+    );
+}
+
+#[test]
+fn creating_a_new_tab_retires_a_mapped_marker_without_clearing_the_error() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+
+    assert!(update(&mut model, Message::Action(Action::NewEditorBuffer)).is_empty());
+
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+    assert_eq!(model.editor.text(), "");
+    assert_eq!(model.editor.cursor(), 0);
+}
+
+#[test]
+fn creating_a_snippet_tab_retires_a_mapped_marker() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    model.snippet_library = Some(crate::app::model::SnippetLibraryState::new());
+
+    assert!(update(&mut model, Message::Action(Action::Insert('n'))).is_empty());
+
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+    assert_eq!(model.buffers.active_buffer().title, "cache-hit-ratio.sql");
+    assert!(model.editor.text().contains("pg_statio_user_indexes"));
+}
+
+#[test]
+fn closing_the_only_tab_retires_a_marker_even_when_the_index_stays_zero() {
+    let mut model = connected();
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    let old_id = model.buffers.active_buffer().id;
+    assert_eq!(model.buffers.active_idx, 0);
+
+    assert!(update(&mut model, Message::Action(Action::CloseEditorBuffer)).is_empty());
+
+    assert_eq!(model.buffers.active_idx, 0);
+    assert_ne!(model.buffers.active_buffer().id, old_id);
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
+}
+
+#[test]
+fn restoring_a_nonempty_tab_with_a_reused_id_retires_the_mapped_marker() {
+    let mut model = connected();
+    let source = "SELECT bad FROM table_name;";
+    model.buffers.active_buffer_mut().editor.set_text(source);
+    model.sync_editor_from_active_buffer();
+    let old_id = model.buffers.active_buffer().id;
+    let diagnostic = complete_mapped_editor_error(&mut model);
+    assert!(model.error_location.is_some());
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let mut recovered = crate::buffer::BufferManager::new();
+    recovered
+        .active_buffer_mut()
+        .editor
+        .set_text("SELECT restored_draft;");
+    recovered.active_buffer_mut().editor.set_cursor(6);
+    let journal =
+        crate::recovery::RecoveryJournal::from_buffers(&recovered, "marker-source-recovery", false);
+    journal.save_to_disk(&recovery_dir).expect("seed journal");
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    assert!(update(&mut model, Message::Action(Action::RestoreSession)).is_empty());
+
+    assert_eq!(model.buffers.active_buffer().id, old_id);
+    assert_eq!(model.editor.text(), "SELECT restored_draft;");
+    assert_eq!(model.editor.cursor(), 6);
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.error, Some(diagnostic));
 }
 
 #[test]
@@ -11670,6 +11878,242 @@ fn w02_watch_profile_switch_rejection_keeps_the_current_timer() {
     );
     let effects = update(&mut model, Message::WatchTick);
     assert!(matches!(effects.as_slice(), [Effect::Execute { sql, .. }] if sql == "SELECT 1;"));
+}
+
+fn watch_position_error(statement: usize) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        "column sample_value does not exist",
+        "running watched statement",
+    )
+    .in_statement(statement)
+    .at_position(8)
+}
+
+fn assert_stored_watch_failure(model: &mut Model, effects: &[Effect]) {
+    let source = "SELECT sample_value;";
+    let [Effect::Execute { job, sql }] = effects else {
+        panic!("expected one watch execution");
+    };
+    assert_eq!(sql, source);
+    model.editor.set_cursor(2);
+    model.focus = Focus::Results;
+    let editor = model.editor.clone();
+    let diagnostic = watch_position_error(1);
+    let effects = update(
+        model,
+        Message::ExecutionFinished(failed_execution(*job, diagnostic.clone())),
+    );
+    assert!(
+        matches!(effects.as_slice(), [Effect::RecordHistory { sql, outcome: crate::history::Outcome::Failed, .. }] if sql == source)
+    );
+    assert_eq!(model.error.as_ref(), Some(&diagnostic));
+    assert!(model.error_location.is_none(), "{:?}", model.error_location);
+    assert_eq!(model.editor, editor);
+    assert_eq!(model.focus, Focus::Results);
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("watched query"))
+    );
+    assert!(model.watch.is_none());
+    assert!(update(model, Message::WatchTick).is_empty());
+}
+
+#[test]
+fn a_bare_watch_position_preserves_the_editor_and_focus() {
+    let mut model = connected();
+    complete_watch_test_query(&mut model, "SELECT sample_value;");
+    model.editor.set_text(r"\watch 60");
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    assert_stored_watch_failure(&mut model, &effects);
+}
+
+#[test]
+fn a_periodic_watch_position_preserves_the_editor_and_focus() {
+    let mut model = connected();
+    complete_watch_test_query(&mut model, r"SELECT sample_value; \watch 60");
+    model.editor.set_text("SELECT unrelated_draft;");
+    let effects = update(&mut model, Message::WatchTick);
+    assert_stored_watch_failure(&mut model, &effects);
+}
+
+#[test]
+fn editor_positions_work_for_companion_sql_and_a_manual_query_during_watch() {
+    for companion in [false, true] {
+        let mut model = connected();
+        let source = "SELECT 1;\nSELECT sample_value;";
+        let input = if companion {
+            format!("{source}\n\\watch 60")
+        } else {
+            complete_watch_test_query(&mut model, r"SELECT 1; \watch 60");
+            source.to_owned()
+        };
+        model.editor.set_text(input);
+        let effects = update(&mut model, Message::Action(Action::RunBuffer));
+        let [Effect::Execute { job, sql }] = effects.as_slice() else {
+            panic!("expected one editor execution");
+        };
+        assert_eq!(sql, source);
+        assert!(model.watch.is_some());
+        model.focus = Focus::Results;
+        update(
+            &mut model,
+            Message::ExecutionFinished(failed_execution(*job, watch_position_error(2))),
+        );
+        let location = model
+            .error_location
+            .as_ref()
+            .expect("editor submission is mappable");
+        assert_eq!(
+            (location.statement_number, location.line, location.column),
+            (2, 2, 8)
+        );
+        assert_eq!(model.editor.cursor(), location.cursor);
+        assert_eq!(model.focus, Focus::Editor);
+    }
+}
+
+#[test]
+fn a_watch_tick_waits_for_parameterized_result_refresh() {
+    let mut model = connected();
+    complete_watch_test_query(&mut model, r"SELECT 1; \watch 60");
+    let source = "SELECT :value AS sample;";
+    model.editor.set_text(source);
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    let first = update(&mut model, Message::Action(Action::Activate));
+    let [Effect::ExecuteParameterized { job, sql, .. }] = first.as_slice() else {
+        panic!("expected the initial parameterized query");
+    };
+    assert_eq!(sql, source);
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(*job, ExecutionStatus::Succeeded, &[""])),
+    );
+
+    model.focus = Focus::Results;
+    assert!(update(&mut model, Message::Action(Action::RefreshResult)).is_empty());
+    update(&mut model, Message::Action(Action::Insert('x')));
+    let watch = model.watch.clone().expect("earlier watch is armed");
+    assert!(update(&mut model, Message::WatchTick).is_empty());
+    assert_eq!(model.watch.as_ref(), Some(&watch));
+    assert!(model.refresh_pending);
+    let prompt = model
+        .parameter_prompt
+        .as_ref()
+        .expect("refresh still owns the prompt");
+    assert_eq!(prompt.sql, source);
+    assert_eq!(prompt.typed_length(), 1);
+
+    let refresh = update(&mut model, Message::Action(Action::Activate));
+    let [Effect::ExecuteParameterized { job, sql, .. }] = refresh.as_slice() else {
+        panic!("refresh must emit one parameterized effect");
+    };
+    assert_eq!(sql, source);
+    assert!(model.running_refresh);
+    assert!(!model.refresh_pending);
+    update(
+        &mut model,
+        Message::ExecutionFinished(execution(*job, ExecutionStatus::Succeeded, &["x"])),
+    );
+    assert!(
+        matches!(update(&mut model, Message::WatchTick).as_slice(), [Effect::Execute { sql, .. }] if sql == "SELECT 1;")
+    );
+    assert_eq!(model.watch.as_ref().unwrap().iteration, watch.iteration + 1);
+    assert!(!model.running_refresh);
+}
+
+#[test]
+fn a_watch_tick_waits_for_an_open_run_confirmation() {
+    let mut model = connected();
+    let mut info = session();
+    info.environment = Environment::Production;
+    update(&mut model, Message::Connected(info));
+    complete_watch_test_query(&mut model, r"SELECT 1; \watch 60");
+    model
+        .editor
+        .set_text("UPDATE sample_rows SET value = value WHERE false;");
+    assert!(update(&mut model, Message::Action(Action::RunBuffer)).is_empty());
+    let pending = model.pending_run.clone().expect("run confirmation is open");
+    let watch = model.watch.clone().expect("earlier watch is armed");
+    assert!(update(&mut model, Message::WatchTick).is_empty());
+    assert_eq!(model.pending_run.as_ref(), Some(&pending));
+    assert_eq!(model.watch.as_ref(), Some(&watch));
+    assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+    assert!(
+        matches!(update(&mut model, Message::WatchTick).as_slice(), [Effect::Execute { sql, .. }] if sql == "SELECT 1;")
+    );
+    assert_eq!(model.watch.as_ref().unwrap().iteration, watch.iteration + 1);
+}
+
+#[test]
+fn a_companion_watch_position_cannot_move_a_different_tab_at_the_same_revision() {
+    let mut model = connected();
+    model.editor.set_text(r"SELECT sample_value; \watch 60");
+    let revision = model.editor.revision();
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected one editor execution");
+    };
+    update(&mut model, Message::Action(Action::NewEditorBuffer));
+    model.editor.set_text("SELECT unrelated_draft;");
+    assert_eq!(model.editor.revision(), revision);
+    model.editor.set_cursor(2);
+    model.focus = Focus::Results;
+    let editor = model.editor.clone();
+    update(
+        &mut model,
+        Message::ExecutionFinished(failed_execution(*job, watch_position_error(1))),
+    );
+    assert!(model.error_location.is_none());
+    assert!(
+        model
+            .error_location_note
+            .as_deref()
+            .is_some_and(|note| note.contains("previous submission"))
+    );
+    assert_eq!(model.editor, editor);
+    assert_eq!(model.focus, Focus::Results);
+}
+
+#[test]
+fn a_companion_watch_position_cannot_attach_to_a_restored_tab_with_reused_identity() {
+    let mut model = connected();
+    model.buffers.active_buffer_mut().editor =
+        crate::app::editor::Editor::with_text(r"SELECT sample_value; \watch 60");
+    model.sync_editor_from_active_buffer();
+    let buffer_id = model.buffers.active_buffer().id;
+    let revision = model.editor.revision();
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let recovery_dir = temp_dir.path().join("recovery");
+    let mut recovered = crate::buffer::BufferManager::new();
+    recovered.active_buffer_mut().editor =
+        crate::app::editor::Editor::with_text("SELECT 'earlier recovery';");
+    let journal =
+        crate::recovery::RecoveryJournal::from_buffers(&recovered, "watch-recovery", false);
+    journal.save_to_disk(&recovery_dir).expect("seed journal");
+    install_recovery_banner(&mut model, &recovery_dir, journal);
+
+    let effects = update(&mut model, Message::Action(Action::RunBuffer));
+    let [Effect::Execute { job, .. }] = effects.as_slice() else {
+        panic!("expected the literal companion to run");
+    };
+    update(&mut model, Message::Action(Action::RestoreSession));
+    assert_eq!(model.editor.text(), "SELECT 'earlier recovery';");
+    assert_eq!(model.buffers.active_buffer().id, buffer_id);
+    assert_eq!(model.editor.revision(), revision);
+    model.focus = Focus::Results;
+    let editor = model.editor.clone();
+
+    update(
+        &mut model,
+        Message::ExecutionFinished(failed_execution(*job, watch_position_error(1))),
+    );
+    assert!(model.error_location.is_none());
+    assert_eq!(model.editor, editor);
+    assert_eq!(model.focus, Focus::Results);
 }
 
 #[test]

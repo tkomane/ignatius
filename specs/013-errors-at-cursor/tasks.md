@@ -118,6 +118,11 @@ never execute or rewrite SQL because a location exists.
 - [x] T025 [P] Add the Feature 013 Unreleased entry describing cursor targeting, constraint context, stale-buffer truthfulness, and plain-mode parity in `CHANGELOG.md`.
 - [x] T026 Run `cargo fmt --all -- --check`, focused tests, `git diff --check`, and inspect all changed paths for secret or SQL logging regressions.
 - [x] T027 Run `cargo --locked xtask verify` with disposable PostgreSQL where available, then record focused, full, live, skipped, and unverified evidence in `docs/status.md`.
+- [x] T028 Retire a completed editor error marker when its source tab is
+  left, closed or replaced. Preserve the server diagnostic and current
+  caret. Verify actual and no-op tab actions plus restored replacement.
+
+[macOS PTY and focused evidence](../../docs/status.md#wave-90---clear-completed-error-markers-on-tab-changes---26-november-2026)
 
 ## Dependencies and Execution Order
 

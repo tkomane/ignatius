@@ -4,6 +4,47 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 90 - Clear completed error markers on tab changes - 26 November 2026
+
+- **W02 / 013 T028.** An actual editor tab change or restored workspace
+  clears a mapped error marker and excerpt. The server diagnostic remains
+  visible with a source note. A no-op tab action preserves the existing
+  marker, and a fresh query can map a new location.
+  [Feature 013 tasks](../specs/013-errors-at-cursor/tasks.md)
+- **Focused verification.** Five regression cases failed on the baseline.
+  The corrected build passed 16 marker checks and seven position-mapper
+  checks. The cases include equal-revision tabs, new and closed tabs,
+  snippet tabs, recovery identity reuse and no-op controls.
+- **Owned macOS arm64 PTYs with PostgreSQL 18.7.** A real server failure
+  first pointed to statement 2, line 2, column 8 in the original draft.
+  The baseline showed that marker and excerpt on the unrelated next tab.
+  The corrected workbench kept the original server diagnostic and the
+  second tab's caret at column 3, cleared the stale marker and excerpt,
+  and recorded one failed history entry for the submitted SQL. Both
+  files retained their bytes and both workbench processes exited zero.
+
+## Wave 89 - Keep watch positions with the watched query - 26 November 2026
+
+- **W02 / 050 T010.** Bare watch and periodic runs keep a server position
+  with their watched SQL. The first literal companion query still maps into
+  its original editor buffer, including the server statement ordinal.
+  The editor identity covers the buffer ID and revision. Crash recovery
+  retires a prior editor source, and scheduled runs wait through a
+  parameter prompt or run confirmation.
+  [Feature 050 tasks](../specs/050-psql-metacommands-and-watch-mode/tasks.md)
+- **Focused verification.** Six regressions failed on the baseline. The
+  corrected build passed 16 watch checks, seven error-location checks
+  and 17 refresh checks, plus workspace lint across all features and
+  targets. The checks include failed history, stopped watch, prompt
+  ownership and tabs at equal revisions.
+- **Owned macOS arm64 PTY with PostgreSQL 18.7.** A 12-second watch first
+  read a synthetic row. Renaming its source column caused the next tick
+  to report a real PostgreSQL position. The baseline moved the unrelated
+  draft's caret from column 3 to column 8 and focused the editor. The
+  corrected build showed the watched-query note, kept the caret at
+  column 3 and kept focus out of the editor. The watch stopped and both
+  PTYs exited zero. The unrelated draft bytes stayed intact.
+
 ## Wave 88 - Bound cloud provider output capture - 26 November 2026
 
 - **W10 / 011 T006.** Direct and Windows Azure CLI MSI launches share 1 MiB

@@ -16,6 +16,10 @@ source can generate user-facing notes.
   `pg_temp`-qualified temporary tables.
 - Fixed: A profile switch stops the previous connection's `\watch` loop.
   Bare `\watch` uses SQL from the current connection.
+- Fixed: Watch errors keep positions with the watched query. Scheduled runs
+  wait for an open parameter prompt or run confirmation to close.
+- Fixed: Changing editor tabs clears the previous tab's error marker and
+  source excerpt while keeping the server diagnostic visible.
 - Fixed: Crash recovery retains a file-backed draft after its text was
   cleared, including its path and modified marker. Accepting a pending
   crash journal also preserves file-backed drafts cleared after startup.

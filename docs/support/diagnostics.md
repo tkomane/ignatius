@@ -115,6 +115,9 @@ The headline is the server's own message. `While` is what the client was doing.
 is the mapped editor coordinate when the submitted statement and buffer still
 match. The source excerpt is sanitized and line-oriented; a missing, internal,
 rewritten, or stale position is reported as unavailable rather than estimated.
+Changing editor tabs, closing the source tab or restoring the workspace
+clears the old marker and excerpt. The diagnostic stays visible with an
+explanation. A fresh submission can map a new editor location.
 `Likely cause` appears only when the SQLSTATE is one where a plain-language cause
 can be stated honestly; it is omitted rather than guessed. `--verbose`, or Ctrl+D
 in the client, expands SQLSTATE, severity, detail, hint, schema, table, column,
