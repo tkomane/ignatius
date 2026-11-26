@@ -5176,3 +5176,123 @@ fn structured_result_observed_under_lossy_output_stays_inspect_only() {
     let fresh = stage_structured_edit(&fx, source, 1, 2, "4.25");
     assert_eq!(run_structured_edit(&fx, &fresh), 1);
 }
+
+// === M20: target_session_attrs ===
+
+#[test]
+fn target_session_attrs_allows_matching_primary_read_write_and_any_on_live_server() {
+    use ignatius::connection::TargetSessionAttrs;
+
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    for (attrs_str, expected) in [
+        ("any", TargetSessionAttrs::Any),
+        ("read-write", TargetSessionAttrs::ReadWrite),
+        ("primary", TargetSessionAttrs::Primary),
+    ] {
+        let target = resolve(
+            Some(&uri),
+            &ConnectionArgs {
+                target_session_attrs: Some(expected),
+                ..ConnectionArgs::default()
+            },
+            &EnvSnapshot::from_process(),
+            &config.connection,
+        )
+        .expect("target resolves");
+        assert_eq!(target.target_session_attrs, expected);
+
+        let opened = runtime
+            .block_on(session::connect(&target, Duration::ZERO))
+            .unwrap_or_else(|err| panic!("expected {attrs_str} to connect: {err:?}"));
+        assert!(!opened.info().read_only);
+    }
+}
+
+#[test]
+fn target_session_attrs_refuses_read_only_and_standby_on_writable_primary() {
+    use ignatius::connection::TargetSessionAttrs;
+    use ignatius::diagnostics::DiagnosticKind;
+
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    for (attrs, expected_requested, expected_observed) in [
+        (TargetSessionAttrs::ReadOnly, "read-only", "read-write"),
+        (TargetSessionAttrs::Standby, "standby", "primary"),
+    ] {
+        let target = resolve(
+            Some(&uri),
+            &ConnectionArgs {
+                target_session_attrs: Some(attrs),
+                ..ConnectionArgs::default()
+            },
+            &EnvSnapshot::from_process(),
+            &config.connection,
+        )
+        .expect("target resolves");
+
+        let err = runtime
+            .block_on(session::connect(&target, Duration::ZERO))
+            .expect_err("mismatched target_session_attrs must refuse");
+        assert_eq!(err.kind, DiagnosticKind::Connection);
+        assert!(
+            err.headline.contains(expected_requested),
+            "expected requested {expected_requested} in {}",
+            err.headline
+        );
+        assert!(
+            err.headline.contains(expected_observed),
+            "expected observed {expected_observed} in {}",
+            err.headline
+        );
+        assert!(err.next_action.is_some());
+    }
+}
+
+#[test]
+fn target_session_attrs_read_only_succeeds_with_read_only_session_and_object_tree_uses_any() {
+    use ignatius::connection::TargetSessionAttrs;
+
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    let ro_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            target_session_attrs: Some(TargetSessionAttrs::ReadOnly),
+            read_only: true,
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+    let ro_session = runtime
+        .block_on(session::connect(&ro_target, Duration::ZERO))
+        .expect("read-only session satisfies target_session_attrs=read-only");
+    assert!(ro_session.info().read_only);
+
+    // Object tree connection is always read-only, so it resets target_session_attrs to Any
+    // even when the primary connection requires ReadWrite.
+    let rw_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            target_session_attrs: Some(TargetSessionAttrs::ReadWrite),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+    let tree_target = rw_target.for_object_tree();
+    assert_eq!(tree_target.target_session_attrs, TargetSessionAttrs::Any);
+    let tree_session = runtime
+        .block_on(session::connect(&tree_target, Duration::ZERO))
+        .expect("object tree connection succeeds");
+    assert!(tree_session.info().read_only);
+}

@@ -1,5 +1,5 @@
 use super::*;
-use crate::connection::target::{Host, SslMode};
+use crate::connection::target::{Host, SslMode, TargetSessionAttrs};
 
 fn target(sslmode: SslMode) -> ConnectionTarget {
     ConnectionTarget {
@@ -9,6 +9,7 @@ fn target(sslmode: SslMode) -> ConnectionTarget {
         user: "someone@example.com".into(),
         password: None,
         sslmode,
+        target_session_attrs: TargetSessionAttrs::Any,
         root_cert: None,
         client_cert: None,
         client_key: None,

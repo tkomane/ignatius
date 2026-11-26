@@ -159,3 +159,31 @@ fn control_text_is_bounded_in_derived_details() {
     let summary = ConnectionProfileSummary::from_profile("profile", &profile, &BTreeMap::new());
     assert!(summary.detail().chars().count() <= MAX_DETAIL_CHARS + 3);
 }
+
+#[test]
+fn target_session_attrs_is_shown_in_picker_only_when_not_any() {
+    let standby = profile("host = \"replica.example.net\"\ntarget-session-attrs = \"standby\"\n");
+    let summary = ConnectionProfileSummary::from_profile("replica", &standby, &BTreeMap::new());
+    assert_eq!(summary.target_session_attrs.as_deref(), Some("standby"));
+    assert!(summary.detail().contains("target-session-attrs standby"));
+
+    let any = profile("host = \"any.example.net\"\ntarget-session-attrs = \"ANY\"\n");
+    let any_summary = ConnectionProfileSummary::from_profile("any", &any, &BTreeMap::new());
+    assert!(any_summary.target_session_attrs.is_none());
+    assert!(!any_summary.detail().contains("target-session-attrs"));
+
+    let invalid = profile("host = \"bad.example.net\"\ntarget-session-attrs = \"bogus\"\n");
+    let bad_summary = ConnectionProfileSummary::from_profile("bad", &invalid, &BTreeMap::new());
+    assert!(bad_summary.target_session_attrs.is_none());
+    assert!(
+        bad_summary
+            .validation
+            .as_deref()
+            .is_some_and(|v| v.contains("target-session-attrs"))
+    );
+    assert!(
+        bad_summary
+            .detail()
+            .contains("configuration needs attention")
+    );
+}

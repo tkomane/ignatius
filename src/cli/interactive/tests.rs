@@ -2468,3 +2468,58 @@ async fn spawn_cancel_query_bench_marks_active_handle_cancelled_without_blocking
     assert!(cancel.is_cancelled());
     assert!(rx.try_recv().is_err(), "successful cancel sends no error");
 }
+
+#[tokio::test]
+async fn doctor_probe_target_displays_target_session_attrs_when_not_any() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let missing_socket = dir.path().join("missing-pg-socket");
+    let config = Config::default();
+
+    let mut target = crate::connection::resolve(
+        Some(&format!(
+            "host={} target_session_attrs=read-only",
+            missing_socket.display()
+        )),
+        &crate::connection::ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config.connection,
+    )
+    .expect("resolve");
+    if crate::platform::supports_unix_sockets() {
+        let checks = probe_target(target, &config).await.expect("probe");
+        let attrs_check = checks
+            .iter()
+            .find(|c| c.name == "target_session_attrs")
+            .expect("target_session_attrs check must appear when != Any");
+        assert_eq!(attrs_check.status, CheckStatus::Ok);
+        assert!(
+            attrs_check.detail.contains("read-only"),
+            "{}",
+            attrs_check.detail
+        );
+    } else {
+        target = crate::connection::resolve(
+            Some("host=127.0.0.1 target_session_attrs=any"),
+            &crate::connection::ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &config.connection,
+        )
+        .expect("resolve");
+    }
+
+    if crate::platform::supports_unix_sockets() {
+        let any_target = crate::connection::resolve(
+            Some(&format!("host={}", missing_socket.display())),
+            &crate::connection::ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &config.connection,
+        )
+        .expect("resolve");
+        let any_checks = probe_target(any_target, &config).await.expect("probe");
+        assert!(
+            !any_checks.iter().any(|c| c.name == "target_session_attrs"),
+            "target_session_attrs check is omitted for Any"
+        );
+    }
+    let _ = target;
+}

@@ -97,6 +97,65 @@ impl SslMode {
     }
 }
 
+/// Session attribute routing and verification policy requested for the connection.
+///
+/// Follows libpq's `target_session_attrs` vocabulary. Verified directly from
+/// PostgreSQL after connecting, never guessed or silently downgraded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TargetSessionAttrs {
+    /// Accept any server regardless of read-only or recovery state.
+    #[default]
+    Any,
+    /// Require a session with `transaction_read_only = off`.
+    ReadWrite,
+    /// Require a session with `transaction_read_only = on`.
+    ReadOnly,
+    /// Require a primary server (`pg_is_in_recovery() = false`).
+    Primary,
+    /// Require a standby server (`pg_is_in_recovery() = true`).
+    Standby,
+}
+
+impl TargetSessionAttrs {
+    /// Parses a libpq `target_session_attrs` value.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "any" => Ok(Self::Any),
+            "read-write" => Ok(Self::ReadWrite),
+            "read-only" => Ok(Self::ReadOnly),
+            "primary" => Ok(Self::Primary),
+            "standby" => Ok(Self::Standby),
+            other => Err(format!(
+                "unknown target_session_attrs {other:?}; expected one of any, read-write, read-only, primary, standby"
+            )),
+        }
+    }
+
+    /// The libpq name, for display and for round-tripping.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::ReadWrite => "read-write",
+            Self::ReadOnly => "read-only",
+            Self::Primary => "primary",
+            Self::Standby => "standby",
+        }
+    }
+
+    /// Plain-language description of what this policy requires from the session.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Any => "any server (primary or standby, read-write or read-only)",
+            Self::ReadWrite => "read-write session (transaction_read_only = off)",
+            Self::ReadOnly => "read-only session (transaction_read_only = on)",
+            Self::Primary => "primary server (not in recovery)",
+            Self::Standby => "standby server (in recovery)",
+        }
+    }
+}
+
 /// How the connection reaches the server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Host {
@@ -213,6 +272,7 @@ impl EnvSnapshot {
             "PGPASSWORD",
             "PGAPPNAME",
             "PGSSLMODE",
+            "PGTARGETSESSIONATTRS",
             "PGCONNECT_TIMEOUT",
             "PGSERVICE",
             "PGSERVICEFILE",
@@ -275,6 +335,8 @@ pub struct ConnectionArgs {
     pub username: Option<String>,
     /// `--sslmode`
     pub sslmode: Option<SslMode>,
+    /// `--target-session-attrs`
+    pub target_session_attrs: Option<TargetSessionAttrs>,
     /// `--environment`
     pub environment: Option<Environment>,
     /// `--read-only`
@@ -330,6 +392,8 @@ pub struct ConnectionTarget {
     pub password: Option<SecretString>,
     /// Requested transport protection.
     pub sslmode: SslMode,
+    /// Requested session routing and verification policy.
+    pub target_session_attrs: TargetSessionAttrs,
     /// An explicit trust root, replacing the operating system's.
     pub root_cert: Option<std::path::PathBuf>,
     /// A client certificate to present.
@@ -400,6 +464,7 @@ impl ConnectionTarget {
         };
         copy.application_name = format!("{prefix}{OBJECT_SUFFIX}");
         copy.read_only = true;
+        copy.target_session_attrs = TargetSessionAttrs::Any;
         copy
     }
 
@@ -417,6 +482,7 @@ impl ConnectionTarget {
             user: self.user.clone(),
             password,
             sslmode: self.sslmode,
+            target_session_attrs: self.target_session_attrs,
             root_cert: self.root_cert.clone(),
             client_cert: self.client_cert.clone(),
             client_key: self.client_key.clone(),
@@ -455,6 +521,7 @@ const SUPPORTED_KEYS: &[&str] = &[
     "user",
     "password",
     "sslmode",
+    "target_session_attrs",
     "sslrootcert",
     "sslcert",
     "sslkey",
@@ -619,6 +686,24 @@ pub fn resolve(
         }
     };
 
+    let target_session_attrs = match args.target_session_attrs {
+        Some(attrs) => attrs,
+        None => {
+            let text = layered("target_session_attrs", "PGTARGETSESSIONATTRS");
+            match text {
+                Some(value) => TargetSessionAttrs::parse(&value).map_err(|message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        message,
+                        "resolving the connection target",
+                    )
+                    .next_action("use any, read-write, read-only, primary, or standby")
+                })?,
+                None => TargetSessionAttrs::Any,
+            }
+        }
+    };
+
     let certificate_path = |key: &str, variable: &str| -> Option<std::path::PathBuf> {
         layered(key, variable).map(std::path::PathBuf::from)
     };
@@ -669,6 +754,7 @@ pub fn resolve(
         user,
         password,
         sslmode,
+        target_session_attrs,
         root_cert,
         client_cert,
         client_key,

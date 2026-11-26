@@ -171,7 +171,7 @@ async fn live_session(startup_setting: Option<&str>) -> Option<Session> {
             }
         }
         .expect("synthetic fixture connection");
-    let info = bootstrap(&client, &target).await.expect("session facts");
+    let (info, _) = bootstrap(&client, &target).await.expect("session facts");
     Some(Session {
         client,
         user_sql_gate: tokio::sync::Mutex::new(()),
@@ -757,4 +757,67 @@ async fn queued_import_rechecks_approval_after_obtaining_the_user_sql_gate() {
     .unwrap()
     .unwrap();
     assert_eq!(rows.get(0), Some("0"));
+}
+
+#[test]
+fn verify_target_session_attrs_enforces_each_policy_without_downgrade() {
+    use crate::connection::TargetSessionAttrs;
+
+    let mut base = target("postgres://app:hunter2-secret@db.example.net:5432/orders");
+
+    let cases = [
+        // (policy, read_only, in_recovery, expected_err: Option<(requested, observed)>)
+        (TargetSessionAttrs::Any, false, false, None),
+        (TargetSessionAttrs::Any, true, true, None),
+        (TargetSessionAttrs::ReadWrite, false, false, None),
+        (
+            TargetSessionAttrs::ReadWrite,
+            true,
+            false,
+            Some(("read-write", "read-only")),
+        ),
+        (TargetSessionAttrs::ReadOnly, true, false, None),
+        (
+            TargetSessionAttrs::ReadOnly,
+            false,
+            false,
+            Some(("read-only", "read-write")),
+        ),
+        (TargetSessionAttrs::Primary, false, false, None),
+        (
+            TargetSessionAttrs::Primary,
+            true,
+            true,
+            Some(("primary", "standby")),
+        ),
+        (TargetSessionAttrs::Standby, true, true, None),
+        (
+            TargetSessionAttrs::Standby,
+            false,
+            false,
+            Some(("standby", "primary")),
+        ),
+    ];
+
+    for (policy, read_only, in_recovery, expected) in cases {
+        base.target_session_attrs = policy;
+        let result = verify_target_session_attrs(&base, read_only, in_recovery);
+        match expected {
+            None => assert!(
+                result.is_ok(),
+                "{policy:?} ro={read_only} rec={in_recovery}: {result:?}"
+            ),
+            Some((requested, observed)) => {
+                let err = result.expect_err("mismatch must be refused");
+                assert_eq!(err.kind, DiagnosticKind::Connection);
+                assert!(err.headline.contains(requested), "{}", err.headline);
+                assert!(err.headline.contains(observed), "{}", err.headline);
+                assert!(err.next_action.is_some());
+                assert!(
+                    !format!("{err:?}").contains("hunter2-secret"),
+                    "diagnostic must never leak password"
+                );
+            }
+        }
+    }
 }

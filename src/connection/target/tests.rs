@@ -164,17 +164,14 @@ fn security_parameters_fail_and_other_unknowns_only_warn() {
     assert!(err.headline.contains("gssencmode"), "{}", err.headline);
 
     let target = resolve(
-        Some("postgres://app@db.example.net/orders?target_session_attrs=read-write"),
+        Some("postgres://app@db.example.net/orders?keepalives_idle=60"),
         &ConnectionArgs::default(),
         &EnvSnapshot::default(),
         &config(),
     )
     .expect("non-security parameter is a note");
     assert!(
-        target
-            .notes
-            .iter()
-            .any(|n| n.subject == "target_session_attrs"),
+        target.notes.iter().any(|n| n.subject == "keepalives_idle"),
         "{:?}",
         target.notes
     );
@@ -526,4 +523,137 @@ fn an_invalid_port_is_rejected_with_guidance() {
     )
     .expect_err("port out of range");
     assert!(err.next_action.is_some());
+}
+
+#[test]
+fn target_session_attrs_parses_all_libpq_values_and_rejects_unknowns() {
+    for (input, expected, canonical) in [
+        ("any", TargetSessionAttrs::Any, "any"),
+        (" ANY ", TargetSessionAttrs::Any, "any"),
+        ("read-write", TargetSessionAttrs::ReadWrite, "read-write"),
+        ("Read-Write", TargetSessionAttrs::ReadWrite, "read-write"),
+        ("read-only", TargetSessionAttrs::ReadOnly, "read-only"),
+        ("primary", TargetSessionAttrs::Primary, "primary"),
+        ("standby", TargetSessionAttrs::Standby, "standby"),
+    ] {
+        let parsed = TargetSessionAttrs::parse(input).expect("valid target_session_attrs");
+        assert_eq!(parsed, expected);
+        assert_eq!(parsed.as_str(), canonical);
+        assert!(!parsed.description().is_empty());
+    }
+    let err = TargetSessionAttrs::parse("prefer-standby").expect_err("must reject unknown");
+    assert!(err.contains("target_session_attrs"), "{err}");
+    assert!(err.contains("read-write"), "{err}");
+}
+
+#[test]
+fn target_session_attrs_follows_libpq_precedence_and_object_tree_resets_to_any() {
+    let (_dir, service_path) =
+        service_file("[s]\nhost=db.example.net\ntarget_session_attrs=standby\n");
+    let env_only = EnvSnapshot::from_pairs(&[("PGTARGETSESSIONATTRS", "read-only")]);
+    let env_with_service = EnvSnapshot::from_pairs(&[
+        ("PGSERVICEFILE", &service_path),
+        ("PGTARGETSESSIONATTRS", "read-only"),
+    ]);
+
+    // Default is Any.
+    let target = resolve(
+        None,
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config(),
+    )
+    .expect("default");
+    assert_eq!(target.target_session_attrs, TargetSessionAttrs::Any);
+
+    // Env applies when nothing higher sets it.
+    let target = resolve(None, &ConnectionArgs::default(), &env_only, &config()).expect("env");
+    assert_eq!(target.target_session_attrs, TargetSessionAttrs::ReadOnly);
+
+    // Service beats env.
+    let target = resolve(
+        Some("service=s"),
+        &ConnectionArgs::default(),
+        &env_with_service,
+        &config(),
+    )
+    .expect("service");
+    assert_eq!(target.target_session_attrs, TargetSessionAttrs::Standby);
+
+    // URI/kv beats service and env.
+    let target = resolve(
+        Some("service=s target_session_attrs=primary"),
+        &ConnectionArgs::default(),
+        &env_with_service,
+        &config(),
+    )
+    .expect("kv");
+    assert_eq!(target.target_session_attrs, TargetSessionAttrs::Primary);
+
+    let uri_target = resolve(
+        Some("postgres://app@db.example.net/orders?target_session_attrs=read-write"),
+        &ConnectionArgs::default(),
+        &env_only,
+        &config(),
+    )
+    .expect("uri");
+    assert_eq!(
+        uri_target.target_session_attrs,
+        TargetSessionAttrs::ReadWrite
+    );
+    assert!(
+        !uri_target
+            .notes
+            .iter()
+            .any(|n| n.subject == "target_session_attrs"),
+        "supported key must not emit unsupported note: {:?}",
+        uri_target.notes
+    );
+
+    // CLI argument beats URI, service, and env (even when CLI selects `any`).
+    let cli_target = resolve(
+        Some("postgres://app@db.example.net/orders?target_session_attrs=read-write"),
+        &ConnectionArgs {
+            target_session_attrs: Some(TargetSessionAttrs::Any),
+            ..ConnectionArgs::default()
+        },
+        &env_only,
+        &config(),
+    )
+    .expect("cli overrides uri");
+    assert_eq!(cli_target.target_session_attrs, TargetSessionAttrs::Any);
+
+    // Object tree is read-only and resets target_session_attrs to Any.
+    let tree_target = uri_target.for_object_tree();
+    assert!(tree_target.read_only);
+    assert_eq!(tree_target.target_session_attrs, TargetSessionAttrs::Any);
+}
+
+#[test]
+fn invalid_target_session_attrs_in_uri_service_or_env_fails_with_config_diagnostic() {
+    let err = resolve(
+        Some("postgres://app@db.example.net/orders?target_session_attrs=invalid"),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config(),
+    )
+    .expect_err("invalid uri target_session_attrs");
+    assert_eq!(err.kind, DiagnosticKind::Config);
+    assert!(err.next_action.is_some());
+
+    let env = EnvSnapshot::from_pairs(&[("PGTARGETSESSIONATTRS", "bogus")]);
+    let err = resolve(None, &ConnectionArgs::default(), &env, &config())
+        .expect_err("invalid env PGTARGETSESSIONATTRS");
+    assert_eq!(err.kind, DiagnosticKind::Config);
+
+    let (_dir, service_path) = service_file("[bad]\nhost=db\ntarget_session_attrs=bogus\n");
+    let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &service_path)]);
+    let err = resolve(
+        Some("service=bad"),
+        &ConnectionArgs::default(),
+        &env,
+        &config(),
+    )
+    .expect_err("invalid service target_session_attrs");
+    assert_eq!(err.kind, DiagnosticKind::Config);
 }

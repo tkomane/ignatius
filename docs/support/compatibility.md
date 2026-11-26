@@ -168,11 +168,11 @@ is shown as unknown when that view is not readable.
 ## Connection parameters
 
 **Applied**: `service`, `passfile`, `host`, `port`, `dbname`, `user`, `password`,
-`sslmode`, `application_name`, `connect_timeout`.
+`sslmode`, `target_session_attrs`, `application_name`, `connect_timeout`.
 
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
-`PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGCONNECT_TIMEOUT`, `PGSERVICE`,
-`PGSERVICEFILE`, `PGPASSFILE`, `PGSYSCONFDIR`.
+`PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
+`PGCONNECT_TIMEOUT`, `PGSERVICE`, `PGSERVICEFILE`, `PGPASSFILE`, `PGSYSCONFDIR`.
 
 **Files read**: `pg_service.conf`, from `PGSERVICEFILE`, then
 `~/.pg_service.conf`, then `$PGSYSCONFDIR/pg_service.conf`. `.pgpass`, from
@@ -198,8 +198,8 @@ then the password file, then the prompt.
 
 **Profiles**: a `[profiles]` table in `config.toml` names a connection, reached
 as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
-`user`, `sslmode`, `environment`, `read-only`, `description` and `auth`, and nothing
-else. It never carries a password.
+`user`, `sslmode`, `target-session-attrs`, `environment`, `read-only`,
+`description` and `auth`, and nothing else. It never carries a password.
 
 ## Interactive connection picker
 

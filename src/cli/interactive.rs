@@ -4191,6 +4191,16 @@ pub async fn probe_target(
             target.sslmode.guarantee()
         ),
     ));
+    if target.target_session_attrs != crate::connection::TargetSessionAttrs::Any {
+        checks.push(Check::ok(
+            "target_session_attrs",
+            format!(
+                "{} ({})",
+                target.target_session_attrs.as_str(),
+                target.target_session_attrs.description()
+            ),
+        ));
+    }
 
     match &target.host {
         crate::connection::Host::Socket(path) => {

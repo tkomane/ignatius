@@ -14648,6 +14648,7 @@ fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished
         database: "orders".to_owned(),
         user: "app".to_owned(),
         transport: "prefer".to_owned(),
+        target_session_attrs: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,
