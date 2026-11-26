@@ -4,6 +4,21 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 105 - Confirm production-classified seed inserts - 26 November 2026
+
+- **W04 / 040 T012.** Direct seed insertion requires
+  `--confirm-production` for a production-classified target. The CLI
+  refuses an unconfirmed insert before authentication or connection
+  and leaves the report path untouched. Fixture rendering is available
+  without insertion. [Feature 040 tasks](../specs/040-synthetic-test-fixture-generator/tasks.md)
+- **Focused verification.** Four CLI subprocess checks passed for
+  provider and connection preflight, help, and output protection.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** A
+  production-labelled profile and a classified literal target both
+  refused an unconfirmed insert. An independent query verified the prior
+  row after the refusals and fixture rendering. A confirmed insert
+  committed the same two deterministic rows as the rendered fixture.
+
 ## Wave 104 - Keep temporary tables out of sync and seed discovery - 26 November 2026
 
 - **W03 / 039 T014 and 040 T011.** The shared dependency graph and seed

@@ -4861,6 +4861,9 @@ pub struct SeedArgs {
     /// Directly execute and insert generated fixtures into the database.
     #[arg(long)]
     pub insert: bool,
+    /// Confirm inserting fixtures into a production-classified target.
+    #[arg(long)]
+    pub confirm_production: bool,
     /// Output serialization format (sql, jsonl, csv, table).
     #[arg(short = 'f', long, value_enum, default_value_t = CliSeedFormat::Sql)]
     pub format: CliSeedFormat,
@@ -4908,6 +4911,17 @@ fn run_seed(
         &EnvSnapshot::from_process(),
         &loaded.config.connection,
     )?;
+    if args.insert && target.environment.is_production() && !args.confirm_production {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "refusing to insert synthetic fixtures into a production target without confirmation",
+            "checking whether seed can write to the target",
+        )
+        .likely_cause("the target is classified as production")
+        .next_action(
+            "pass --confirm-production to insert, or omit --insert to generate fixtures",
+        ));
+    }
     let target = authenticate_target(target, &loaded.config)?;
 
     let rt = runtime()?;

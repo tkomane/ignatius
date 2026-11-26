@@ -552,6 +552,14 @@ binary COPY, the source dry-run count, destination truncation and commit.
 It keeps a validated SQLSTATE when available and omits server and driver
 text that could contain copied values.
 
+## Synthetic seed writes
+
+`ignatius seed --insert` requires `--confirm-production` for a
+production-classified target. An unconfirmed insert stops before
+authentication or connection and leaves the report path untouched.
+Fixture rendering without `--insert` remains available without
+production confirmation.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson

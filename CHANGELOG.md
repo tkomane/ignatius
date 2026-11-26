@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Direct synthetic seed inserts into a production-classified
+  target require `--confirm-production`.
 - Fixed: Sync plans and synthetic seed fixtures omit session-local
   temporary tables and keep permanent and unlogged tables in dependency
   order.
