@@ -415,3 +415,16 @@ Actual raw/mouse/cursor proof is mandatory; translated sequences cannot close
 unobservable buffer/paste modes. The real Windows runner is required for this
 slice, and Windows 11/Windows Terminal hand use remains separate. Root owns CI,
 canonical integration, final source-bound review and acceptance records.
+
+## W05 prove cancellation and recovery on a Unix socket
+
+Extend the existing PostgreSQL socket integration binary. Verify the
+session uses a Unix socket at the server. Wait for an independent observer
+on the disposable fixture to see the known backend running the tagged
+test statement, then send the session's normal cancellation request.
+Prove SQLSTATE 57014 within a bounded deadline and a successful later
+query on the same backend.
+
+Reuse the pinned PostgreSQL 18 Linux socket job in standard CI. Record
+actual hosted execution independently of a local skip or Linux desktop
+hand use. Keep T052 open for its existing manual acceptance.

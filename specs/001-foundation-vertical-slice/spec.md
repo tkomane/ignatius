@@ -141,6 +141,9 @@ assert the exit code for both success and failure.
   outcomes, server notices and elapsed time.
 - **FR-006**: The client MUST cancel a running statement through PostgreSQL's
   cancellation request and MUST NOT re-run or retry any statement automatically.
+  An established Unix-socket session follows the same cancellation contract.
+  After the server confirms the cancellation, the same backend can execute
+  a later statement in autocommit.
 - **FR-007**: The client MUST provide `connect`, `query`, `config`, `doctor`,
   `completion` and `version` commands.
 - **FR-008**: `query` MUST support table, CSV, TSV, JSON, NDJSON and Markdown
