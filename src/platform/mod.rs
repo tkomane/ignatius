@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 
 mod atomic;
-pub(crate) use atomic::{create_private_file, write_atomic};
+pub(crate) use atomic::{create_private_file, rename_noreplace, write_atomic};
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 mod azure_cli;

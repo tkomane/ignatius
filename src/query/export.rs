@@ -16,12 +16,14 @@
 //! Individual values, rows, driver frames, encoding and file buffers use memory.
 
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::fs::{self, File};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 /// Suffix given to a file that is still being written.
 pub const PARTIAL_SUFFIX: &str = "partial";
+
+const OVERWRITE_ADVICE: &str = "choose another path, or pass --force to replace it";
 
 /// An export in progress.
 #[derive(Debug)]
@@ -30,6 +32,7 @@ pub struct Export {
     partial: PathBuf,
     writer: BufWriter<File>,
     rows: u64,
+    force: bool,
 }
 
 /// How an export ended.
@@ -90,10 +93,16 @@ impl Export {
     /// flags to pass. Advice that names a flag the reader does not have is the
     /// same failure as telling someone to check a status bar that is not there.
     pub fn create(destination: &Path, force: bool) -> Result<Self, Diagnostic> {
-        Self::create_with_advice(
+        Self::create_with_advice(destination, force, OVERWRITE_ADVICE)
+    }
+
+    /// Checks the export names before CLI work starts, without reserving either.
+    pub(crate) fn check_destination(destination: &Path, force: bool) -> Result<(), Diagnostic> {
+        check_names(
             destination,
+            &partial_path(destination),
             force,
-            "choose another path, or pass --force to replace it",
+            OVERWRITE_ADVICE,
         )
     }
 
@@ -103,19 +112,10 @@ impl Export {
         force: bool,
         advice: &str,
     ) -> Result<Self, Diagnostic> {
-        if destination.exists() && !force {
-            return Err(Diagnostic::new(
-                DiagnosticKind::Usage,
-                format!("{} already exists", destination.display()),
-                "opening the export destination",
-            )
-            .likely_cause("an export never replaces a file that is already there")
-            .next_action(advice.to_owned()));
-        }
-
         let partial = partial_path(destination);
+        check_names(destination, &partial, force, advice)?;
         if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent).map_err(|err| {
+            fs::create_dir_all(parent).map_err(|err| {
                 Diagnostic::new(
                     DiagnosticKind::Usage,
                     format!("could not create {}", parent.display()),
@@ -126,7 +126,14 @@ impl Export {
             })?;
         }
 
-        let file = File::create(&partial).map_err(|err| {
+        let file = crate::platform::create_private_file(&partial).map_err(|err| {
+            if err.kind() == io::ErrorKind::AlreadyExists
+                || (cfg!(windows)
+                    && err.kind() == io::ErrorKind::PermissionDenied
+                    && partial.symlink_metadata().is_ok())
+            {
+                return occupied_partial(&partial);
+            }
             Diagnostic::new(
                 DiagnosticKind::Usage,
                 format!("could not create {}", partial.display()),
@@ -141,6 +148,7 @@ impl Export {
             partial,
             writer: BufWriter::new(file),
             rows: 0,
+            force,
         })
     }
 
@@ -166,7 +174,21 @@ impl Export {
         &self.partial
     }
 
-    /// Flushes, syncs, and moves the partial file into place.
+    /// Reports a write failure with the recovery path for the incomplete file.
+    pub(crate) fn write_failure(&self, error: &io::Error) -> Diagnostic {
+        Diagnostic::new(
+            DiagnosticKind::ExportInterrupted,
+            format!("could not write {}", self.destination.display()),
+            "writing the export file",
+        )
+        .likely_cause(error.to_string())
+        .next_action(format!(
+            "inspect the partial file at {} before continuing",
+            self.partial.display()
+        ))
+    }
+
+    /// Flushes, syncs, closes, and moves the partial file into place.
     ///
     /// The sync matters: a rename that completes before the data reaches the
     /// disk would leave a complete-looking file with missing rows after a crash.
@@ -176,28 +198,57 @@ impl Export {
 
     fn finish_with(
         mut self,
-        flush: impl FnOnce(&mut BufWriter<File>) -> std::io::Result<()>,
+        flush: impl FnOnce(&mut BufWriter<File>) -> io::Result<()>,
     ) -> Result<Finished, Diagnostic> {
-        let outcome = flush(&mut self.writer)
-            .and_then(|()| self.writer.get_ref().sync_all())
-            .and_then(|()| std::fs::rename(&self.partial, &self.destination));
-
-        if let Err(err) = outcome {
-            let diagnostic = Diagnostic::new(
+        let interrupted = || {
+            Diagnostic::new(
                 DiagnosticKind::ExportInterrupted,
                 format!("could not finish writing {}", self.destination.display()),
                 "completing the export",
             )
-            .likely_cause(err.to_string())
-            .next_action(format!(
+        };
+        if let Err(err) = flush(&mut self.writer).and_then(|()| self.writer.get_ref().sync_all()) {
+            // Dropping the writer still attempts to flush any buffered bytes.
+            return Err(interrupted().likely_cause(err.to_string()).next_action(format!(
                 "the partial file remains at {}; its on-disk row count is unconfirmed; inspect it before continuing",
                 self.partial.display()
-            ));
-            return Err(diagnostic);
+            )));
         }
+        drop(self.writer);
+
+        let publication = if self.force {
+            fs::rename(&self.partial, &self.destination)
+        } else {
+            crate::platform::rename_noreplace(&self.partial, &self.destination)
+        };
+        publication.map_err(|err| {
+            let partial = self.partial.display();
+            let collision = !self.force
+                && (err.kind() == io::ErrorKind::AlreadyExists
+                    || (cfg!(windows)
+                        && err.kind() == io::ErrorKind::PermissionDenied
+                        && self.destination.symlink_metadata().is_ok()));
+            if collision {
+                interrupted()
+                    .likely_cause(format!("the export destination already exists ({err})"))
+                    .next_action(format!(
+                        "inspect the partial file at {partial}, then move it or choose another destination before retrying"
+                    ))
+            } else if !self.force && err.kind() == io::ErrorKind::Unsupported {
+                interrupted()
+                    .likely_cause(format!("an atomic move without replacement is unavailable ({err})"))
+                    .next_action(format!(
+                        "inspect the partial file at {partial} before moving it to an unused path"
+                    ))
+            } else {
+                interrupted().likely_cause(err.to_string()).next_action(format!(
+                    "inspect the partial file at {partial} before continuing"
+                ))
+            }
+        })?;
 
         Ok(Finished {
-            path: self.destination.clone(),
+            path: self.destination,
             rows: self.rows,
         })
     }
@@ -209,7 +260,7 @@ impl Export {
 
     fn abandon_with(
         mut self,
-        flush: impl FnOnce(&mut BufWriter<File>) -> std::io::Result<()>,
+        flush: impl FnOnce(&mut BufWriter<File>) -> io::Result<()>,
     ) -> Abandoned {
         let flush = if flush(&mut self.writer).is_ok() {
             PartialFlush::Flushed
@@ -224,6 +275,55 @@ impl Export {
             flush,
         }
     }
+}
+
+fn check_names(
+    destination: &Path,
+    partial: &Path,
+    force: bool,
+    advice: &str,
+) -> Result<(), Diagnostic> {
+    if entry_exists(partial)? {
+        return Err(occupied_partial(partial));
+    }
+    if !force && entry_exists(destination)? {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("{} already exists", destination.display()),
+            "opening the export destination",
+        )
+        .likely_cause("the export destination is occupied")
+        .next_action(advice));
+    }
+    Ok(())
+}
+
+fn entry_exists(path: &Path) -> Result<bool, Diagnostic> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("could not inspect {}", path.display()),
+            "opening the export destination",
+        )
+        .likely_cause(err.to_string())
+        .next_action("check the path and its permissions")),
+    }
+}
+
+fn occupied_partial(partial: &Path) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Usage,
+        format!("{} already exists", partial.display()),
+        "opening the export destination",
+    )
+    .likely_cause(
+        "another export may be using this path or an earlier export may have left it behind",
+    )
+    .next_action(
+        "wait for an active export or choose another destination. If the writer has stopped, inspect any leftover partial file before you move it",
+    )
 }
 
 /// The name of the partial file for a destination.

@@ -189,6 +189,165 @@ fn an_existing_file_is_never_replaced_by_accident() {
 }
 
 #[test]
+fn a_stale_partial_is_refused_in_both_force_modes_without_changing_bytes() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let destination = dir.path().join("stale.csv");
+    let partial = partial_path(&destination);
+    let bytes = b"recovery data\n";
+    std::fs::write(&partial, bytes).expect("write stale partial");
+
+    for force in [false, true] {
+        let error = Export::create(&destination, force).expect_err("stale partial must refuse");
+        assert_eq!(error.exit_code(), crate::ExitCode::Usage);
+        assert!(
+            error.headline.contains(&partial.display().to_string()),
+            "{}",
+            error.headline
+        );
+        let action = error.next_action.expect("recovery hint");
+        let lower = action.to_ascii_lowercase();
+        assert!(lower.contains("inspect"), "{action}");
+        assert!(
+            lower.contains("move") || lower.contains("choose"),
+            "{action}"
+        );
+        assert_eq!(std::fs::read(&partial).expect("read stale partial"), bytes);
+        assert!(!destination.exists());
+    }
+}
+
+#[test]
+fn an_active_second_export_is_refused_in_both_force_modes_and_the_first_finishes() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let destination = dir.path().join("active.csv");
+    let bytes = b"id\n1\n";
+    let mut first = Export::create(&destination, false).expect("create first export");
+    first.writer().write_all(bytes).expect("write first export");
+    first.writer().flush().expect("flush first export");
+    assert_eq!(
+        std::fs::read(first.partial_path()).expect("read active partial"),
+        bytes
+    );
+
+    for force in [false, true] {
+        let error = Export::create(&destination, force).expect_err("active export must refuse");
+        assert_eq!(error.exit_code(), crate::ExitCode::Usage);
+        assert!(
+            error
+                .headline
+                .contains(&first.partial_path().display().to_string()),
+            "{}",
+            error.headline
+        );
+        let action = error.next_action.expect("recovery hint");
+        let lower = action.to_ascii_lowercase();
+        assert!(lower.contains("inspect"), "{action}");
+        assert!(
+            lower.contains("move") || lower.contains("choose"),
+            "{action}"
+        );
+        assert_eq!(
+            std::fs::read(first.partial_path()).expect("read preserved active partial"),
+            bytes
+        );
+    }
+
+    first.finish().expect("first export finishes");
+    assert_eq!(
+        std::fs::read(&destination).expect("read destination"),
+        bytes
+    );
+}
+
+#[test]
+fn an_independent_final_keeps_its_bytes_when_finish_is_interrupted() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let destination = dir.path().join("racing.csv");
+    let partial_bytes = b"id\n1\n";
+    let final_bytes = b"independent final\n";
+    let mut export = Export::create(&destination, false).expect("create export");
+    export
+        .writer()
+        .write_all(partial_bytes)
+        .expect("write export");
+    export.writer().flush().expect("flush partial");
+    let partial = export.partial_path().to_path_buf();
+    std::fs::write(&destination, final_bytes).expect("create independent final");
+
+    let error = export
+        .finish()
+        .expect_err("existing final must interrupt finish");
+    assert_eq!(error.exit_code(), crate::ExitCode::ExportInterrupted);
+    assert_eq!(
+        std::fs::read(&partial).expect("read partial"),
+        partial_bytes
+    );
+    assert_eq!(
+        std::fs::read(&destination).expect("read final"),
+        final_bytes
+    );
+}
+
+#[test]
+fn forced_abandon_flush_failure_keeps_prior_final_and_preserves_partial() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let destination = dir.path().join("abandoned.csv");
+    let final_bytes = b"prior final\n";
+    let partial_bytes = b"new partial\n";
+    std::fs::write(&destination, final_bytes).expect("write prior final");
+    let mut export = Export::create(&destination, true).expect("create forced export");
+    export
+        .writer()
+        .write_all(partial_bytes)
+        .expect("write partial");
+    let partial = export.partial_path().to_path_buf();
+
+    let write_error = export.write_failure(&io::Error::other("synthetic write failure"));
+    assert_eq!(write_error.exit_code(), crate::ExitCode::ExportInterrupted);
+    let action = write_error.next_action.expect("recovery guidance");
+    assert!(action.contains(&partial.display().to_string()), "{action}");
+    assert!(!action.contains("rows written"), "{action}");
+
+    let abandoned = export.abandon_with(|_| Err(std::io::Error::other("synthetic flush failure")));
+    assert_eq!(abandoned.flush, PartialFlush::Unconfirmed);
+    assert_eq!(
+        std::fs::read(&partial).expect("read partial"),
+        partial_bytes
+    );
+    assert_eq!(
+        std::fs::read(&destination).expect("read final"),
+        final_bytes
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_long_windows_path_publishes_exact_bytes_without_a_partial() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let mut parent = root.path().to_path_buf();
+    for index in 0..12 {
+        parent = parent.join(format!("nested-directory-{index:02}-ordinary-name"));
+        std::fs::create_dir_all(&parent).expect("create nested directory");
+    }
+    let destination = parent.join("long-path-export.csv");
+    assert!(destination.to_string_lossy().len() > 260);
+    let bytes = b"id\n1\n";
+
+    let mut export = Export::create(&destination, false).expect("create long-path export");
+    export
+        .writer()
+        .write_all(bytes)
+        .expect("write long-path export");
+    export.finish().expect("publish long-path export");
+
+    assert_eq!(
+        std::fs::read(&destination).expect("read long-path export"),
+        bytes
+    );
+    assert!(!partial_path(&destination).exists());
+}
+
+#[test]
 fn force_replaces_the_file_but_only_once_the_new_one_is_complete() {
     let dir = tempfile::tempdir().expect("temp dir");
     let destination = dir.path().join("report.csv");

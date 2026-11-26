@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Exports preserve occupied partial files and destinations that appear
+  before publication. A failed query connection leaves no empty partial.
 - Fixed: Crash recovery keeps both editor panes and preserves the previous
   journal if the restored workspace cannot be checkpointed.
 - Fixed: The read-only object-tree connection stays identifiable in

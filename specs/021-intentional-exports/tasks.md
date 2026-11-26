@@ -88,3 +88,12 @@ macOS 27.0.1 arm64/Homebrew Rust 1.99.1; socket remains a semantic skip.
 Injected I/O failures are not native full-disk evidence. The frozen Linux
 `871db73` proof excludes this repair; current-source Linux/MSRV/Windows,
 hosted and native hand use remain separate.
+
+## W10 destination and partial ownership
+
+- [x] T026 Reserve the recovery partial exclusively and publish the final
+  file with an atomic no-replace move unless the operator requested
+  replacement. Verify both export routes, connection refusal, active and
+  stale partials, a late destination, and recoverable write failure.
+
+[Focused and executable checks](../../docs/status.md#wave-112---preserve-export-destinations-and-recovery-files---26-november-2026)

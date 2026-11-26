@@ -115,10 +115,11 @@ An export is the one route by which result data is written to disk, and it only
 happens when the user asks for it by naming a file. Nothing is cached, and no
 result is ever written anywhere else.
 
-An export never overwrites an existing file without `--force`, and never leaves
-a truncated file at the destination: incomplete work stays under a `.partial`
-name, which is reported rather than cleaned up silently, because the rows in it
-may be what the user needed.
+Exports reserve the `.partial` path exclusively and preserve existing partials.
+Default publication preserves the final path even if another writer creates it
+during the export. `--force` authorizes replacement of the final path after
+the new file is flushed and synced. An interrupted export reports the recovery
+path and leaves the partial available for inspection.
 
 Interactive export chooses CSV, TSV, JSON, NDJSON or Markdown before the path is
 accepted. The choice and retained-row scope are ephemeral model state; they do
