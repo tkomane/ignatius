@@ -526,6 +526,8 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::NextEditorBuffer
         | Action::PrevEditorBuffer
         | Action::ToggleEditorSplit
+        | Action::TogglePinEditorBuffer
+        | Action::RenameEditorBuffer
         | Action::SnippetLibrary => true,
         Action::RestoreSession | Action::DiscardRecovery => model.recovery_banner.is_some(),
         Action::LintBuffer => !model.editor.text().trim().is_empty(),
@@ -765,6 +767,8 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::NextEditorBuffer
         | Action::PrevEditorBuffer
         | Action::ToggleEditorSplit
+        | Action::TogglePinEditorBuffer
+        | Action::RenameEditorBuffer
         | Action::SnippetLibrary => "this surface to close first".to_owned(),
         Action::RestoreSession | Action::DiscardRecovery => {
             "an unrecovered crash session journal".to_owned()
@@ -838,6 +842,8 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::NextEditorBuffer
         | Action::PrevEditorBuffer
         | Action::ToggleEditorSplit
+        | Action::TogglePinEditorBuffer
+        | Action::RenameEditorBuffer
         | Action::SqlRunbook => "Editor",
         Action::OpenResultControls
         | Action::NarrowColumn

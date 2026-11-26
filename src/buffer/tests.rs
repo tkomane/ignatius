@@ -145,3 +145,57 @@ fn load_files_preloads_buffers() {
     assert_eq!(mgr.buffers[1].editor.text(), "SELECT 200;");
     assert_eq!(mgr.buffers[1].file_path, Some(file2));
 }
+
+#[test]
+fn pinning_prevents_closing_lone_or_multi_buffer_until_unpinned() {
+    let mut mgr = BufferManager::new();
+    assert!(!mgr.active_buffer().pinned);
+    mgr.active_buffer_mut().editor = Editor::with_text("SELECT 'keep';");
+
+    assert!(mgr.toggle_pin_active());
+    assert!(mgr.active_buffer().pinned);
+    assert!(!mgr.close_active(), "pinned lone buffer must refuse close");
+    assert_eq!(mgr.count(), 1);
+    assert_eq!(mgr.active_buffer().editor.text(), "SELECT 'keep';");
+
+    mgr.new_buffer(Some("tab2.sql".into()), Some("SELECT 2;".into()));
+    assert!(!mgr.active_buffer().pinned);
+    mgr.switch_to(0);
+    assert!(
+        !mgr.close_active(),
+        "pinned tab in multi-buffer must refuse close"
+    );
+    assert_eq!(mgr.count(), 2);
+    assert_eq!(mgr.active_idx, 0);
+
+    assert!(!mgr.toggle_pin_active());
+    assert!(!mgr.active_buffer().pinned);
+    assert!(mgr.close_active(), "unpinned buffer closes normally");
+    assert_eq!(mgr.count(), 1);
+    assert_eq!(mgr.active_buffer().title, "tab2.sql");
+}
+
+#[test]
+fn rename_active_sanitizes_trims_caps_and_refuses_empty() {
+    let mut mgr = BufferManager::new();
+    assert!(mgr.rename_active("  orders_audit.sql  "));
+    assert_eq!(mgr.active_buffer().title, "orders_audit.sql");
+
+    // Control and bidi characters are stripped cleanly.
+    assert!(mgr.rename_active("safe\x1b\n\u{202e}_tab"));
+    assert_eq!(mgr.active_buffer().title, "safe_tab");
+
+    // Titles longer than MAX_BUFFER_TITLE_CHARS are capped at 48 characters.
+    let overlong = "a".repeat(80);
+    assert!(mgr.rename_active(&overlong));
+    assert_eq!(
+        mgr.active_buffer().title.chars().count(),
+        MAX_BUFFER_TITLE_CHARS
+    );
+
+    // Empty, whitespace-only, or control-only titles are refused without altering title.
+    let current = mgr.active_buffer().title.clone();
+    assert!(!mgr.rename_active("   "));
+    assert!(!mgr.rename_active("\x1b\n\t\u{202e}"));
+    assert_eq!(mgr.active_buffer().title, current);
+}

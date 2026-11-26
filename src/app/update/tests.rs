@@ -14800,3 +14800,75 @@ fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished
     assert!(model.query_bench.is_none());
     assert_ne!(model.query_bench_request, first_req);
 }
+
+#[test]
+fn buffer_pin_rename_and_tab_click_workflows_are_pure_and_truthful() {
+    let mut model = moving();
+    model.editor.set_text("SELECT 'pinned';");
+    model.sync_active_buffer_from_editor();
+
+    // 1. Pin active buffer via TogglePinEditorBuffer -> sets pinned and triggers TabGlide.
+    assert!(update(&mut model, Message::Action(Action::TogglePinEditorBuffer)).is_empty());
+    assert!(model.buffers.active_buffer().pinned);
+    assert_eq!(model.motion().tab_glide(), Some(0.0));
+
+    // 2. Attempting to close a pinned buffer refuses cleanly with a helpful notice.
+    model.motion.settle();
+    assert!(update(&mut model, Message::Action(Action::CloseEditorBuffer)).is_empty());
+    assert_eq!(model.buffers.count(), 1);
+    assert_eq!(model.editor.text(), "SELECT 'pinned';");
+    assert_eq!(
+        model.buffer_notice.as_deref(),
+        Some("Buffer is pinned; unpin it before closing.")
+    );
+    assert!(model.motion().tab_glide().is_none());
+
+    // 3. RenameEditorBuffer opens single-line NamePrompt; Esc cancels without changing title.
+    assert!(update(&mut model, Message::Action(Action::RenameEditorBuffer)).is_empty());
+    assert!(model.buffer_notice.is_none());
+    assert_eq!(
+        model.name_prompt.as_ref().map(|p| p.purpose),
+        Some(crate::app::model::NamePurpose::RenameBuffer)
+    );
+    for ch in "ignored".chars() {
+        assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+    }
+    assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+    assert!(model.name_prompt.is_none());
+    assert_eq!(model.buffers.active_buffer().title, "buffer-1.sql");
+
+    // 4. RenameEditorBuffer + Enter applies sanitized title with zero disk I/O and starts TabGlide.
+    assert!(update(&mut model, Message::Action(Action::RenameEditorBuffer)).is_empty());
+    for ch in "  orders-check  ".chars() {
+        assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+    }
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.name_prompt.is_none());
+    assert_eq!(model.buffers.active_buffer().title, "orders-check");
+    assert_eq!(model.motion().tab_glide(), Some(0.0));
+
+    // 5. Clicking a tab or [+] on the tab bar switches or creates buffers accurately.
+    model.size = (120, 30);
+    assert!(update(&mut model, Message::Action(Action::NewEditorBuffer)).is_empty());
+    assert_eq!(model.buffers.active_idx, 1);
+    let (tab0_col, tab0_row) = find_region(&model, |r| {
+        r == crate::ui::widgets::Region::EditorTab { index: 0 }
+    });
+    assert!(update(&mut model, mouse_down(tab0_col, tab0_row)).is_empty());
+    assert_eq!(model.buffers.active_idx, 0);
+    assert_eq!(model.buffers.active_buffer().title, "orders-check");
+
+    let (plus_col, plus_row) =
+        find_region(&model, |r| r == crate::ui::widgets::Region::NewEditorTab);
+    assert!(update(&mut model, mouse_down(plus_col, plus_row)).is_empty());
+    assert_eq!(model.buffers.count(), 3);
+    assert_eq!(model.buffers.active_idx, 2);
+
+    // 6. Unpinning allows CloseEditorBuffer to succeed again.
+    model.buffers.switch_to(0);
+    model.sync_editor_from_active_buffer();
+    assert!(update(&mut model, Message::Action(Action::TogglePinEditorBuffer)).is_empty());
+    assert!(!model.buffers.active_buffer().pinned);
+    assert!(update(&mut model, Message::Action(Action::CloseEditorBuffer)).is_empty());
+    assert_eq!(model.buffers.count(), 2);
+}

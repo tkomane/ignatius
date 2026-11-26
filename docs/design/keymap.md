@@ -143,6 +143,8 @@ timer: a popup that disappears while being read is worse than one that waits.
 | `'` | Run query latency benchmark and A/B suite |
 | `"` | Inspect schema snapshot and drift guard |
 | `?` | Open interactive SQL Markdown runbook |
+| `9` | Pin or unpin the active buffer |
+| `0` | Rename the active buffer |
 
 The crash-recovery capsule adds two contextual chords for as long as it is on
 screen: `Ctrl+K r` restores the recovered buffers and `Ctrl+K d` discards the
@@ -346,6 +348,8 @@ With the workbench active, buffer chords manage the multi-tab and split SQL edit
 - `Ctrl+K }` (`next-buffer`) cycles to the next editor buffer.
 - `Ctrl+K {` (`prev-buffer`) cycles to the previous editor buffer.
 - `Ctrl+K \` (`split-buffer`) toggles dual split-buffer editing mode between `OFF`, `VERTICAL` (side-by-side), and `HORIZONTAL` (stacked).
+- `Ctrl+K 9` (`pin-buffer`) pins or unpins the active buffer; pinned tabs render a pin marker and cannot be closed until unpinned.
+- `Ctrl+K 0` (`rename-buffer`) opens a single-line in-TUI prompt to rename the active buffer tab for the session without writing to disk.
 
 With the workbench active, `Ctrl+K ;` (`snippet-library`) opens the persistent scratchpad and snippet library cockpit:
 - `Enter` inserts the selected snippet directly into the active editor buffer at the cursor.
@@ -673,7 +677,7 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `show-dependencies`, `save-query`, `open-query`, `export-rows`, `open-history`,
 `toggle-history-recording`, `schema-diagram`, `server-activity`, `security-audit`,
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
-`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
+`index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `pin-buffer`, `rename-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`.
 

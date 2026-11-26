@@ -950,3 +950,34 @@ fn notice_settle_tints_only_applied_format_notice_and_returns_to_resting() {
     render_footer(&custom_model, &keymap, &custom_pres, area, &mut custom_zero);
     assert_eq!(custom_zero, custom_resting);
 }
+
+#[test]
+fn buffer_notice_shows_pinned_close_refusal_and_truncates_narrowly() {
+    let mut model = connected_editor_model();
+    model.buffer_notice = Some("Buffer is pinned; unpin it before closing.".to_owned());
+    let keymap = Keymap::new();
+    let pres = presentation(ThemeChoice::Dark, true, GlyphTier::Unicode);
+
+    let wide = Rect::new(0, 0, 100, 1);
+    let mut buf = Buffer::empty(wide);
+    assert!(render_footer(&model, &keymap, &pres, wide, &mut buf));
+    let rendered: String = (0..wide.width).map(|x| buf[(x, 0)].symbol()).collect();
+    assert!(
+        rendered.contains("Buffer is pinned; unpin it before closing."),
+        "{rendered}"
+    );
+
+    let narrow = Rect::new(0, 0, 42, 1);
+    let mut narrow_buf = Buffer::empty(narrow);
+    assert!(render_footer(
+        &model,
+        &keymap,
+        &pres,
+        narrow,
+        &mut narrow_buf
+    ));
+    let narrow_text: String = (0..narrow.width)
+        .map(|x| narrow_buf[(x, 0)].symbol())
+        .collect();
+    assert!(narrow_text.contains("Buffer pinned"), "{narrow_text}");
+}

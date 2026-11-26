@@ -546,6 +546,8 @@ Press `Ctrl+K` to open the live chord guide showing every key that can follow; p
 | `'` | Run query latency benchmark and A/B suite |
 | `"` | Inspect schema snapshot and drift guard |
 | `?` | Open interactive SQL Markdown runbook |
+| `9` | Pin or unpin the active buffer |
+| `0` | Rename the active buffer |
 
 </details>
 

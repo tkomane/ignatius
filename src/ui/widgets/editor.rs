@@ -398,6 +398,16 @@ fn render_recovery_capsule(
     Line::from(spans).render(area, buf);
 }
 
+fn tab_pin_marker(pinned: bool, unicode: bool) -> &'static str {
+    if !pinned {
+        ""
+    } else if unicode {
+        "\u{25c6} "
+    } else {
+        "[P] "
+    }
+}
+
 fn tab_item_width(label_width: usize, is_active: bool, is_secondary: bool) -> usize {
     if is_active {
         label_width + 3
@@ -414,6 +424,170 @@ fn tab_window_width(start: usize, end: usize, total: usize, widths: &[usize]) ->
     left + widths[start..end].iter().sum::<usize>() + right
 }
 
+struct TabHitSpan {
+    index: usize,
+    start_x: u16,
+    end_x: u16,
+}
+
+struct TabBarLayout {
+    tabs: Vec<TabHitSpan>,
+    new_tab_start_x: u16,
+    new_tab_end_x: u16,
+    start: usize,
+    end: usize,
+    labels: Vec<String>,
+    tab_budget: usize,
+    overflow_overhead: usize,
+    needs_truncate: bool,
+}
+
+fn compute_tab_bar_layout(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+) -> Option<TabBarLayout> {
+    if area.width < 10 || area.height == 0 {
+        return None;
+    }
+    let unicode = !presentation.glyphs.is_ascii();
+    let split_active = model.buffers.split_mode != crate::buffer::EditorSplitMode::None;
+    let buffers_badge = format!(
+        "[BUFFERS: {}/{}]",
+        model.buffers.count(),
+        crate::buffer::MAX_EDITOR_BUFFERS
+    );
+    let mut prefix_width = display_width(&buffers_badge) + 1;
+    if split_active {
+        let split_badge = format!("[SPLIT: {}] ", model.buffers.split_mode.label());
+        prefix_width += display_width(&split_badge);
+    }
+
+    let total = model.buffers.buffers.len();
+    if total == 0 {
+        let start_x = area
+            .x
+            .saturating_add(u16::try_from(prefix_width).unwrap_or(u16::MAX));
+        return Some(TabBarLayout {
+            tabs: Vec::new(),
+            new_tab_start_x: start_x,
+            new_tab_end_x: start_x.saturating_add(3),
+            start: 0,
+            end: 0,
+            labels: Vec::new(),
+            tab_budget: 0,
+            overflow_overhead: 0,
+            needs_truncate: false,
+        });
+    }
+
+    let suffix = "[+]";
+    let tab_budget = usize::from(area.width).saturating_sub(prefix_width + display_width(suffix));
+    let active_idx = model.buffers.active_idx.min(total.saturating_sub(1));
+
+    let labels: Vec<String> = model
+        .buffers
+        .buffers
+        .iter()
+        .enumerate()
+        .map(|(idx, b)| {
+            let pin = tab_pin_marker(b.pinned, unicode);
+            format!(
+                "{pin}{}: {}",
+                idx + 1,
+                sanitize_for_display(&b.display_label())
+            )
+        })
+        .collect();
+    let widths: Vec<usize> = labels
+        .iter()
+        .enumerate()
+        .map(|(idx, label)| {
+            let is_active = idx == active_idx;
+            let is_secondary = split_active && model.buffers.secondary_idx == Some(idx);
+            tab_item_width(display_width(label), is_active, is_secondary)
+        })
+        .collect();
+
+    let mut start = active_idx;
+    let mut end = active_idx + 1;
+    loop {
+        let mut expanded = false;
+        if end < total && tab_window_width(start, end + 1, total, &widths) <= tab_budget {
+            end += 1;
+            expanded = true;
+        }
+        if start > 0 && tab_window_width(start - 1, end, total, &widths) <= tab_budget {
+            start -= 1;
+            expanded = true;
+        }
+        if !expanded {
+            break;
+        }
+    }
+
+    let overflow_overhead = if start > 0 { 2 } else { 0 } + if end < total { 2 } else { 0 };
+    let needs_truncate =
+        start + 1 == end && tab_window_width(start, end, total, &widths) > tab_budget;
+
+    let mut x = prefix_width + usize::from(start > 0) * 2;
+    let mut tabs = Vec::with_capacity(end.saturating_sub(start));
+    for (idx, raw_label) in labels.iter().enumerate().take(end).skip(start) {
+        let is_active = idx == active_idx;
+        let is_secondary = split_active && model.buffers.secondary_idx == Some(idx);
+        let label_width = if needs_truncate {
+            let max_label = tab_budget.saturating_sub(overflow_overhead + 3).max(4);
+            display_width(&truncate_to_width(raw_label, max_label, unicode))
+        } else {
+            display_width(raw_label)
+        };
+        let item_w = tab_item_width(label_width, is_active, is_secondary);
+        let pill_w = item_w.saturating_sub(1).max(1);
+        let start_x = area.x.saturating_add(u16::try_from(x).unwrap_or(u16::MAX));
+        let end_x = area
+            .x
+            .saturating_add(u16::try_from(x + pill_w).unwrap_or(u16::MAX));
+        tabs.push(TabHitSpan {
+            index: idx,
+            start_x,
+            end_x,
+        });
+        x += item_w;
+    }
+    x += usize::from(end < total) * 2;
+    let new_tab_start_x = area.x.saturating_add(u16::try_from(x).unwrap_or(u16::MAX));
+    let new_tab_end_x = new_tab_start_x.saturating_add(3);
+
+    Some(TabBarLayout {
+        tabs,
+        new_tab_start_x,
+        new_tab_end_x,
+        start,
+        end,
+        labels,
+        tab_budget,
+        overflow_overhead,
+        needs_truncate,
+    })
+}
+
+pub(crate) fn tab_bar_hit(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+    column: u16,
+) -> Option<super::Region> {
+    let layout = compute_tab_bar_layout(model, presentation, area)?;
+    if column >= layout.new_tab_start_x && column < layout.new_tab_end_x {
+        return Some(super::Region::NewEditorTab);
+    }
+    layout
+        .tabs
+        .into_iter()
+        .find(|tab| column >= tab.start_x && column < tab.end_x)
+        .map(|tab| super::Region::EditorTab { index: tab.index })
+}
+
 fn tab_glide_inks_are_legible(theme: &Theme) -> bool {
     let surface_alt = theme.rgb(Token::SurfaceAlt);
     [Token::Info, Token::Focus]
@@ -428,9 +602,9 @@ fn render_tab_bar(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    if area.width < 10 || area.height == 0 {
+    let Some(layout) = compute_tab_bar_layout(model, presentation, area) else {
         return;
-    }
+    };
     let theme = &presentation.theme;
     let unicode = !presentation.glyphs.is_ascii();
     let split_active = model.buffers.split_mode != crate::buffer::EditorSplitMode::None;
@@ -461,56 +635,24 @@ fn render_tab_bar(
         return;
     }
 
-    let prefix_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
-    let suffix = "[+]";
-    let tab_budget = usize::from(area.width).saturating_sub(prefix_width + display_width(suffix));
     let active_idx = model.buffers.active_idx.min(total.saturating_sub(1));
-
-    let labels: Vec<String> = model
-        .buffers
-        .buffers
-        .iter()
-        .enumerate()
-        .map(|(idx, b)| format!("{}: {}", idx + 1, sanitize_for_display(&b.display_label())))
-        .collect();
-    let widths: Vec<usize> = labels
-        .iter()
-        .enumerate()
-        .map(|(idx, label)| {
-            let is_active = idx == active_idx;
-            let is_secondary = split_active && model.buffers.secondary_idx == Some(idx);
-            tab_item_width(display_width(label), is_active, is_secondary)
-        })
-        .collect();
-
-    let mut start = active_idx;
-    let mut end = active_idx + 1;
-    loop {
-        let mut expanded = false;
-        if end < total && tab_window_width(start, end + 1, total, &widths) <= tab_budget {
-            end += 1;
-            expanded = true;
-        }
-        if start > 0 && tab_window_width(start - 1, end, total, &widths) <= tab_budget {
-            start -= 1;
-            expanded = true;
-        }
-        if !expanded {
-            break;
-        }
-    }
+    let start = layout.start;
+    let end = layout.end;
 
     if start > 0 {
         spans.push(Span::styled("< ", theme.style(Token::Info)));
     }
 
-    let overflow_overhead = if start > 0 { 2 } else { 0 } + if end < total { 2 } else { 0 };
-    for (idx, raw_label) in labels.iter().enumerate().take(end).skip(start) {
+    for (idx, raw_label) in layout.labels.iter().enumerate().take(end).skip(start) {
         let is_active = idx == active_idx;
         let is_secondary = split_active && model.buffers.secondary_idx == Some(idx);
-        let label = if start + 1 == end && tab_window_width(start, end, total, &widths) > tab_budget
-        {
-            let max_label = tab_budget.saturating_sub(overflow_overhead + 3).max(4);
+        let is_pinned = model.buffers.buffers[idx].pinned;
+        let pin_marker = tab_pin_marker(is_pinned, unicode);
+        let label = if layout.needs_truncate {
+            let max_label = layout
+                .tab_budget
+                .saturating_sub(layout.overflow_overhead + 3)
+                .max(4);
             truncate_to_width(raw_label, max_label, unicode)
         } else {
             raw_label.clone()
@@ -526,7 +668,17 @@ fn render_tab_bar(
             {
                 active_style = active_style.fg(ink);
             }
-            spans.push(Span::styled(format!("[{label}]"), active_style));
+            if is_pinned && tab_glide.is_none() && label.starts_with(pin_marker) {
+                let rest = &label[pin_marker.len()..];
+                spans.push(Span::styled("[", active_style));
+                spans.push(Span::styled(
+                    pin_marker.to_owned(),
+                    theme.active_tab(Token::Info),
+                ));
+                spans.push(Span::styled(format!("{rest}]"), active_style));
+            } else {
+                spans.push(Span::styled(format!("[{label}]"), active_style));
+            }
             spans.push(Span::raw(" "));
         } else if is_secondary {
             spans.push(Span::styled(
@@ -534,6 +686,13 @@ fn render_tab_bar(
                 theme.recessed_pill(Token::Info),
             ));
             spans.push(Span::raw(" "));
+        } else if is_pinned && label.starts_with(pin_marker) {
+            let rest = &label[pin_marker.len()..];
+            spans.push(Span::styled(
+                pin_marker.to_owned(),
+                theme.style(Token::Info),
+            ));
+            spans.push(Span::styled(format!("{rest} "), theme.style(Token::Text)));
         } else {
             spans.push(Span::styled(format!("{label} "), theme.style(Token::Muted)));
         }
@@ -543,7 +702,7 @@ fn render_tab_bar(
         spans.push(Span::styled("> ", theme.style(Token::Info)));
     }
 
-    spans.push(Span::styled(suffix, theme.style(Token::Focus)));
+    spans.push(Span::styled("[+]", theme.style(Token::Focus)));
 
     Line::from(spans).render(area, buf);
 }

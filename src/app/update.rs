@@ -125,6 +125,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             model.mouse.drag = None;
             model.mouse.last_click = None;
             model.layout_notice = None;
+            model.buffer_notice = None;
             paste_action(model, text)
         }
         Message::Connected(info) => {
@@ -1815,6 +1816,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         return switch_theme_action(model);
     }
     model.layout_notice = None;
+    model.buffer_notice = None;
     // Reshaping a pane must not dismiss an input owner and act underneath it.
     if (model.help_open || pane_input_owned(model))
         && matches!(
@@ -2177,10 +2179,13 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::CloseEditorBuffer => {
             let previous_count = model.buffers.count();
             let previous_buffer_id = model.buffers.active_buffer().id;
-            model.buffers.close_active();
-            sync_editor_after_buffer_change(model, previous_buffer_id);
-            if previous_count > 1 && model.allows_motion() {
-                model.motion.begin_tab_glide();
+            if model.buffers.close_active() {
+                sync_editor_after_buffer_change(model, previous_buffer_id);
+                if previous_count > 1 && model.allows_motion() {
+                    model.motion.begin_tab_glide();
+                }
+            } else {
+                model.buffer_notice = Some("Buffer is pinned; unpin it before closing.".to_owned());
             }
             Vec::new()
         }
@@ -2209,6 +2214,22 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ToggleEditorSplit => {
             model.sync_active_buffer_from_editor();
             model.buffers.cycle_split_mode();
+            Vec::new()
+        }
+        Action::TogglePinEditorBuffer => {
+            model.sync_active_buffer_from_editor();
+            model.buffers.toggle_pin_active();
+            if model.allows_motion() {
+                model.motion.begin_tab_glide();
+            }
+            Vec::new()
+        }
+        Action::RenameEditorBuffer => {
+            model.sync_active_buffer_from_editor();
+            let current_title = model.buffers.active_buffer().title.clone();
+            model.name_prompt = Some(crate::app::model::NamePrompt::for_buffer_rename(
+                &current_title,
+            ));
             Vec::new()
         }
         Action::SnippetLibrary => snippet_library_open(model),
@@ -5786,6 +5807,7 @@ fn handle_mouse(
             if pane_at(model, area, column, row) == Some(Focus::Results) && !model.plan.is_visible()
             {
                 model.layout_notice = None;
+                model.buffer_notice = None;
                 let columns = model.visible_result().map_or_else(Vec::new, |set| {
                     model.result_grid.visible_columns(set.columns.len())
                 });
@@ -5810,6 +5832,7 @@ fn handle_mouse(
     if matches!(kind, MouseKind::ScrollDown | MouseKind::ScrollUp) {
         if let Some(target_pane) = pane_at(model, area, column, row) {
             model.layout_notice = None;
+            model.buffer_notice = None;
             let direction = if matches!(kind, MouseKind::ScrollDown) {
                 Direction::Down
             } else {
@@ -5846,6 +5869,7 @@ fn handle_mouse(
                     return Vec::new();
                 }
                 model.layout_notice = None;
+                model.buffer_notice = None;
                 model.splits.zoomed = false;
                 let geometry = pane_geometry(model, area);
                 let delta = i32::from(column) - i32::from(start_column);
@@ -5863,6 +5887,7 @@ fn handle_mouse(
                     return Vec::new();
                 }
                 model.layout_notice = None;
+                model.buffer_notice = None;
                 model.splits.zoomed = false;
                 let geometry = pane_geometry(model, area);
                 let delta = i32::from(row) - i32::from(start_row);
@@ -5881,6 +5906,7 @@ fn handle_mouse(
                     return Vec::new();
                 }
                 model.layout_notice = None;
+                model.buffer_notice = None;
                 let delta =
                     isize::try_from(i32::from(column) - i32::from(start_column)).unwrap_or(0);
                 let width = start_width.saturating_add_signed(delta).clamp(
@@ -5932,6 +5958,7 @@ fn handle_mouse(
         Some(Region::SidebarRow { index }) => {
             model.prefix_pending = false;
             model.layout_notice = None;
+            model.buffer_notice = None;
             model.completion.menu = None;
             model.result_filtering = false;
             let previous_focus = model.focus;
@@ -5947,12 +5974,38 @@ fn handle_mouse(
             }
             Vec::new()
         }
+        Some(Region::EditorTab { index }) => {
+            model.prefix_pending = false;
+            model.layout_notice = None;
+            model.buffer_notice = None;
+            model.completion.menu = None;
+            model.tree.filtering = false;
+            model.result_filtering = false;
+            let previous_idx = model.buffers.active_idx;
+            let previous_focus = model.focus;
+            let previous_buffer_id = model.buffers.active_buffer().id;
+            model.sync_active_buffer_from_editor();
+            model.buffers.switch_to(index);
+            sync_editor_after_buffer_change(model, previous_buffer_id);
+            model.focus = Focus::Editor;
+            if model.allows_motion() {
+                if model.buffers.active_idx != previous_idx {
+                    model.motion.begin_tab_glide();
+                }
+                if model.focus != previous_focus {
+                    model.motion.begin_focus_pulse();
+                }
+            }
+            Vec::new()
+        }
+        Some(Region::NewEditorTab) => apply_action(model, Action::NewEditorBuffer),
         Some(Region::EditorText {
             line,
             column: text_col,
         }) => {
             model.prefix_pending = false;
             model.layout_notice = None;
+            model.buffer_notice = None;
             model.completion.menu = None;
             model.tree.filtering = false;
             model.result_filtering = false;
@@ -5970,6 +6023,7 @@ fn handle_mouse(
         }) => {
             model.prefix_pending = false;
             model.layout_notice = None;
+            model.buffer_notice = None;
             model.completion.menu = None;
             model.tree.filtering = false;
             let previous_focus = model.focus;
@@ -5995,6 +6049,7 @@ fn handle_mouse(
         Some(Region::ResultsHeaderCell { column: header_col }) => {
             model.prefix_pending = false;
             model.layout_notice = None;
+            model.buffer_notice = None;
             let selected_source_row = model.selected_source_row();
             model.result_grid.toggle_sort(header_col);
             restore_selected_source_row(model, selected_source_row);
@@ -6040,6 +6095,7 @@ fn handle_mouse(
         Some(Region::OverlayItem { index }) => {
             model.prefix_pending = false;
             model.layout_notice = None;
+            model.buffer_notice = None;
             if let Some(palette) = model.palette.as_mut() {
                 let max = palette.matches().len().saturating_sub(1);
                 palette.selected = index.min(max);
@@ -6054,6 +6110,7 @@ fn handle_mouse(
             if let Some(pane) = pane_at(model, area, column, row) {
                 model.prefix_pending = false;
                 model.layout_notice = None;
+                model.buffer_notice = None;
                 model.completion.menu = None;
                 if pane != Focus::Objects {
                     model.tree.filtering = false;
@@ -6490,6 +6547,11 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
             let name = prompt.typed.trim().to_owned();
             let purpose = prompt.purpose;
+            if purpose == crate::app::model::NamePurpose::RenameBuffer
+                && crate::buffer::sanitize_buffer_title(&name).is_none()
+            {
+                return Vec::new();
+            }
             let export_format = prompt.export_format;
             model.name_prompt = None;
             match purpose {
@@ -6508,6 +6570,12 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                         return Vec::new();
                     };
                     vec![Effect::ExportRows { path: name, format }]
+                }
+                crate::app::model::NamePurpose::RenameBuffer => {
+                    if model.buffers.rename_active(&name) && model.allows_motion() {
+                        model.motion.begin_tab_glide();
+                    }
+                    Vec::new()
                 }
             }
         }

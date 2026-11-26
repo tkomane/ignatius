@@ -130,6 +130,8 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("next-buffer", Action::NextEditorBuffer),
     ("prev-buffer", Action::PrevEditorBuffer),
     ("split-buffer", Action::ToggleEditorSplit),
+    ("pin-buffer", Action::TogglePinEditorBuffer),
+    ("rename-buffer", Action::RenameEditorBuffer),
     ("snippet-library", Action::SnippetLibrary),
     ("restore-session", Action::RestoreSession),
     ("discard-recovery", Action::DiscardRecovery),
@@ -920,6 +922,12 @@ pub const CHORDS: &[(char, Action, &str)] = &[
         Action::SqlRunbook,
         "Open interactive SQL Markdown runbook",
     ),
+    (
+        '9',
+        Action::TogglePinEditorBuffer,
+        "Pin or unpin the active buffer",
+    ),
+    ('0', Action::RenameEditorBuffer, "Rename the active buffer"),
 ];
 
 /// The contextual second keys offered while the crash recovery capsule is on
@@ -1073,6 +1081,8 @@ const fn short_label(action: &Action) -> &'static str {
         Action::NextEditorBuffer => "Next buffer",
         Action::PrevEditorBuffer => "Previous buffer",
         Action::ToggleEditorSplit => "Toggle split",
+        Action::TogglePinEditorBuffer => "Pin buffer",
+        Action::RenameEditorBuffer => "Rename buffer",
         Action::SnippetLibrary => "Snippet library",
         Action::RestoreSession => "Restore",
         Action::DiscardRecovery => "Discard",
