@@ -482,6 +482,7 @@ pub async fn completion_catalog(
     use crate::query::completion::{
         CatalogColumn, CatalogObject, CatalogObjectKind, CatalogRelation,
     };
+    use futures_util::StreamExt;
     use std::collections::HashMap;
 
     const RELATIONS: &str = "SELECT n.nspname::text AS schema, \
@@ -515,34 +516,37 @@ pub async fn completion_catalog(
         .map(str::to_owned)
         .collect::<Vec<_>>();
 
+    let mut objects = Vec::new();
     let relation_rows = client
-        .query(RELATIONS, &[&relkinds])
+        .query_raw(RELATIONS, [&relkinds])
         .await
         .map_err(|err| from_query_error(&err, 0))?;
-    let function_rows = client
-        .query(FUNCTIONS, &[])
-        .await
-        .map_err(|err| from_query_error(&err, 0))?;
-    let column_rows = client
-        .query(COLUMNS, &[&relkinds])
-        .await
-        .map_err(|err| from_query_error(&err, 0))?;
+    tokio::pin!(relation_rows);
+    while let Some(row) = relation_rows.next().await {
+        let row = row.map_err(|err| from_query_error(&err, 0))?;
+        let Some(kind) = CatalogObjectKind::from_relkind(row.get::<_, &str>("relkind")) else {
+            continue;
+        };
+        objects.push(CatalogObject {
+            kind,
+            schema: row.get("schema"),
+            name: row.get("name"),
+            readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
+            detail: None,
+        });
+    }
 
-    let mut objects = relation_rows
-        .iter()
-        .filter_map(|row| {
-            let kind = CatalogObjectKind::from_relkind(row.get::<_, String>("relkind").as_str())?;
-            Some(CatalogObject {
-                kind,
-                schema: row.get("schema"),
-                name: row.get("name"),
-                readable: row.get::<_, Option<bool>>("readable").unwrap_or(false),
-                detail: None,
-            })
-        })
-        .collect::<Vec<_>>();
-    objects.extend(function_rows.iter().map(|row| {
-        CatalogObject {
+    let function_rows = client
+        .query_raw(
+            FUNCTIONS,
+            std::iter::empty::<&(dyn tokio_postgres::types::ToSql + Sync)>(),
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    tokio::pin!(function_rows);
+    while let Some(row) = function_rows.next().await {
+        let row = row.map_err(|err| from_query_error(&err, 0))?;
+        objects.push(CatalogObject {
             kind: CatalogObjectKind::Function,
             schema: row.get("schema"),
             name: row.get("name"),
@@ -550,23 +554,39 @@ pub async fn completion_catalog(
             detail: row
                 .get::<_, Option<String>>("returns")
                 .map(|returns| format!("returns {returns}")),
-        }
-    }));
+        });
+    }
+
+    let column_rows = client
+        .query_raw(COLUMNS, [&relkinds])
+        .await
+        .map_err(|err| from_query_error(&err, 0))?;
+    tokio::pin!(column_rows);
 
     let mut relations = Vec::new();
-    let mut relation_positions = HashMap::new();
-    for row in &column_rows {
+    let mut relation_positions: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    while let Some(row) = column_rows.next().await {
+        let row = row.map_err(|err| from_query_error(&err, 0))?;
         let schema: &str = row.get("schema");
         let name: &str = row.get("relation");
-        let position = *relation_positions.entry((schema, name)).or_insert_with(|| {
+        let position = if let Some(position) = relation_positions
+            .get(schema)
+            .and_then(|positions| positions.get(name))
+        {
+            *position
+        } else {
             let position = relations.len();
+            relation_positions
+                .entry(schema.to_owned())
+                .or_default()
+                .insert(name.to_owned(), position);
             relations.push(CatalogRelation {
                 schema: schema.to_owned(),
                 name: name.to_owned(),
                 columns: Vec::new(),
             });
             position
-        });
+        };
         relations[position].columns.push(CatalogColumn {
             name: row.get("name"),
             data_type: row.get("data_type"),

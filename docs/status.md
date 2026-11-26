@@ -4,6 +4,25 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 101 - Stream completion catalogue rows - 26 November 2026
+
+- **W10 / 012 T033.** Relation, function and column queries map decoded
+  rows as they arrive. Completion and the ER preview receive the full
+  ordered snapshot after all three queries complete.
+  [Feature 012 tasks](../specs/012-schema-completion/tasks.md)
+- **Matched release builds on macOS arm64 and PostgreSQL 18.7.** Three
+  fresh processes per build each loaded the same control and scaled
+  fixtures. Median peak resident memory fell from 20.7 MiB (19.4-20.8)
+  to 11.1 MiB (11.1-11.3). Independent SQL counts and ordered snapshot
+  fingerprints matched across builds, including all 2,100 relations,
+  24,600 columns and 200 functions in the scaled fixture.
+- **Acquisition time.** Each process measured seven loads after a warmup.
+  The scaled median of process medians was 80.1 ms before and 73.7 ms after.
+  The control medians were 10.6 ms and 10.8 ms. The timing ranges overlapped.
+  The retained snapshot and driver buffers still scale with the workload.
+- **Focused verification.** The live PostgreSQL catalogue metadata snapshot,
+  ten completion tests and four resource-bound contracts passed.
+
 ## Wave 100 - Protect copied values in binary sync diagnostics - 26 November 2026
 
 - **W04 / 039 T011.** Binary COPY, source dry-run counts and destination

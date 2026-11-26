@@ -122,6 +122,9 @@ Principle I, applied to the one feature most tempted to bluff.
   the true count, in the same words the result pane already uses.
 - **FR-1208**: Completion MUST be switchable off in configuration, and the key
   that requests it explicitly MUST work whether or not the automatic offer is on.
+- **FR-1209**: Catalogue acquisition MUST consume decoded rows as they arrive
+  and publish a complete snapshot after all catalogue queries succeed. The
+  snapshot retains the order and metadata of every mapped object and column.
 
 ### Security
 
