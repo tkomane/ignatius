@@ -427,11 +427,33 @@ struct Lexeme {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct SqlIdentifier {
+    text: String,
+    quoted: bool,
+}
+
+impl SqlIdentifier {
+    fn matches(&self, other: &Self) -> bool {
+        match (self.quoted, other.quoted) {
+            (false, false) => self.text.eq_ignore_ascii_case(&other.text),
+            (true, true) => self.text == other.text,
+            (true, false) => self
+                .text
+                .bytes()
+                .eq(other.text.bytes().map(|byte| byte.to_ascii_lowercase())),
+            (false, true) => other
+                .text
+                .bytes()
+                .eq(self.text.bytes().map(|byte| byte.to_ascii_lowercase())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RelationRef {
     schema: Option<String>,
-    name: String,
-    alias: Option<String>,
-    subquery: bool,
+    name: Option<SqlIdentifier>,
+    alias: Option<SqlIdentifier>,
 }
 
 fn lexemes(sql: &str) -> Vec<Lexeme> {
@@ -517,7 +539,29 @@ fn lexemes_before(lexemes: &[Lexeme], cursor: usize) -> Vec<&Lexeme> {
 
 fn relation_refs(lexemes: &[&Lexeme]) -> Vec<RelationRef> {
     let mut refs = Vec::new();
+    let mut resume_at = 0;
     for (index, lexeme) in lexemes.iter().enumerate() {
+        if index < resume_at {
+            continue;
+        }
+        // A completed subquery's internal names are no longer in scope. The
+        // enclosing FROM or JOIN can still bind its alias independently.
+        if symbol_at(lexemes, index) == Some("(")
+            && lexemes[index + 1..]
+                .iter()
+                .find(|lexeme| !is_comment(lexeme))
+                .is_some_and(|lexeme| {
+                    lexeme.kind == LexemeKind::Word
+                        && matches!(
+                            lexeme.text.to_ascii_lowercase().as_str(),
+                            "select" | "with" | "values" | "table"
+                        )
+                })
+            && let Some(close) = matching_paren(lexemes, index)
+        {
+            resume_at = close + 1;
+            continue;
+        }
         if lexeme.kind != LexemeKind::Word {
             continue;
         }
@@ -537,54 +581,45 @@ fn relation_refs(lexemes: &[&Lexeme]) -> Vec<RelationRef> {
                 let alias = alias_after(lexemes, close + 1);
                 refs.push(RelationRef {
                     schema: None,
-                    name: String::new(),
+                    name: None,
                     alias,
-                    subquery: true,
                 });
             }
             continue;
         }
-        let Some(first) = name_at(lexemes, cursor) else {
+        let Some(first) = identifier_at(lexemes, cursor) else {
             continue;
         };
-        cursor = first.1;
+        cursor += 1;
         let (schema, name) = if symbol_at(lexemes, cursor) == Some(".") {
-            if let Some(second) = name_at(lexemes, cursor + 1) {
-                (Some(first.0), second.0)
+            if let Some(second) = identifier_at(lexemes, cursor + 1) {
+                cursor += 2;
+                (Some(first.text), second)
             } else {
-                (None, first.0)
+                (None, first)
             }
         } else {
-            (None, first.0)
+            (None, first)
         };
-        if schema.is_some() {
-            cursor += 2;
-        }
         let alias = alias_after(lexemes, cursor);
         refs.push(RelationRef {
             schema,
-            name,
+            name: Some(name),
             alias,
-            subquery: false,
         });
     }
     refs
 }
 
-fn alias_after(lexemes: &[&Lexeme], mut index: usize) -> Option<String> {
+fn alias_after(lexemes: &[&Lexeme], mut index: usize) -> Option<SqlIdentifier> {
     if word_at(lexemes, index).is_some_and(|word| word.eq_ignore_ascii_case("as")) {
         index += 1;
     }
-    let candidate = name_at(lexemes, index)?;
-    let text = candidate.0;
-    if !highlight::is_keyword(&text) {
-        Some(text)
-    } else {
-        None
-    }
+    identifier_at(lexemes, index)
+        .filter(|identifier| identifier.quoted || !highlight::is_keyword(&identifier.text))
 }
 
-fn cte_names(lexemes: &[&Lexeme]) -> Vec<String> {
+fn cte_names(lexemes: &[&Lexeme]) -> Vec<SqlIdentifier> {
     let Some(with) = lexemes.iter().position(|lexeme| {
         lexeme.kind == LexemeKind::Word && lexeme_text(lexeme).eq_ignore_ascii_case("with")
     }) else {
@@ -595,7 +630,8 @@ fn cte_names(lexemes: &[&Lexeme]) -> Vec<String> {
         index += 1;
     }
     let mut names = Vec::new();
-    while let Some((name, after_name)) = name_at(lexemes, index) {
+    while let Some(name) = identifier_at(lexemes, index) {
+        let after_name = index + 1;
         if !word_at(lexemes, after_name).is_some_and(|word| word.eq_ignore_ascii_case("as")) {
             break;
         }
@@ -623,26 +659,38 @@ fn candidates_for_context(
     before: &[&Lexeme],
     context: &CompletionContext,
     refs: &[RelationRef],
-    ctes: &[String],
+    ctes: &[SqlIdentifier],
     catalog: Option<&CompletionCatalog>,
 ) -> (CompletionScope, Vec<Candidate>) {
-    let qualifier = qualifier_before(sql, before, context);
-    if let Some(qualifier) = qualifier {
+    if let Some((qualifier, index)) = qualifier_before(sql, before, context) {
         if let Some(catalog) = catalog {
-            if catalog.has_schema(&qualifier) {
+            if !qualifier_in_relation_position(&before[..index])
+                && let Some(relation) = relation_for_qualifier(refs, &qualifier)
+            {
+                let candidates = relation
+                    .name
+                    .as_ref()
+                    .filter(|name| {
+                        relation.schema.is_some() || !ctes.iter().any(|cte| cte.matches(name))
+                    })
+                    .and_then(|name| catalog.relation(relation.schema.as_deref(), &name.text))
+                    .map_or_else(Vec::new, |relation| {
+                        columns_for_relation(relation, &qualifier.text)
+                    });
                 return (
-                    CompletionScope::Schema(qualifier.clone()),
-                    objects_in_schema(catalog, &qualifier),
+                    CompletionScope::QualifiedColumns(qualifier.text),
+                    candidates,
                 );
             }
-            if let Some(relation) = relation_for_qualifier(catalog, refs, &qualifier) {
-                return (
-                    CompletionScope::QualifiedColumns(qualifier.clone()),
-                    columns_for_relation(relation, &qualifier),
-                );
+            if catalog.has_schema(&qualifier.text) {
+                let candidates = objects_in_schema(catalog, &qualifier.text);
+                return (CompletionScope::Schema(qualifier.text), candidates);
             }
         }
-        return (CompletionScope::QualifiedColumns(qualifier), Vec::new());
+        return (
+            CompletionScope::QualifiedColumns(qualifier.text),
+            Vec::new(),
+        );
     }
 
     let relation_position = last_context_keyword(before).is_some_and(|keyword| {
@@ -655,8 +703,8 @@ fn candidates_for_context(
     if relation_position {
         let mut candidates = catalog.map_or_else(Vec::new, relation_objects);
         candidates.extend(ctes.iter().map(|name| Candidate {
-            label: name.clone(),
-            insert_text: quote_identifier(name),
+            label: name.text.clone(),
+            insert_text: quote_identifier(&name.text),
             kind: CandidateKind::Cte,
             schema: None,
             source: None,
@@ -671,23 +719,23 @@ fn candidates_for_context(
     let mut candidates = Vec::new();
     if let Some(catalog) = catalog {
         for relation_ref in refs {
-            if relation_ref.subquery || relation_ref.name.is_empty() {
+            let Some(name) = &relation_ref.name else {
                 continue;
-            }
+            };
             let relation = catalog
-                .relation(relation_ref.schema.as_deref(), &relation_ref.name)
+                .relation(relation_ref.schema.as_deref(), &name.text)
                 .or_else(|| {
                     relation_ref
                         .schema
                         .is_none()
-                        .then(|| catalog.relations_named(&relation_ref.name))
+                        .then(|| catalog.relations_named(&name.text))
                         .and_then(|relations| relations.into_iter().next())
                 });
             if let Some(relation) = relation {
                 let source = relation_ref
                     .alias
-                    .as_deref()
-                    .unwrap_or(&relation_ref.name)
+                    .as_ref()
+                    .map_or(name.text.as_str(), |alias| alias.text.as_str())
                     .to_owned();
                 candidates.extend(relation.columns.iter().map(|column| Candidate {
                     label: column.name.clone(),
@@ -712,7 +760,11 @@ fn candidates_for_context(
     (scope, candidates)
 }
 
-fn qualifier_before(sql: &str, before: &[&Lexeme], context: &CompletionContext) -> Option<String> {
+fn qualifier_before(
+    sql: &str,
+    before: &[&Lexeme],
+    context: &CompletionContext,
+) -> Option<(SqlIdentifier, usize)> {
     let mut index = before.len();
     while index > 0 {
         index -= 1;
@@ -720,7 +772,7 @@ fn qualifier_before(sql: &str, before: &[&Lexeme], context: &CompletionContext) 
         if lexeme.end <= context.replacement.start {
             if lexeme.kind == LexemeKind::Symbol && &sql[lexeme.start..lexeme.end] == "." {
                 let previous = index.checked_sub(1)?;
-                return name_at(before, previous).map(|(name, _)| name);
+                return identifier_at(before, previous).map(|name| (name, previous));
             }
             if lexeme.end < context.replacement.start {
                 break;
@@ -730,26 +782,76 @@ fn qualifier_before(sql: &str, before: &[&Lexeme], context: &CompletionContext) 
     None
 }
 
-fn relation_for_qualifier<'a>(
-    catalog: &'a CompletionCatalog,
-    refs: &[RelationRef],
-    qualifier: &str,
-) -> Option<&'a CatalogRelation> {
-    refs.iter()
-        .find(|relation| {
-            relation
-                .alias
-                .as_deref()
-                .is_some_and(|alias| same_identifier(alias, qualifier))
-                || same_identifier(&relation.name, qualifier)
-        })
-        .and_then(|relation| {
-            if relation.subquery {
-                None
-            } else {
-                catalog.relation(relation.schema.as_deref(), &relation.name)
+fn qualifier_in_relation_position(before: &[&Lexeme]) -> bool {
+    let mut preceding = before
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, lexeme)| !is_comment(lexeme));
+    let position = match preceding.next() {
+        Some((_, lexeme))
+            if lexeme.kind == LexemeKind::Word
+                && (lexeme.text.eq_ignore_ascii_case("lateral")
+                    || lexeme.text.eq_ignore_ascii_case("only")) =>
+        {
+            preceding.next()
+        }
+        Some((_, lexeme)) if lexeme.kind == LexemeKind::Symbol && lexeme.text == "(" => {
+            if !preceding.next().is_some_and(|(_, lexeme)| {
+                lexeme.kind == LexemeKind::Word && lexeme.text.eq_ignore_ascii_case("only")
+            }) {
+                return false;
             }
-        })
+            preceding.next()
+        }
+        position => position,
+    };
+
+    position.is_some_and(|(index, lexeme)| match lexeme.kind {
+        LexemeKind::Word => matches!(
+            lexeme.text.to_ascii_lowercase().as_str(),
+            "from" | "join" | "update" | "into" | "references"
+        ),
+        LexemeKind::Symbol if lexeme.text == "," => comma_in_from_list(&before[..index]),
+        _ => false,
+    })
+}
+
+/// A comma separates relation names only in a FROM list at its own nesting
+/// level. Expression commas inside function calls or brackets stay local.
+fn comma_in_from_list(before: &[&Lexeme]) -> bool {
+    let mut nested = 0;
+    for lexeme in before.iter().rev() {
+        match (lexeme.kind, lexeme.text.as_str()) {
+            (LexemeKind::Symbol, ")" | "]") => nested += 1,
+            (LexemeKind::Symbol, "(" | "[") if nested == 0 => return false,
+            (LexemeKind::Symbol, "(" | "[") => nested -= 1,
+            (LexemeKind::Word, _) if nested == 0 => {
+                match lexeme.text.to_ascii_lowercase().as_str() {
+                    "from" => return true,
+                    "select" | "where" | "group" | "having" | "window" | "order" | "limit"
+                    | "offset" | "fetch" | "for" | "union" | "intersect" | "except" | "set"
+                    | "values" | "returning" => return false,
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn relation_for_qualifier<'a>(
+    refs: &'a [RelationRef],
+    qualifier: &SqlIdentifier,
+) -> Option<&'a RelationRef> {
+    refs.iter().rev().find(|relation| {
+        relation
+            .alias
+            .as_ref()
+            .or(relation.name.as_ref())
+            .is_some_and(|name| name.matches(qualifier))
+    })
 }
 
 fn objects_in_schema(catalog: &CompletionCatalog, schema: &str) -> Vec<Candidate> {
@@ -861,12 +963,17 @@ fn matching_paren(lexemes: &[&Lexeme], open: usize) -> Option<usize> {
     None
 }
 
-fn name_at(lexemes: &[&Lexeme], index: usize) -> Option<(String, usize)> {
+fn identifier_at(lexemes: &[&Lexeme], index: usize) -> Option<SqlIdentifier> {
     let lexeme = *lexemes.get(index)?;
-    matches!(lexeme.kind, LexemeKind::Word | LexemeKind::Quoted).then(|| {
-        let text = lexeme_text(lexeme);
-        (unquote_identifier(&text), index + 1)
+    matches!(lexeme.kind, LexemeKind::Word | LexemeKind::Quoted).then(|| SqlIdentifier {
+        text: unquote_identifier(&lexeme.text),
+        quoted: lexeme.kind == LexemeKind::Quoted,
     })
+}
+
+fn is_comment(lexeme: &Lexeme) -> bool {
+    lexeme.kind == LexemeKind::Protected
+        && (lexeme.text.starts_with("--") || lexeme.text.starts_with("/*"))
 }
 
 fn word_at(lexemes: &[&Lexeme], index: usize) -> Option<String> {

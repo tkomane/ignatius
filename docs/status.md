@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 107 - Resolve completion qualifiers by SQL scope - 26 November 2026
+
+- **W02 / 012 T034.** An in-scope relation alias takes precedence over a
+  same-named schema in an expression. Schema completions remain
+  available in relation-name slots, and aliases with unavailable
+  column metadata have an empty column list.
+  [Feature 012 tasks](../specs/012-schema-completion/tasks.md)
+- **Focused verification.** Two new regressions failed on the baseline.
+  All 32 completion and plain-mode unit tests passed on the fix.
+  Cases covered quoted and bare identifiers, closed subqueries, and
+  qualified relation slots in JOIN and FROM lists.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** With a
+  real schema and alias sharing a name, `\complete` offered the scoped
+  columns. Accepting the column produced the expected result row.
+  A separate JOIN completion still offered the schema table.
+
 ## Wave 106 - Preserve transaction ownership for direct seed inserts - 26 November 2026
 
 - **W03 / 040 T013.** Nonempty direct seeding requires an idle session

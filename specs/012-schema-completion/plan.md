@@ -147,6 +147,9 @@ examples and verification commands in [quickstart.md](./quickstart.md).
 1. Add shared lexer helpers and the pure completion analyzer with conservative
    scope detection for relations, aliases, schemas, CTE names, subquery aliases,
    literals, comments, and statement boundaries.
+   Detect the relation-name slot from tokens at the qualifier so an alias
+   collision can resolve to columns in an expression and to schema objects
+   in a relation list.
 2. Add the fixed catalogue snapshot query and session facade, preserving
    read-only metadata routing, bound parameters, permission facts, and bounded
    response data.
