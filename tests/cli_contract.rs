@@ -142,6 +142,124 @@ fn an_invalid_sslmode_is_a_usage_error_and_names_the_alternatives() {
 }
 
 #[test]
+fn result_diff_offline_cli_contract() {
+    let help = binary()
+        .args(["result-diff", "--help"])
+        .output()
+        .expect("run ignatius result-diff --help");
+    assert_eq!(code(&help), 0);
+    let help_text = stdout(&help);
+    assert!(help_text.contains("--key"), "{help_text}");
+    assert!(help_text.contains("--format"), "{help_text}");
+    assert!(help_text.contains("--output"), "{help_text}");
+    assert!(help_text.contains("--force"), "{help_text}");
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ignatius-result-diff-contract-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let baseline = dir.join("base.json");
+    let current = dir.join("curr.json");
+    std::fs::write(
+        &baseline,
+        r#"[{"id":1,"name":"alice"},{"id":2,"name":"bob"}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &current,
+        r#"[{"id":1,"name":"alice-v2"},{"id":3,"name":"carol"}]"#,
+    )
+    .unwrap();
+
+    // Text output
+    let text_out = binary()
+        .args([
+            "result-diff",
+            baseline.to_str().unwrap(),
+            current.to_str().unwrap(),
+            "--key",
+            "id",
+        ])
+        .output()
+        .expect("run result-diff text");
+    assert_eq!(code(&text_out), 0, "stderr: {}", stderr(&text_out));
+    let text_stdout = stdout(&text_out);
+    assert!(text_stdout.contains("[~]"), "{text_stdout}");
+    assert!(text_stdout.contains("[-]"), "{text_stdout}");
+    assert!(text_stdout.contains("[+]"), "{text_stdout}");
+    assert!(text_stdout.contains("keyed (id)"), "{text_stdout}");
+
+    // Markdown + atomic output protection (--force required when occupied)
+    let report = dir.join("diff.md");
+    std::fs::write(&report, "keep existing").unwrap();
+    let occupied = binary()
+        .args([
+            "result-diff",
+            baseline.to_str().unwrap(),
+            current.to_str().unwrap(),
+            "--format",
+            "markdown",
+            "--output",
+            report.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run occupied output");
+    assert_ne!(code(&occupied), 0);
+    assert_eq!(std::fs::read_to_string(&report).unwrap(), "keep existing");
+
+    let forced = binary()
+        .args([
+            "result-diff",
+            baseline.to_str().unwrap(),
+            current.to_str().unwrap(),
+            "--format",
+            "markdown",
+            "--output",
+            report.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .expect("run forced output");
+    assert_eq!(code(&forced), 0, "stderr: {}", stderr(&forced));
+    let md = std::fs::read_to_string(&report).unwrap();
+    assert!(md.contains("| `[~]` |"), "{md}");
+
+    // Malformed JSON -> exit 2 (Usage)
+    let bad = dir.join("bad.json");
+    std::fs::write(&bad, "{not-json").unwrap();
+    let bad_out = binary()
+        .args([
+            "result-diff",
+            bad.to_str().unwrap(),
+            current.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run malformed json");
+    assert_eq!(code(&bad_out), 2, "stderr: {}", stderr(&bad_out));
+
+    // Symlink input rejected -> exit 2 (Usage)
+    #[cfg(unix)]
+    {
+        let link = dir.join("link.json");
+        std::os::unix::fs::symlink(&baseline, &link).unwrap();
+        let link_out = binary()
+            .args([
+                "result-diff",
+                link.to_str().unwrap(),
+                current.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run symlink input");
+        assert_eq!(code(&link_out), 2, "stderr: {}", stderr(&link_out));
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn insert_output_requires_an_explicit_table_before_connection_work() {
     for args in [
         vec!["query", "-c", "SELECT 1", "--format", "insert"],

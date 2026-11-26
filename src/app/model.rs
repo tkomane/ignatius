@@ -2483,6 +2483,157 @@ impl ResultAnalyticsState {
     }
 }
 
+/// Row filter mode in the Result Snapshot A/B Diff overlay (`067` Slice 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResultDiffFilter {
+    /// Show every aligned row (`[+]`, `[-]`, `[~]`, `[=]`).
+    #[default]
+    All,
+    /// Show only added, removed, or changed rows.
+    DifferencesOnly,
+    /// Show only added rows (`[+]`).
+    Added,
+    /// Show only removed rows (`[-]`).
+    Removed,
+    /// Show only changed rows (`[~]`).
+    Changed,
+}
+
+impl ResultDiffFilter {
+    /// Cycles through all filter modes deterministically.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::All => Self::DifferencesOnly,
+            Self::DifferencesOnly => Self::Added,
+            Self::Added => Self::Removed,
+            Self::Removed => Self::Changed,
+            Self::Changed => Self::All,
+        }
+    }
+
+    /// Plain-language filter label shown in the overlay header.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::DifferencesOnly => "Differences only",
+            Self::Added => "Added",
+            Self::Removed => "Removed",
+            Self::Changed => "Changed",
+        }
+    }
+
+    /// Whether this filter admits a diff row classification.
+    #[must_use]
+    pub const fn matches(self, kind: &crate::result_diff::DiffRowKind) -> bool {
+        use crate::result_diff::DiffRowKind;
+        match self {
+            Self::All => true,
+            Self::DifferencesOnly => !matches!(kind, DiffRowKind::Unchanged),
+            Self::Added => matches!(kind, DiffRowKind::Added),
+            Self::Removed => matches!(kind, DiffRowKind::Removed),
+            Self::Changed => matches!(kind, DiffRowKind::Changed { .. }),
+        }
+    }
+}
+
+/// Interactive state for the Pinned Result Snapshot A/B Diff overlay (`067` Slice 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultDiffState {
+    /// Computed bounded diff between `pinned_result` and the compared `ResultSet`.
+    pub diff: crate::result_diff::ResultDiff,
+    /// Active row classification filter.
+    pub filter: ResultDiffFilter,
+    /// Currently selected key column override (`None` = positional alignment).
+    pub selected_key: Option<String>,
+    /// Vertical scroll offset within filtered diff rows.
+    pub vertical_scroll: usize,
+    /// Horizontal column scroll offset across `diff.display_columns`.
+    pub horizontal_scroll: usize,
+    /// Optional status feedback shown in the overlay footer.
+    pub status_message: Option<String>,
+}
+
+impl ResultDiffState {
+    /// Computes an initial [`ResultDiffState`] comparing `baseline` to `current`.
+    #[must_use]
+    pub fn new(
+        baseline: &crate::result_diff::PinnedResult,
+        current: &crate::query::result::ResultSet,
+    ) -> Self {
+        let selected_key = baseline.key_column.clone();
+        let diff = crate::result_diff::diff_results(baseline, current, selected_key.as_deref());
+        Self {
+            diff,
+            filter: ResultDiffFilter::All,
+            selected_key,
+            vertical_scroll: 0,
+            horizontal_scroll: 0,
+            status_message: None,
+        }
+    }
+
+    /// Returns filtered `(original_index, row)` entries for the active filter.
+    #[must_use]
+    pub fn filtered_entries(&self) -> Vec<(usize, &crate::result_diff::DiffRow)> {
+        self.diff
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| self.filter.matches(&entry.kind))
+            .collect()
+    }
+
+    /// Cycles the active row filter and resets vertical scroll to the top.
+    pub fn cycle_filter(&mut self) {
+        self.set_filter(self.filter.next());
+    }
+
+    /// Sets the active row filter directly and resets vertical scroll to the top.
+    pub fn set_filter(&mut self, filter: ResultDiffFilter) {
+        self.filter = filter;
+        self.vertical_scroll = 0;
+        self.status_message = Some(format!("Filter: {}", filter.label()));
+    }
+
+    /// Cycles through `None` (Positional) and each candidate key column, recomputing the diff.
+    pub fn cycle_key_column(
+        &mut self,
+        baseline: &crate::result_diff::PinnedResult,
+        current: &crate::query::result::ResultSet,
+    ) {
+        let mut options: Vec<Option<String>> = vec![None];
+        for col in &self.diff.candidate_key_columns {
+            options.push(Some(col.clone()));
+        }
+        let next_pos = options
+            .iter()
+            .position(|opt| *opt == self.selected_key)
+            .map_or(0, |idx| (idx + 1) % options.len());
+        self.selected_key = options[next_pos].clone();
+        self.diff =
+            crate::result_diff::diff_results(baseline, current, self.selected_key.as_deref());
+        self.vertical_scroll = 0;
+        self.status_message = Some(format!("Alignment: {}", self.diff.alignment.label()));
+    }
+
+    /// Scrolls vertically within filtered rows.
+    pub fn scroll_vertical(&mut self, delta: isize) {
+        let total = self.filtered_entries().len();
+        let max_scroll = total.saturating_sub(1);
+        let next = (self.vertical_scroll as isize + delta).clamp(0, max_scroll as isize);
+        self.vertical_scroll = next as usize;
+    }
+
+    /// Scrolls horizontally across `display_columns`.
+    pub fn scroll_horizontal(&mut self, delta: isize) {
+        let max_col = self.diff.display_columns.len().saturating_sub(1);
+        let next = (self.horizontal_scroll as isize + delta).clamp(0, max_col as isize);
+        self.horizontal_scroll = next as usize;
+    }
+}
+
 /// State for the Query Latency Benchmark & A/B Regression Suite overlay (`056`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct QueryBenchState {
@@ -4104,6 +4255,12 @@ pub struct Model {
     pub plan_diff_request: u64,
     /// Interactive zero-query result analytics profiler overlay state.
     pub result_analytics: Option<ResultAnalyticsState>,
+    /// Bounded in-memory pinned result snapshot for A/B diffing (`067` Slice 2).
+    pub pinned_result: Option<crate::result_diff::PinnedResult>,
+    /// Interactive pinned result snapshot A/B diff overlay state (`067` Slice 2).
+    pub result_diff: Option<ResultDiffState>,
+    /// Last status or refusal notice for pinning/comparing result snapshots.
+    pub result_diff_notice: Option<String>,
     /// Interactive query latency benchmark and A/B regression suite overlay state.
     pub query_bench: Option<QueryBenchState>,
     /// Request counter for in-flight query benchmark executions.

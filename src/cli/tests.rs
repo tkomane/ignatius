@@ -2274,3 +2274,62 @@ fn target_session_attrs_cli_flag_validates_and_overrides_profile() {
         .expect_err("invalid profile target-session-attrs must fail");
     assert_eq!(err.kind, DiagnosticKind::Config);
 }
+
+#[test]
+fn result_diff_cli_runs_offline_across_formats_and_writes_output() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ignatius-cli-result-diff-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let baseline = dir.join("baseline.json");
+    let current = dir.join("current.ndjson");
+    let out_file = dir.join("report.json");
+
+    std::fs::write(
+        &baseline,
+        r#"{"columns":["id","state"],"rows":[{"id":"1","state":"open"},{"id":"2","state":null}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &current,
+        "{\"id\":\"1\",\"state\":\"closed\"}\n{\"id\":\"3\",\"state\":\"new\"}\n",
+    )
+    .unwrap();
+
+    let cli = Cli::try_parse_from([
+        "ignatius",
+        "result-diff",
+        baseline.to_str().unwrap(),
+        current.to_str().unwrap(),
+        "--key",
+        "id",
+        "--format",
+        "json",
+        "--output",
+        out_file.to_str().unwrap(),
+    ])
+    .expect("parse result-diff");
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = run(&cli, &mut out, &mut err);
+    assert_eq!(
+        code,
+        ExitCode::Success,
+        "stderr: {}",
+        String::from_utf8_lossy(&err)
+    );
+    assert!(out.is_empty());
+
+    let written = std::fs::read_to_string(&out_file).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["counts"]["changed"], 1);
+    assert_eq!(json["counts"]["removed"], 1);
+    assert_eq!(json["counts"]["added"], 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

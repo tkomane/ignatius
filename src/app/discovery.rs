@@ -242,17 +242,24 @@ pub fn hint_actions_for(
             Action::FocusNext,
             Action::OpenPalette,
         ],
-        Focus::Results if model.visible_result().is_some() => vec![
-            Action::RefreshResult,
-            Action::Move(Direction::Down),
-            Action::CopyValue,
-            Action::GenerateCellUpdate,
-            Action::ToggleInspector,
-            Action::StartFilter,
-            Action::OpenResultControls,
-            Action::NarrowColumn,
-            Action::WidenColumn,
-        ],
+        Focus::Results if model.visible_result().is_some() => {
+            let mut list = vec![
+                Action::RefreshResult,
+                Action::Move(Direction::Down),
+                Action::CopyValue,
+                Action::GenerateCellUpdate,
+                Action::ToggleInspector,
+                Action::StartFilter,
+                Action::OpenResultControls,
+                Action::NarrowColumn,
+                Action::WidenColumn,
+            ];
+            if model.pinned_result.is_some() {
+                list.push(Action::CompareResultSnapshot);
+            }
+            list.push(Action::PinResultSnapshot);
+            list
+        }
         Focus::Results => vec![
             Action::FocusNext,
             Action::OpenPalette,
@@ -374,6 +381,7 @@ pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>
         || model.data_browser.is_some()
         || model.plan_diff.is_some()
         || model.result_analytics.is_some()
+        || model.result_diff.is_some()
         || model.query_bench.is_some()
         || model.schema_snapshot.is_some()
         || model.sql_runbook.is_some();
@@ -419,6 +427,8 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::OpenQuery,
         Action::OpenHistory,
         Action::ToggleHistoryRecording,
+        Action::PinResultSnapshot,
+        Action::CompareResultSnapshot,
         Action::Quit,
     ]
     .into_iter()
@@ -613,6 +623,15 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         Action::DataBrowser => model.connection.is_ready(),
         Action::PlanDiff => model.connection.is_ready() && !model.editor.text().trim().is_empty(),
         Action::ResultAnalytics => model.visible_result().is_some(),
+        Action::PinResultSnapshot => model
+            .visible_result()
+            .is_some_and(crate::query::result::ResultSet::is_available),
+        Action::CompareResultSnapshot => {
+            model.pinned_result.is_some()
+                && model
+                    .visible_result()
+                    .is_some_and(crate::query::result::ResultSet::is_available)
+        }
         Action::QueryBench => model.connection.is_ready() && !model.editor.text().trim().is_empty(),
         Action::SchemaSnapshot => model.connection.is_ready(),
         Action::SqlRunbook => !model.editor.text().trim().is_empty(),
@@ -805,6 +824,16 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         }
         Action::SqlRunbook => "write SQL in the editor first".to_owned(),
         Action::ResultAnalytics => "run a query that produces rows first".to_owned(),
+        Action::PinResultSnapshot => {
+            "run a query that produces an available retained result first".to_owned()
+        }
+        Action::CompareResultSnapshot => {
+            if model.pinned_result.is_none() {
+                "pin a baseline result snapshot first".to_owned()
+            } else {
+                "run a query that produces an available retained result to compare".to_owned()
+            }
+        }
         Action::StopWatch => "an active psql \\watch loop".to_owned(),
         Action::BeginPrefix
         | Action::Insert(_)
@@ -881,7 +910,10 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::PlanDiff
         | Action::QueryBench
         | Action::SchemaSnapshot => "Data",
-        Action::StopWatch | Action::ResultAnalytics => "Results",
+        Action::StopWatch
+        | Action::ResultAnalytics
+        | Action::PinResultSnapshot
+        | Action::CompareResultSnapshot => "Results",
         Action::Cancel
         | Action::ToggleHelp
         | Action::FocusNext

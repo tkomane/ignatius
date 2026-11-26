@@ -59,6 +59,7 @@ pub mod queries;
 pub mod query;
 pub mod recovery;
 pub mod replication;
+pub mod result_diff;
 pub mod routine;
 pub mod runbook;
 pub mod seed;
