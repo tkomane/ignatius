@@ -3889,6 +3889,262 @@ fn catalogue_discovery_excludes_other_sessions_temp_tables() {
     assert_eq!(cleanup.status, ExecutionStatus::Succeeded);
 }
 
+fn seed_report(
+    schema: &str,
+    table: &str,
+    values: impl IntoIterator<Item = String>,
+) -> ignatius::seed::FixtureReport {
+    let rows: Vec<Vec<String>> = values.into_iter().map(|value| vec![value]).collect();
+    let total_rows = rows.len();
+    ignatius::seed::FixtureReport {
+        seed: 4040,
+        schema: Some(schema.to_owned()),
+        tables: vec![ignatius::seed::GeneratedTableData {
+            key: ignatius::sync::TableKey::new(schema, table),
+            columns: vec!["id".to_owned()],
+            rows,
+        }],
+        total_rows,
+        duration_ms: 0,
+    }
+}
+
+fn seed_with_timeout(
+    fx: &mut Fixture,
+    report: &ignatius::seed::FixtureReport,
+) -> Result<u64, ignatius::diagnostics::Diagnostic> {
+    let runtime = &fx.runtime;
+    let session = &mut fx.session;
+    runtime
+        .block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                session.execute_synthetic_seed(report),
+            )
+            .await
+        })
+        .expect("synthetic seed completes within ten seconds")
+}
+
+#[test]
+fn synthetic_seed_preserves_active_and_failed_caller_transactions() {
+    use ignatius::query::result::TransactionState;
+
+    let uri = target_or_skip!();
+    let mut fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE seed_owner (id integer PRIMARY KEY)",
+        10,
+        JobId(9700),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let report = seed_report("pg_temp", "seed_owner", ["1".to_owned()]);
+
+    let begun = fx.block_on(fx.session.execute(
+        "BEGIN; INSERT INTO pg_temp.seed_owner VALUES (9)",
+        10,
+        JobId(9701),
+    ));
+    assert_eq!(begun.transaction, TransactionState::Open);
+    assert_eq!(
+        seed_with_timeout(&mut fx, &ignatius::seed::FixtureReport::default())
+            .expect("empty plan has no destination writes"),
+        0
+    );
+    let active = seed_with_timeout(&mut fx, &report).expect_err("active caller tx is refused");
+    assert_eq!(active.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(
+        active.headline,
+        "the synthetic seed insert did not start, because the session is not outside a transaction"
+    );
+    let sentinel = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM pg_temp.seed_owner WHERE id = 9",
+        10,
+        JobId(9702),
+    ));
+    assert_eq!(sentinel.status, ExecutionStatus::Succeeded);
+    assert_eq!(sentinel.transaction, TransactionState::Open);
+    assert_eq!(
+        sentinel.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("1".into())
+    );
+    let rollback = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(9703)));
+    assert_eq!(rollback.transaction, TransactionState::Autocommit);
+
+    let failed = fx.block_on(fx.session.execute(
+        r#"BEGIN; INSERT INTO pg_temp.seed_owner VALUES (1);
+           INSERT INTO pg_temp.seed_owner VALUES (1)"#,
+        10,
+        JobId(9704),
+    ));
+    assert_eq!(failed.transaction, TransactionState::Failed);
+    let refused = seed_with_timeout(&mut fx, &report).expect_err("failed caller tx is refused");
+    assert_eq!(refused.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(refused.headline, active.headline);
+    let still_failed = fx.block_on(fx.session.execute("SELECT 1", 10, JobId(9705)));
+    assert_eq!(still_failed.transaction, TransactionState::Failed);
+    let rollback = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(9706)));
+    assert_eq!(rollback.transaction, TransactionState::Autocommit);
+}
+
+#[test]
+fn synthetic_seed_rolls_back_prior_100_row_chunk_and_session_is_reusable() {
+    use ignatius::query::result::TransactionState;
+
+    let uri = target_or_skip!();
+    let mut fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE seed_chunk_rollback (id integer PRIMARY KEY CHECK (id <> 101))",
+        10,
+        JobId(9710),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let report = seed_report(
+        "pg_temp",
+        "seed_chunk_rollback",
+        (1..=101).map(|id| id.to_string()),
+    );
+    let script = report.render_sql();
+    assert!(script.starts_with("-- Ignatius Synthetic Test Fixtures\n"));
+    assert!(script.contains("BEGIN;"));
+    assert!(script.ends_with("COMMIT;\n"));
+    assert!(script.contains("INSERT INTO \"pg_temp\".\"seed_chunk_rollback\" (\"id\")"));
+    assert_eq!(script.matches("INSERT INTO").count(), 2);
+
+    let error = seed_with_timeout(&mut fx, &report).expect_err("row 101 violates CHECK");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(error.headline, "synthetic seed insert failed");
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|field| field.label == "SQLSTATE" && field.value == "23514")
+    );
+    let count = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM pg_temp.seed_chunk_rollback",
+        10,
+        JobId(9711),
+    ));
+    assert_eq!(count.status, ExecutionStatus::Succeeded);
+    assert_eq!(count.transaction, TransactionState::Autocommit);
+    assert_eq!(
+        count.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("0".into()),
+        "first 100-row insert chunk was rolled back"
+    );
+
+    let reusable = seed_report("pg_temp", "seed_chunk_rollback", ["7".to_owned()]);
+    assert_eq!(
+        seed_with_timeout(&mut fx, &reusable).expect("autocommit session reused"),
+        1
+    );
+    let persisted = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM pg_temp.seed_chunk_rollback",
+        10,
+        JobId(9712),
+    ));
+    assert_eq!(persisted.status, ExecutionStatus::Succeeded);
+    assert_eq!(persisted.transaction, TransactionState::Autocommit);
+    assert_eq!(
+        persisted.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("1".into())
+    );
+}
+
+#[test]
+fn synthetic_seed_reports_deferred_unique_failure_at_commit() {
+    use ignatius::query::result::TransactionState;
+
+    let uri = target_or_skip!();
+    let mut fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        r#"CREATE TEMP TABLE seed_deferred (id integer);
+           ALTER TABLE pg_temp.seed_deferred
+               ADD CONSTRAINT seed_deferred_id_unique UNIQUE (id)
+               DEFERRABLE INITIALLY DEFERRED"#,
+        10,
+        JobId(9720),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let report = seed_report("pg_temp", "seed_deferred", ["1".to_owned(), "1".to_owned()]);
+    let error = seed_with_timeout(&mut fx, &report).expect_err("COMMIT rejects deferred duplicate");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(error.headline, "synthetic seed commit failed");
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|field| field.label == "SQLSTATE" && field.value == "23505")
+    );
+    let count = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM pg_temp.seed_deferred",
+        10,
+        JobId(9721),
+    ));
+    assert_eq!(count.status, ExecutionStatus::Succeeded);
+    assert_eq!(count.transaction, TransactionState::Autocommit);
+    assert_eq!(
+        count.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("0".into())
+    );
+}
+
+#[test]
+fn synthetic_seed_returns_server_affected_count_when_trigger_skips_row() {
+    let uri = target_or_skip!();
+    let mut fx = fixture(&uri);
+    let schema = unique_sync_database_name("seed_trigger");
+    let setup = fx.block_on(fx.session.execute(
+        &format!(
+            r#"CREATE SCHEMA {schema};
+               CREATE TABLE {schema}.seed_trigger (id integer PRIMARY KEY);
+               CREATE FUNCTION {schema}.skip_seed_row() RETURNS trigger
+                   LANGUAGE plpgsql AS $$
+               BEGIN
+                   IF NEW.id = 2 THEN RETURN NULL; END IF;
+                   RETURN NEW;
+               END;
+               $$;
+               CREATE TRIGGER skip_seed_row BEFORE INSERT ON {schema}.seed_trigger
+                   FOR EACH ROW EXECUTE FUNCTION {schema}.skip_seed_row()"#
+        ),
+        10,
+        JobId(9730),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let report = seed_report(
+        &schema,
+        "seed_trigger",
+        ["1".to_owned(), "2".to_owned(), "3".to_owned()],
+    );
+    assert_eq!(report.total_rows, 3);
+    let script = report.render_sql();
+    assert!(script.contains("BEGIN;"));
+    assert!(script.contains("INSERT INTO \""));
+    assert!(script.ends_with("COMMIT;\n"));
+
+    assert_eq!(
+        seed_with_timeout(&mut fx, &report).expect("seed commits"),
+        2
+    );
+    let actual = fx.block_on(fx.session.execute(
+        &format!("SELECT count(*) FROM {schema}.seed_trigger"),
+        10,
+        JobId(9731),
+    ));
+    assert_eq!(actual.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        actual.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("2".into())
+    );
+    let cleanup = fx.block_on(fx.session.execute(
+        &format!("DROP SCHEMA {schema} CASCADE"),
+        10,
+        JobId(9732),
+    ));
+    assert_eq!(cleanup.status, ExecutionStatus::Succeeded);
+}
+
 #[test]
 fn sync_pipeline_atomically_replaces_related_tables() {
     let admin_uri = target_or_skip!();

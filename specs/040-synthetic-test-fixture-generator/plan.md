@@ -11,7 +11,8 @@
 2. **PostgreSQL Catalog Inspection (`src/postgres/metadata.rs` & `src/postgres/session.rs`)**:
    - `analyze_seed_plan(client, schema)`: discovers tables, columns, constraints, enums, and foreign keys, assembling `SyntheticFixturePlan`.
    - Match the sync graph's permanent and unlogged table scope in column discovery and referenced-table lookup.
-   - `execute_synthetic_seed(client, plan, options)`: executes generated fixtures inside a guarded transaction (`BEGIN; ... COMMIT;`).
+   - `execute_synthetic_seed`: with exclusive session access, check server autocommit and use one driver-owned transaction for the generated INSERT batches. Share INSERT rendering with exported SQL and return the server's affected-row total only after commit.
+   - An empty plan returns zero without opening a transaction. On a failed batch, await rollback and preserve the safe failure phase and SQLSTATE. An unclear commit acknowledgment requires checking the database before retrying.
 3. **Keymap & Configuration (`src/ui/keymap.rs` & `docs/design/keymap.md`)**:
    - Chord `Ctrl+K +` (`synthetic-seed`) bound to `Action::SyntheticSeed`.
 4. **TEA Model, Messages & Update (`src/app/`)**:

@@ -469,6 +469,31 @@ pub struct GeneratedTableData {
     pub rows: Vec<Vec<String>>,
 }
 
+impl GeneratedTableData {
+    /// Renders one INSERT at a time, in the same order used by the exported script.
+    pub(crate) fn insert_statements(&self) -> impl Iterator<Item = String> {
+        let columns = self
+            .columns
+            .iter()
+            .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let header = format!(
+            "INSERT INTO {} ({columns}) VALUES\n",
+            self.key.qualified_sql()
+        );
+        self.rows.chunks(100).map(move |chunk| {
+            let mut statement = header.clone();
+            for (index, row) in chunk.iter().enumerate() {
+                let values = row.join(", ");
+                let terminator = if index + 1 == chunk.len() { ";" } else { "," };
+                let _ = writeln!(statement, "  ({values}){terminator}");
+            }
+            statement
+        })
+    }
+}
+
 /// Comprehensive report and container of synthesized test fixtures.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FixtureReport {
@@ -502,13 +527,6 @@ impl FixtureReport {
             if table.rows.is_empty() {
                 continue;
             }
-            let cols = table
-                .columns
-                .iter()
-                .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
-                .collect::<Vec<_>>()
-                .join(", ");
-
             let _ = writeln!(
                 out,
                 "-- Fixtures for table: {} ({} rows)",
@@ -516,18 +534,8 @@ impl FixtureReport {
                 table.rows.len()
             );
 
-            for chunk in table.rows.chunks(100) {
-                let _ = writeln!(
-                    out,
-                    "INSERT INTO {} ({}) VALUES",
-                    table.key.qualified_sql(),
-                    cols
-                );
-                for (row_idx, row) in chunk.iter().enumerate() {
-                    let vals = row.join(", ");
-                    let terminator = if row_idx == chunk.len() - 1 { ";" } else { "," };
-                    let _ = writeln!(out, "  ({vals}){terminator}");
-                }
+            for statement in table.insert_statements() {
+                out.push_str(&statement);
             }
             let _ = writeln!(out);
         }
