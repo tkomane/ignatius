@@ -367,8 +367,8 @@ impl Session {
         crate::postgres::metadata::update_relation(&self.client, schema, relation).await
     }
 
-    /// Serialize the workbench lookup with user SQL. Read the transaction
-    /// state on failure so an open transaction that aborted is shown accurately.
+    /// Check the effective transaction access mode and resolve the update target
+    /// on the query backend, serialized with user SQL.
     pub(crate) async fn update_relation_for_workbench(
         &self,
         schema: Option<&str>,
@@ -377,8 +377,36 @@ impl Session {
         Result<crate::postgres::metadata::UpdateRelation, Diagnostic>,
         Option<crate::query::result::TransactionState>,
     ) {
+        const CHECKING_POSTURE: &str = "checking whether the query session is read-only";
         let _gate = self.user_sql_gate.lock().await;
-        let result = self.update_relation(schema, relation).await;
+        // SHOW reads the effective setting without establishing a query
+        // snapshot. An intentional refusal leaves the transaction untouched.
+        let result = match single_row(&self.client, "SHOW transaction_read_only").await {
+            Ok(row) => match row
+                .as_ref()
+                .filter(|row| row.len() == 1)
+                .and_then(|row| row.try_get(0).ok().flatten())
+            {
+                Some("off") => self.update_relation(schema, relation).await,
+                Some("on") => {
+                    return (
+                        Err(Diagnostic::new(
+                            DiagnosticKind::Query,
+                            "the server session is read-only",
+                            CHECKING_POSTURE,
+                        )),
+                        None,
+                    );
+                }
+                _ => Err(Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "the server's read-only setting could not be confirmed",
+                    CHECKING_POSTURE,
+                )),
+            },
+            Err(error) => Err(from_query_error(&error, 0)),
+        };
+        // A probe or lookup can fail inside an open transaction.
         let transaction = if result.is_err() {
             Some(self.transaction_state().await)
         } else {

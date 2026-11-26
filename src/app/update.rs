@@ -7012,7 +7012,7 @@ fn begin_cell_update_with_patch(
         source: source.clone(),
     });
     model.cell_update_notice = Some(format!(
-        "Reading primary-key metadata for {}.{}.",
+        "Checking read-only status and primary-key metadata for {}.{}.",
         crate::postgres::metadata::quote_identifier(
             source.relation.schema.as_deref().unwrap_or("search_path")
         ),
@@ -7061,7 +7061,7 @@ fn finish_update_target(
         Ok(relation) => relation,
         Err(error) => {
             model.cell_update_notice = Some(format!(
-                "Cell update metadata is unavailable: {}",
+                "Cell update refused ({}). No UPDATE was sent.",
                 error.headline
             ));
             return Vec::new();

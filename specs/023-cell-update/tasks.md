@@ -95,6 +95,13 @@ row on explicit execution.
 
 [macOS PTY, PostgreSQL 18.7 and focused evidence](../../docs/status.md#wave-86---resolve-reviewed-edits-on-the-query-session---26-november-2026)
 
+- [x] T023 Detect effective read-only state on the query backend before
+  requesting replacement input. Prove explicit read-only transactions,
+  changed session defaults and a writable override, and verify refusal and
+  recovery through the workbench on disposable PostgreSQL.
+
+[Focused and live workbench evidence](../../docs/status.md#wave-94---refuse-reviewed-cell-edits-in-a-read-only-transaction---26-november-2026)
+
 ## Dependencies and execution order
 
 - T001 precedes all implementation.

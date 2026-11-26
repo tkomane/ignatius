@@ -227,6 +227,111 @@ async fn cell_update_metadata_errors_report_the_query_transaction_state() {
 }
 
 #[tokio::test]
+async fn cell_update_checks_effective_read_only_before_replacement_input() {
+    use crate::app::model::{ConnectionState, Focus};
+    use crate::app::{Action, Effect, Message, Model, update};
+    use crate::query::result::TransactionState;
+
+    let Some(session) = live_session(None).await else {
+        return;
+    };
+    assert!(!session.info().read_only, "fixture bootstraps writable");
+    session
+        .client
+        .batch_execute(
+            "CREATE TEMP TABLE cell_update_posture_probe (id integer PRIMARY KEY, note text); \
+             INSERT INTO cell_update_posture_probe VALUES (1, 'before')",
+        )
+        .await
+        .unwrap();
+
+    let source = "SELECT id, note FROM pg_temp.cell_update_posture_probe";
+    for (setup, state, read_only, recover) in [
+        ("BEGIN READ ONLY", TransactionState::Open, true, "ROLLBACK"),
+        (
+            "SET default_transaction_read_only = on",
+            TransactionState::Autocommit,
+            true,
+            "RESET default_transaction_read_only",
+        ),
+        (
+            "SET default_transaction_read_only = on; BEGIN READ WRITE",
+            TransactionState::Open,
+            false,
+            "ROLLBACK; RESET default_transaction_read_only",
+        ),
+    ] {
+        session.client.batch_execute(setup).await.unwrap();
+        let execution = session
+            .execute_for_workbench(source, None, 10, JobId(823))
+            .await;
+        assert_eq!(execution.status, ExecutionStatus::Succeeded, "{setup}");
+        assert_eq!(execution.transaction, state, "{setup}");
+        let mut model = Model::new(10);
+        model.connection = ConnectionState::Connected(Box::new(session.info().clone()));
+        model.focus = Focus::Results;
+        model.selected_column = 1;
+        model.last_sql = Some(source.to_owned());
+        model.transaction = execution.transaction;
+        model.last_execution = Some(execution);
+
+        let effects = update(&mut model, Message::Action(Action::GenerateCellUpdate));
+        let [Effect::LoadUpdateTarget { request, relation }] = effects.as_slice() else {
+            panic!("expected a metadata lookup for {setup}, got {effects:?}");
+        };
+        let schema = relation.schema.as_deref();
+        let (result, transaction) = session
+            .update_relation_for_workbench(schema, &relation.relation)
+            .await;
+        assert_eq!(transaction, None, "{setup}");
+        let effects = update(
+            &mut model,
+            Message::UpdateTargetLoaded {
+                request: *request,
+                result: Box::new(result),
+                transaction,
+            },
+        );
+        assert!(effects.is_empty(), "{setup}: {effects:?}");
+        assert!(model.pending_update.is_none(), "{setup}");
+        assert!(!model.running_cell_update, "{setup}");
+        assert_eq!(model.update_prompt.is_none(), read_only, "{setup}");
+        if read_only {
+            let notice = model
+                .cell_update_notice
+                .as_deref()
+                .expect("read-only refusal");
+            assert!(notice.contains("read-only"), "{setup}: {notice}");
+            assert!(notice.contains("No UPDATE was sent"), "{setup}: {notice}");
+        }
+        assert_eq!(model.transaction, state, "{setup}");
+        assert_eq!(session.transaction_state().await, state, "{setup}");
+
+        // Posture is a workbench write guard. The catalog still reports the
+        // role's privileges in a read-only transaction.
+        let metadata = session
+            .update_relation(schema, &relation.relation)
+            .await
+            .unwrap();
+        assert!(metadata.readable && metadata.writable, "{setup}");
+        session.client.batch_execute(recover).await.unwrap();
+    }
+
+    assert_eq!(
+        session.transaction_state().await,
+        TransactionState::Autocommit
+    );
+    let row = single_row(
+        &session.client,
+        "SELECT note FROM pg_temp.cell_update_posture_probe",
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(row.get(0), Some("before"));
+}
+
+#[tokio::test]
 async fn parameter_semantics_off_at_start_is_refused_before_the_first_parameterized_send() {
     let Some(session) = live_session(Some("off")).await else {
         return;

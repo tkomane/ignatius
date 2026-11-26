@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Replace Cell checks the query backend's effective read-only setting
+  before asking for a replacement value.
 - Fixed: Unix SIGTERM restores the terminal when a workbench key chord or
   modal is active.
 - Fixed: Dry-run import requires a transaction and reports success after
