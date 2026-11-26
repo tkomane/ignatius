@@ -360,18 +360,31 @@ fn w10_local_input_palette_and_completion_p95_within_100ms_and_state_invariant()
         Message::QueriesListed(vec![
             SavedQuery {
                 name: "monthly_active_users".into(),
+                collection: None,
+                tags: Vec::new(),
+                description: None,
                 path: PathBuf::from("/tmp/queries/monthly_active_users.sql"),
                 summary: "SELECT user_id, count(*) FROM public.table_0 GROUP BY 1;".into(),
+                preview: "SELECT user_id, count(*) FROM public.table_0 GROUP BY 1;".into(),
             },
             SavedQuery {
                 name: "daily_revenue_breakdown".into(),
+                collection: None,
+                tags: Vec::new(),
+                description: None,
                 path: PathBuf::from("/tmp/queries/daily_revenue_breakdown.sql"),
                 summary: "SELECT date, sum(amount) FROM analytics.table_1 GROUP BY 1;".into(),
+                preview: "SELECT date, sum(amount) FROM analytics.table_1 GROUP BY 1;".into(),
             },
             SavedQuery {
                 name: "stale_session_cleanup".into(),
+                collection: None,
+                tags: Vec::new(),
+                description: None,
                 path: PathBuf::from("/tmp/queries/stale_session_cleanup.sql"),
                 summary: "DELETE FROM public.table_2 WHERE updated_at < now() - interval '7 days';"
+                    .into(),
+                preview: "DELETE FROM public.table_2 WHERE updated_at < now() - interval '7 days';"
                     .into(),
             },
         ]),
@@ -1169,12 +1182,23 @@ fn w10_local_state_recovery_preserves_existing_files_and_refuses_unsafe_paths() 
                 .contains("walk up a directory")
         );
 
-        // Path separator refusal
+        // Nested / backslash path separator refusal
         let sep_err = library
-            .path_for("sub/dir")
-            .expect_err("separator must refuse");
+            .path_for("a/b/c")
+            .expect_err("nested separator must refuse");
         assert_eq!(sep_err.kind, DiagnosticKind::Usage);
         assert!(sep_err.likely_cause.unwrap().contains("path separator"));
+
+        let backslash_err = library
+            .path_for("sub\\dir")
+            .expect_err("backslash separator must refuse");
+        assert_eq!(backslash_err.kind, DiagnosticKind::Usage);
+        assert!(
+            backslash_err
+                .likely_cause
+                .unwrap()
+                .contains("path separator")
+        );
 
         // Corrupted / non-UTF8 query file in queries directory does not panic list()
         let corrupted_file = queries_dir.join("corrupted.sql");

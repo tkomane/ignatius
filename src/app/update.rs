@@ -637,17 +637,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             transaction,
         } => finish_update_target(model, request, *result, transaction),
         Message::QueriesListed(queries) => {
-            model.palette = Some(crate::app::palette::Palette::over_saved_queries(
-                queries
-                    .iter()
-                    .map(|query| crate::app::palette::PaletteEntry {
-                        label: query.name.clone(),
-                        detail: query.summary.clone(),
-                        group: "Saved",
-                        command: crate::app::palette::PaletteCommand::Open(query.name.clone()),
-                    })
-                    .collect(),
-            ));
+            model.palette = Some(crate::app::palette::Palette::from_saved_queries(&queries));
             Vec::new()
         }
         Message::RowsExported(result) => {

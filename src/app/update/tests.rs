@@ -4443,13 +4443,21 @@ fn a_saved_query_can_be_found_by_name_and_opened_into_the_buffer() {
         Message::QueriesListed(vec![
             crate::queries::SavedQuery {
                 name: "monthly-revenue".into(),
+                collection: None,
+                tags: Vec::new(),
+                description: None,
                 path: "/tmp/monthly-revenue.sql".into(),
                 summary: "SELECT sum(total) FROM orders;".into(),
+                preview: "SELECT sum(total) FROM orders;".into(),
             },
             crate::queries::SavedQuery {
                 name: "stale-sessions".into(),
+                collection: None,
+                tags: Vec::new(),
+                description: None,
                 path: "/tmp/stale-sessions.sql".into(),
                 summary: "SELECT * FROM pg_stat_activity;".into(),
+                preview: "SELECT * FROM pg_stat_activity;".into(),
             },
         ]),
     );
@@ -4480,6 +4488,56 @@ fn a_saved_query_can_be_found_by_name_and_opened_into_the_buffer() {
     // And it can be taken back, because loading is an edit like any other.
     model.editor.undo();
     assert_eq!(model.editor.text(), "SELECT 1;");
+}
+
+#[test]
+fn saved_query_collections_and_tags_filter_and_preview_in_palette() {
+    let mut model = connected();
+    update(
+        &mut model,
+        Message::QueriesListed(vec![
+            crate::queries::SavedQuery {
+                name: "billing/monthly-revenue".into(),
+                collection: Some("billing".into()),
+                tags: vec!["finance".into(), "monthly".into()],
+                description: Some("Monthly gross revenue".into()),
+                path: "/tmp/billing/monthly-revenue.sql".into(),
+                summary: "SELECT sum(total)".into(),
+                preview: "SELECT sum(total)\nFROM orders;".into(),
+            },
+            crate::queries::SavedQuery {
+                name: "ops/active-locks".into(),
+                collection: Some("ops".into()),
+                tags: vec!["locks".into()],
+                description: Some("Blocked sessions".into()),
+                path: "/tmp/ops/active-locks.sql".into(),
+                summary: "SELECT pid FROM pg_stat_activity;".into(),
+                preview: "SELECT pid\nFROM pg_stat_activity;".into(),
+            },
+        ]),
+    );
+
+    for ch in "#finance".chars() {
+        update(&mut model, Message::Action(Action::Insert(ch)));
+    }
+    let palette = model.palette.as_ref().expect("palette open");
+    let matches = palette.matches();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].label, "billing/monthly-revenue");
+    let preview = palette.selected_preview().expect("preview").join("\n");
+    assert!(preview.contains("Origin: Saved / billing"), "{preview}");
+    assert!(preview.contains("Tags: #finance #monthly"), "{preview}");
+    assert!(
+        preview.contains("Description: Monthly gross revenue"),
+        "{preview}"
+    );
+    assert!(preview.contains("FROM orders;"), "{preview}");
+
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::LoadQuery { name }] if name == "billing/monthly-revenue"
+    ));
 }
 
 #[test]
@@ -7967,8 +8025,12 @@ fn notice_reader_saved_query_choice_reveals_covered_inspector_and_definition() {
             &mut model,
             Message::QueriesListed(vec![crate::queries::SavedQuery {
                 name: "synthetic-saved".into(),
+                collection: None,
+                tags: Vec::new(),
+                description: None,
                 path: "/unused/synthetic.sql".into(),
                 summary: "SELECT 77".into(),
+                preview: "SELECT 77".into(),
             }]),
         );
         let effects = update(&mut model, Message::Action(Action::Activate));
@@ -8021,8 +8083,12 @@ fn notice_reader_empty_or_cancelled_palette_preserves_snapshot_and_baseline_open
         &mut baseline,
         Message::QueriesListed(vec![crate::queries::SavedQuery {
             name: "synthetic-saved".into(),
+            collection: None,
+            tags: Vec::new(),
+            description: None,
             path: "/unused/synthetic.sql".into(),
             summary: "SELECT 77".into(),
+            preview: "SELECT 77".into(),
         }]),
     );
     assert!(matches!(

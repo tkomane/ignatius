@@ -74,6 +74,8 @@ pub struct Palette {
     pub purpose: Purpose,
     /// Current focus and prerequisite guidance for the general command palette.
     pub context_note: Option<String>,
+    /// Rich saved-query metadata when populated from `Library::list()`.
+    saved_queries: Vec<crate::queries::SavedQuery>,
 }
 
 /// What a palette is searching.
@@ -182,6 +184,7 @@ impl Palette {
             loading: false,
             purpose: Purpose::GoTo,
             context_note: None,
+            saved_queries: Vec::new(),
         }
     }
 
@@ -218,6 +221,44 @@ impl Palette {
     pub fn over_saved_queries(entries: Vec<PaletteEntry>) -> Self {
         Self {
             purpose: Purpose::SavedQueries,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens a palette over rich [`SavedQuery`](crate::queries::SavedQuery) metadata,
+    /// enabling collection/`#tag`/description search and multi-line SQL previews.
+    #[must_use]
+    pub fn from_saved_queries(queries: &[crate::queries::SavedQuery]) -> Self {
+        let entries = queries
+            .iter()
+            .map(|query| {
+                let tag_part = query
+                    .tags
+                    .iter()
+                    .map(|tag| format!("#{tag}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let text_part = query
+                    .description
+                    .as_deref()
+                    .filter(|desc| !desc.trim().is_empty())
+                    .unwrap_or(&query.summary);
+                let detail = match (tag_part.is_empty(), text_part.is_empty()) {
+                    (true, _) => text_part.to_owned(),
+                    (false, true) => tag_part,
+                    (false, false) => format!("{tag_part} - {text_part}"),
+                };
+                PaletteEntry {
+                    label: query.name.clone(),
+                    detail,
+                    group: "Saved",
+                    command: PaletteCommand::Open(query.name.clone()),
+                }
+            })
+            .collect();
+        Self {
+            purpose: Purpose::SavedQueries,
+            saved_queries: queries.to_vec(),
             ..Self::new(entries)
         }
     }
@@ -284,14 +325,21 @@ impl Palette {
         if self.query.trim().is_empty() {
             return self.entries.iter().collect();
         }
+        let use_saved_metadata = self.purpose == Purpose::SavedQueries
+            && !self.saved_queries.is_empty()
+            && self.saved_queries.len() == self.entries.len();
         let mut scored: Vec<(i32, usize, &PaletteEntry)> = self
             .entries
             .iter()
             .enumerate()
             .filter_map(|(index, entry)| {
-                fuzzy_score(&self.query, &entry.label)
-                    .or_else(|| fuzzy_score(&self.query, &entry.detail).map(|s| s - 40))
-                    .map(|score| (score, index, entry))
+                let score = if use_saved_metadata {
+                    score_saved_query_entry(&self.query, entry, &self.saved_queries[index])
+                } else {
+                    fuzzy_score(&self.query, &entry.label)
+                        .or_else(|| fuzzy_score(&self.query, &entry.detail).map(|s| s - 40))
+                };
+                score.map(|score| (score, index, entry))
             })
             .collect();
         // Sort by score, then by original position, so results never reshuffle
@@ -362,8 +410,97 @@ impl Palette {
             return Some(vec!["No matching entry selected.".to_owned()]);
         }
         let entry = self.selected_entry()?;
+        if self.purpose == Purpose::SavedQueries
+            && let Some(saved) = self
+                .saved_queries
+                .iter()
+                .find(|query| query.name == entry.label)
+        {
+            return Some(saved_query_preview_lines(saved));
+        }
         Some(entry.preview_lines(self.purpose))
     }
+}
+
+fn score_saved_query_entry(
+    needle: &str,
+    entry: &PaletteEntry,
+    saved: &crate::queries::SavedQuery,
+) -> Option<i32> {
+    let trimmed = needle.trim();
+    fuzzy_score(trimmed, &entry.label)
+        .or_else(|| {
+            saved
+                .collection
+                .as_deref()
+                .and_then(|col| fuzzy_score(trimmed, col))
+                .map(|score| score - 10)
+        })
+        .or_else(|| {
+            saved
+                .tags
+                .iter()
+                .filter_map(|tag| {
+                    let hash_tag = format!("#{tag}");
+                    fuzzy_score(trimmed, &hash_tag).max(fuzzy_score(trimmed, tag))
+                })
+                .max()
+                .map(|score| score - 15)
+        })
+        .or_else(|| {
+            saved
+                .description
+                .as_deref()
+                .and_then(|desc| fuzzy_score(trimmed, desc))
+                .map(|score| score - 25)
+        })
+        .or_else(|| fuzzy_score(trimmed, &entry.detail).map(|score| score - 40))
+        .or_else(|| fuzzy_score(trimmed, &saved.preview).map(|score| score - 60))
+}
+
+fn saved_query_preview_lines(query: &crate::queries::SavedQuery) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(format!("Query: {}", sanitize_for_display(&query.name)));
+    let origin = query.collection.as_deref().map_or_else(
+        || "Saved".to_owned(),
+        |col| format!("Saved / {}", sanitize_for_display(col)),
+    );
+    lines.push(format!("Origin: {origin}"));
+    if !query.tags.is_empty() {
+        let formatted_tags = query
+            .tags
+            .iter()
+            .map(|tag| format!("#{tag}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(format!("Tags: {}", sanitize_for_display(&formatted_tags)));
+    }
+    if let Some(description) = query
+        .description
+        .as_deref()
+        .filter(|d| !d.trim().is_empty())
+    {
+        lines.push(format!(
+            "Description: {}",
+            sanitize_for_display(description)
+        ));
+    }
+    let sql_source = if query.preview.is_empty() {
+        query.summary.as_str()
+    } else {
+        query.preview.as_str()
+    };
+    if !sql_source.is_empty() {
+        if sql_source.contains('\n') {
+            lines.push("SQL:".to_owned());
+            for line in sql_source.lines() {
+                lines.push(format!("  {}", sanitize_for_display(line)));
+            }
+        } else {
+            lines.push(format!("SQL: {}", sanitize_for_display(sql_source)));
+        }
+    }
+    lines
 }
 
 impl PaletteEntry {

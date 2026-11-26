@@ -260,6 +260,117 @@ fn result_diff_offline_cli_contract() {
 }
 
 #[test]
+fn queries_list_and_show_offline_cli_contract() {
+    let help = binary()
+        .args(["queries", "--help"])
+        .output()
+        .expect("run ignatius queries --help");
+    assert_eq!(code(&help), 0);
+    let help_text = stdout(&help);
+    assert!(help_text.contains("list"), "{help_text}");
+    assert!(help_text.contains("show"), "{help_text}");
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let cfg_dir = std::env::temp_dir().join(format!("ignatius-queries-contract-{unique}"));
+    let queries_dir = cfg_dir.join("queries");
+    let library = ignatius::queries::Library::new(&queries_dir);
+    library
+        .save(
+            "billing/monthly-revenue",
+            "-- @tags: finance, monthly\n-- @description: Monthly revenue rollup\nSELECT sum(total) FROM orders;",
+        )
+        .expect("save collection query");
+    library
+        .save("health", "SELECT 1;")
+        .expect("save root query");
+
+    let text_list = binary()
+        .args(["--config-dir", cfg_dir.to_str().unwrap(), "queries", "list"])
+        .output()
+        .expect("run queries list text");
+    assert_eq!(code(&text_list), 0, "stderr: {}", stderr(&text_list));
+    let text_out = stdout(&text_list);
+    assert!(text_out.contains("billing/monthly-revenue"), "{text_out}");
+    assert!(text_out.contains("#finance,#monthly"), "{text_out}");
+    assert!(text_out.contains("health"), "{text_out}");
+
+    let json_list = binary()
+        .args([
+            "--config-dir",
+            cfg_dir.to_str().unwrap(),
+            "queries",
+            "list",
+            "--collection",
+            "billing",
+            "--tag",
+            "finance",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run queries list json");
+    assert_eq!(code(&json_list), 0, "stderr: {}", stderr(&json_list));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&json_list)).expect("valid json output");
+    let items = parsed.as_array().expect("json array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "billing/monthly-revenue");
+
+    let show_ok = binary()
+        .args([
+            "--config-dir",
+            cfg_dir.to_str().unwrap(),
+            "queries",
+            "show",
+            "billing/monthly-revenue",
+        ])
+        .output()
+        .expect("run queries show");
+    assert_eq!(code(&show_ok), 0, "stderr: {}", stderr(&show_ok));
+    assert!(stdout(&show_ok).contains("SELECT sum(total) FROM orders;"));
+
+    for bad_name in ["../escape", "a/b/c", "CON", "billing/CON", "missing-query"] {
+        let bad_show = binary()
+            .args([
+                "--config-dir",
+                cfg_dir.to_str().unwrap(),
+                "queries",
+                "show",
+                bad_name,
+            ])
+            .output()
+            .expect("run invalid queries show");
+        assert_eq!(code(&bad_show), 2, "{bad_name}: {}", stderr(&bad_show));
+        assert!(stdout(&bad_show).is_empty(), "{bad_name}");
+        assert!(!stderr(&bad_show).is_empty(), "{bad_name}");
+    }
+
+    #[cfg(unix)]
+    {
+        let outside = cfg_dir.join("outside.sql");
+        std::fs::write(&outside, "SELECT 'outside';\n").unwrap();
+        std::os::unix::fs::symlink(&outside, queries_dir.join("linked.sql")).unwrap();
+        let sym_show = binary()
+            .args([
+                "--config-dir",
+                cfg_dir.to_str().unwrap(),
+                "queries",
+                "show",
+                "linked",
+            ])
+            .output()
+            .expect("run symlinked queries show");
+        assert_eq!(code(&sym_show), 2, "stderr: {}", stderr(&sym_show));
+        assert!(stdout(&sym_show).is_empty());
+    }
+
+    let _ = std::fs::remove_dir_all(&cfg_dir);
+}
+
+#[test]
 fn insert_output_requires_an_explicit_table_before_connection_work() {
     for args in [
         vec!["query", "-c", "SELECT 1", "--format", "insert"],

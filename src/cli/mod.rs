@@ -388,6 +388,13 @@ pub enum Command {
     /// Compare two local JSON or NDJSON result exports completely offline.
     #[command(name = "result-diff")]
     ResultDiff(ResultDiffArgs),
+
+    /// List or inspect saved SQL queries and collections without connecting to a server.
+    #[command(name = "queries")]
+    Queries {
+        #[command(subcommand)]
+        action: QueriesAction,
+    },
 }
 
 /// Arguments for the audit command.
@@ -1040,6 +1047,7 @@ pub fn run(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> ExitCode {
         Some(Command::Runbook(args)) => run_runbook(args, &paths, out, err),
         Some(Command::Fleet(args)) => fleet::run(args, &paths, out, err),
         Some(Command::ResultDiff(args)) => run_result_diff(args, out, err),
+        Some(Command::Queries { action }) => queries_command(action, &paths, out, err),
         Some(Command::Connect {
             target,
             check,
@@ -8677,6 +8685,128 @@ fn run_result_diff(
         out,
         err,
     )
+}
+
+/// Output format for `ignatius queries list`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum CliQueriesFormat {
+    /// Human-readable table on stdout (default).
+    #[default]
+    Text,
+    /// Structured JSON array of saved queries.
+    Json,
+}
+
+/// Offline saved-query sub-commands.
+#[derive(Debug, Subcommand, Clone)]
+pub enum QueriesAction {
+    /// List saved queries from the local library, optionally filtered by collection or tag.
+    List {
+        /// Filter to one single-level collection directory.
+        #[arg(long, value_name = "NAME")]
+        collection: Option<String>,
+        /// Filter to queries carrying this `#tag`.
+        #[arg(long, value_name = "TAG")]
+        tag: Option<String>,
+        /// Output format: text (default) or json.
+        #[arg(short = 'f', long, value_enum, default_value_t = CliQueriesFormat::Text)]
+        format: CliQueriesFormat,
+    },
+    /// Print a saved query's SQL to standard output.
+    Show {
+        /// Saved query name (for example `monthly-revenue` or `billing/monthly-revenue`).
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+}
+
+fn queries_command(
+    action: &QueriesAction,
+    paths: &Paths,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<ExitCode, Diagnostic> {
+    let library = crate::queries::Library::new(&paths.queries_dir);
+    match action {
+        QueriesAction::List {
+            collection,
+            tag,
+            format,
+        } => {
+            let entries = library.list_filtered(collection.as_deref(), tag.as_deref())?;
+            match format {
+                CliQueriesFormat::Json => {
+                    let json = serde_json::to_string_pretty(&entries).map_err(|error| {
+                        Diagnostic::new(
+                            DiagnosticKind::Usage,
+                            format!("failed to serialize saved queries to JSON: {error}"),
+                            "listing saved queries",
+                        )
+                    })?;
+                    writeln!(out, "{json}").map_err(io_diagnostic)?;
+                }
+                CliQueriesFormat::Text => {
+                    if entries.is_empty() {
+                        let notice = if collection.is_some() || tag.is_some() {
+                            "No saved queries matched the filter."
+                        } else {
+                            "No saved queries found."
+                        };
+                        writeln!(err, "{notice}").map_err(io_diagnostic)?;
+                    } else {
+                        writeln!(
+                            out,
+                            "{:<28} {:<16} {:<20} SUMMARY",
+                            "NAME", "COLLECTION", "TAGS"
+                        )
+                        .map_err(io_diagnostic)?;
+                        for entry in &entries {
+                            let col = entry
+                                .collection
+                                .as_deref()
+                                .map(crate::query::sanitize_for_display)
+                                .unwrap_or_else(|| "-".to_owned());
+                            let tags = if entry.tags.is_empty() {
+                                "-".to_owned()
+                            } else {
+                                entry
+                                    .tags
+                                    .iter()
+                                    .map(|t| format!("#{t}"))
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            };
+                            let summary = entry
+                                .description
+                                .as_deref()
+                                .filter(|d| !d.trim().is_empty())
+                                .map(crate::query::sanitize_for_display)
+                                .unwrap_or_else(|| entry.summary.clone());
+                            writeln!(
+                                out,
+                                "{:<28} {:<16} {:<20} {}",
+                                crate::query::sanitize_for_display(&entry.name),
+                                col,
+                                crate::query::sanitize_for_display(&tags),
+                                summary
+                            )
+                            .map_err(io_diagnostic)?;
+                        }
+                    }
+                }
+            }
+            Ok(ExitCode::Success)
+        }
+        QueriesAction::Show { name } => {
+            let sql = library.load(name)?;
+            write!(out, "{sql}").map_err(io_diagnostic)?;
+            if !sql.ends_with('\n') {
+                writeln!(out).map_err(io_diagnostic)?;
+            }
+            Ok(ExitCode::Success)
+        }
+    }
 }
 
 #[cfg(test)]
