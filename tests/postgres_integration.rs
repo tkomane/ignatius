@@ -3637,12 +3637,18 @@ fn import_transaction_ownership_preserves_caller_state_and_unwrapped_route() {
         Cell::Text("1".into()),
         "caller sentinel remains visible"
     );
+    let mut unwrapped = write;
+    unwrapped.transactional = false;
+    let borrowed = fx
+        .block_on(fx.session.execute_import(&unwrapped, b"id\n3\n"))
+        .expect("unwrapped COPY in the caller's transaction");
+    assert_eq!(borrowed.rows_imported, 1);
+    assert_eq!(count(9618), Cell::Text("2".into()));
+
     let rolled_back = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(9605)));
     assert_eq!(rolled_back.transaction, TransactionState::Autocommit);
     assert_eq!(count(9606), Cell::Text("0".into()));
 
-    let mut unwrapped = write;
-    unwrapped.transactional = false;
     let imported = fx.block_on(fx.session.execute_import(&unwrapped, b"id\n4\n"));
     assert_eq!(
         imported
@@ -3651,6 +3657,69 @@ fn import_transaction_ownership_preserves_caller_state_and_unwrapped_route() {
         1
     );
     assert_eq!(count(9607), Cell::Text("1".into()));
+}
+
+#[test]
+fn unwrapped_import_surfaces_deferred_unique_error_and_recovers_for_next_copy() {
+    use ignatius::transfer::{ImportOptions, TransferFormat};
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE import_unwrapped_deferred (id text UNIQUE DEFERRABLE INITIALLY DEFERRED); \
+         INSERT INTO import_unwrapped_deferred VALUES ('synthetic-import-duplicate')",
+        10,
+        JobId(9620),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+    let options = ImportOptions {
+        schema: "pg_temp".into(),
+        table: "import_unwrapped_deferred".into(),
+        file_path: "synthetic-unwrapped.csv".into(),
+        format: TransferFormat::Csv,
+        delimiter: b',',
+        has_header: false,
+        null_string: String::new(),
+        quote: b'"',
+        escape: b'"',
+        columns: Vec::new(),
+        dry_run: false,
+        transactional: false,
+    };
+
+    let error = fx
+        .block_on(fx.session.execute_import(
+            &options,
+            b"synthetic-import-duplicate\nsynthetic-import-duplicate\n",
+        ))
+        .expect_err("unwrapped deferred unique violation must fail");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(sqlstate(&error), "23505");
+    assert!(
+        !format!("{error:?}").contains("synthetic-import-duplicate"),
+        "duplicate input leaked into the diagnostic: {error:?}"
+    );
+
+    let imported = fx
+        .block_on(
+            fx.session
+                .execute_import(&options, b"synthetic-import-valid\n"),
+        )
+        .expect("same session remains usable for the next unwrapped COPY");
+    assert_eq!(imported.rows_imported, 1);
+    let contents = fx.block_on(fx.session.execute(
+        "SELECT id FROM pg_temp.import_unwrapped_deferred ORDER BY id",
+        10,
+        JobId(9621),
+    ));
+    assert_eq!(contents.status, ExecutionStatus::Succeeded, "{contents:?}");
+    assert_eq!(
+        contents.statements[0].result_set.as_ref().unwrap().rows,
+        vec![
+            vec![Cell::Text("synthetic-import-duplicate".into())],
+            vec![Cell::Text("synthetic-import-valid".into())]
+        ]
+    );
 }
 
 #[test]

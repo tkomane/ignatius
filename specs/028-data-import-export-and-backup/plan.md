@@ -48,3 +48,10 @@ and verify the new file. Measure peak process RSS across repeated runs
 using fixed-width CSV at two sizes and compare output digests on matched
 builds. Exercise startup and deferred failures and zero-byte publication
 through the real CLI.
+
+Opt bulk COPY import into completion checking on its existing sink.
+Retain the COPY row count while waiting for the same request's readiness
+message. Propagate a deferred rejection through the value-free transfer
+diagnostic. Verify with a deferred unique constraint that rejects only
+at the end of autocommit. Exercise subsequent COPY on the same session
+and confirm that an explicit caller transaction still owns its rollback.
