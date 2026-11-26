@@ -112,3 +112,23 @@ Root owns integration/docs; use a clean independent clone and separate build
 target if a worker is assigned. Run focused output/export/runtime tests and
 real existing export contracts, then the combined full gate and final platform
 checks after integration. Do not infer on-disk durability from a writer return.
+
+## W10 destination and partial ownership
+
+The shared export writer owns both filesystem decisions. Open the fixed
+partial name through the existing exclusive file-creation helper. After
+flushing, syncing and closing it, use an atomic no-replace move for default
+publication. Explicit CLI replacement uses a same-directory rename after
+the same checks. Report an unsupported move and keep the recovery path.
+
+The streaming query entry point checks for occupied names before connecting
+and reserves the partial after establishing the session, before executing
+SQL. The COPY file route checks both names before starting its PostgreSQL
+work and uses the shared writer for publication. A second open still requires
+an exclusive reservation even after preflight. The retained-row export uses
+the same writer with advice for its interactive path prompt.
+
+Check existing and in-progress partials for both force settings, a destination
+created during a default export, and a forced interruption. Compare exact
+final and partial bytes. Use disposable PostgreSQL and ordinary synthetic
+files to verify CLI status, recovery guidance and machine output.

@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 112 - Preserve export destinations and recovery files - 26 November 2026
+
+- **W10 / 021 T026.** Query, COPY file and retained-row exports reserve
+  their partial exclusively. Default publication uses an atomic no-replace
+  move. `--force` can replace the final name after the new file is complete.
+  File write failures identify the retained partial. Query connection failures
+  leave the output path free. [Feature 021 tasks](../specs/021-intentional-exports/tasks.md)
+- **Focused verification.** Three regressions failed on the baseline. The
+  fix passed 22 writer, filesystem and notice checks and five CLI contracts,
+  including interrupted streaming and live COPY output.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** An
+  independent final file appeared while a query was running. The fix exited
+  9 and preserved exact final and partial bytes. A stale partial blocked
+  `--force`. Moving it allowed the explicit replacement. COPY stdout and
+  file output matched byte for byte. An owned ASCII workbench displayed the
+  occupied path and recovery instructions, then wrote the retained row to a
+  fresh destination and quit normally.
+
 ## Wave 111 - Restore both editor panes after a crash - 26 November 2026
 
 - **W10 / 043 T014.** Version 1 journals optionally record the secondary

@@ -2717,11 +2717,11 @@ fn export_visible_rows(
             export
                 .writer()
                 .write_all(html.as_bytes())
-                .map_err(|err| write_failure(path, &err))?;
+                .map_err(|err| export.write_failure(&err))?;
         }
         crate::app::model::ExportFormat::Parquet => {
             crate::analytics::write_parquet(&visible, export.writer())
-                .map_err(|err| write_failure(path, &err))?;
+                .map_err(|err| export.write_failure(&err))?;
         }
         crate::app::model::ExportFormat::Csv
         | crate::app::model::ExportFormat::Tsv
@@ -2758,7 +2758,7 @@ fn export_visible_rows(
                 ..crate::cli::output::OutputOptions::default()
             };
             crate::cli::output::write_execution(export.writer(), &execution, &options)
-                .map_err(|err| write_failure(path, &err))?;
+                .map_err(|err| export.write_failure(&err))?;
         }
     }
     for _ in 0..visible_row_count {
@@ -2787,16 +2787,6 @@ fn expand_home(path: &str) -> std::path::PathBuf {
         || std::path::PathBuf::from(path),
         |dirs| dirs.home_dir().join(rest),
     )
-}
-
-fn write_failure(path: &str, error: &std::io::Error) -> Diagnostic {
-    Diagnostic::new(
-        DiagnosticKind::ExportInterrupted,
-        format!("could not write {path}"),
-        "writing the rows on screen",
-    )
-    .likely_cause(error.to_string())
-    .next_action("check the directory's permissions and free space")
 }
 
 /// Reads what an object depends on and what depends on it.
@@ -4060,13 +4050,29 @@ pub async fn export_once_with_parameters_reported(
     config: &Config,
     sql: String,
     parameters: Option<crate::query::ParameterBindings>,
-    mut export: crate::query::export::Export,
+    export: crate::query::export::Export,
+    writer: crate::cli::output::StreamWriter,
+) -> Reported<Result<ExportOutcome, Diagnostic>> {
+    export_once_with_reservation_reported(target, config, sql, parameters, || Ok(export), writer)
+        .await
+}
+
+/// Reserves the output after the connection succeeds and before the query runs.
+pub(crate) async fn export_once_with_reservation_reported(
+    target: ConnectionTarget,
+    config: &Config,
+    sql: String,
+    parameters: Option<crate::query::ParameterBindings>,
+    reserve_export: impl FnOnce() -> Result<crate::query::export::Export, Diagnostic>,
     mut writer: crate::cli::output::StreamWriter,
 ) -> Reported<Result<ExportOutcome, Diagnostic>> {
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
     let connected = session::connect_reported(&target, timeout).await;
-    let session = match connected.value {
-        Ok(session) => session,
+    let reserved = connected
+        .value
+        .and_then(|session| reserve_export().map(|export| (session, export)));
+    let (session, mut export) = match reserved {
+        Ok(ready) => ready,
         Err(error) => {
             return Reported {
                 value: Err(error),

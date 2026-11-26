@@ -1557,14 +1557,16 @@ fn query_command(
 
     // An export streams to a file without retaining the complete result.
     if let Some(destination) = request.output {
+        use crate::query::export::Export;
+
         let writer = output::StreamWriter::new(request.options.clone())?;
-        let export = crate::query::export::Export::create(destination, request.force)?;
-        let outcome = runtime()?.block_on(interactive::export_once_with_parameters_reported(
+        Export::check_destination(destination, request.force)?;
+        let outcome = runtime()?.block_on(interactive::export_once_with_reservation_reported(
             target,
             &loaded.config,
             sql,
             parameters,
-            export,
+            || Export::create(destination, request.force),
             writer,
         ));
         write_notice_counts(err, outcome.notice_report.counts).map_err(io_diagnostic)?;
@@ -2604,23 +2606,8 @@ fn run_export(
     )?;
     let target = authenticate_target(target, &loaded.config)?;
 
-    if args
-        .output
-        .as_ref()
-        .is_some_and(|destination| destination.exists())
-        && !args.force
-    {
-        let destination = args.output.as_ref().unwrap();
-        return Err(Diagnostic::new(
-            DiagnosticKind::Usage,
-            format!(
-                "refusing to overwrite existing file {}",
-                destination.display()
-            ),
-            "exporting data with ignatius export",
-        )
-        .likely_cause("the target output file already exists")
-        .next_action("pass --force to overwrite the file"));
+    if let Some(destination) = &args.output {
+        crate::query::export::Export::check_destination(destination, args.force)?;
     }
 
     let query_or_table = match args
@@ -2675,7 +2662,10 @@ fn run_export(
 
     if let Some(ref destination) = args.output {
         let mut export = crate::query::export::Export::create(destination, args.force)?;
-        export.writer().write_all(&bytes).map_err(io_diagnostic)?;
+        export
+            .writer()
+            .write_all(&bytes)
+            .map_err(|err| export.write_failure(&err))?;
         let _ = export.finish()?;
         writeln!(
             err,

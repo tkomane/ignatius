@@ -81,3 +81,18 @@ the production abandonment boundary, with a private injection seam if needed.
 No full-disk experiment, unsafe file-descriptor manipulation, real values or
 production fault switch is needed. Match new sidecar tests to repository policy;
 move existing inline tests mechanically only in directly changed modules.
+
+## W10 destination and partial ownership
+
+- An occupied `<path>.partial` is a usage refusal before local writing. The
+  recovery diagnostic names the partial and explains how to keep or move it.
+- An existing final name is a usage refusal without replacement authority.
+  A final name created after reservation is preserved when default publication
+  fails. That export exits 9 and identifies its retained partial.
+- `--force` applies to publication of the final path. A failed or cancelled
+  forced export leaves the old destination and its own partial available.
+- Publish only after flush and file sync succeed. Use a native no-replace
+  move for default publication. A filesystem refusal is an interrupted export
+  with a recovery path. Flush failures retain unconfirmed-row wording.
+- A query connection failure before streaming keeps its ordinary diagnostic
+  and leaves the output names unused. File diagnostics stay on stderr.

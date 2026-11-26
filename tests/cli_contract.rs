@@ -287,6 +287,100 @@ fn an_unreachable_server_exits_with_the_connection_code() {
 }
 
 #[test]
+fn a_failed_query_output_keeps_connection_exit_and_creates_no_file() {
+    let dir = tempfile::tempdir().expect("output temp dir");
+    let destination = dir.path().join("failed.csv");
+    let output = binary()
+        .args([
+            "query",
+            "postgres://someone@127.0.0.1:1/nothing?connect_timeout=2",
+            "-c",
+            "SELECT 1",
+            "--format",
+            "csv",
+            "--output",
+            &destination.display().to_string(),
+        ])
+        .output()
+        .expect("run failed query export");
+
+    assert_eq!(code(&output), 4, "connection failure: {}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "failed export emitted stdout");
+    assert!(
+        !destination.exists(),
+        "failed connection created a final file"
+    );
+    assert!(
+        !destination.with_extension("csv.partial").exists(),
+        "failed connection created a partial file"
+    );
+}
+
+#[test]
+fn query_and_export_refuse_preexisting_partials_before_connection_and_preserve_them() {
+    let dir = tempfile::tempdir().expect("output temp dir");
+    let partial_bytes = b"old partial bytes\n";
+    let uri = "postgres://someone@127.0.0.1:1/nothing?connect_timeout=2";
+    let cases = ["query", "export"];
+
+    for command in cases {
+        let stem = dir.path().join(format!("{command}.csv"));
+        let partial = stem.with_extension("csv.partial");
+        std::fs::write(&partial, partial_bytes).expect("write existing partial");
+        let output = if command == "query" {
+            binary()
+                .args([
+                    "query",
+                    uri,
+                    "-c",
+                    "SELECT 1",
+                    "--format",
+                    "csv",
+                    "--output",
+                    &stem.display().to_string(),
+                ])
+                .output()
+                .expect("run query partial refusal")
+        } else {
+            binary()
+                .args([
+                    "export",
+                    uri,
+                    "SELECT 1",
+                    "--format",
+                    "csv",
+                    "--output",
+                    &stem.display().to_string(),
+                ])
+                .output()
+                .expect("run export partial refusal")
+        };
+
+        assert_eq!(
+            code(&output),
+            2,
+            "{command} partial refusal: {}",
+            stderr(&output)
+        );
+        assert!(
+            stdout(&output).is_empty(),
+            "{command} partial refusal emitted stdout"
+        );
+        let message = stderr(&output);
+        assert!(
+            message.contains(&partial.display().to_string()),
+            "{command} recovery message omitted the exact partial path: {message}"
+        );
+        assert!(!stem.exists(), "{command} created a final artifact");
+        assert_eq!(
+            std::fs::read(&partial).expect("read preserved partial"),
+            partial_bytes,
+            "{command} changed the existing partial"
+        );
+    }
+}
+
+#[test]
 fn retained_result_refresh_stays_out_of_noninteractive_machine_output() {
     let marker = "synthetic-refresh-value";
     let output = binary()

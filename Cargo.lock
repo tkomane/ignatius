@@ -893,6 +893,7 @@ dependencies = [
  "dirs-sys",
  "futures-util",
  "ratatui",
+ "rustix",
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",

@@ -150,8 +150,11 @@ that the result view, history and diagnostics do not alter machine output.
   history or debug output as a side effect of choosing a format.
 - **SEC-2102**: Table names and column names MUST be quoted through the single
   identifier helper; raw names MUST never be concatenated into SQL syntax.
-- **SEC-2103**: A file is never replaced accidentally. Existing destinations
-  and partial exports retain their current explicit recovery behavior.
+- **SEC-2103**: Reserve `<path>.partial` exclusively and leave an existing
+  partial available for recovery. Publish the completed file atomically with
+  the same no-overwrite guarantee as the initial path check. `--force`
+  authorizes replacement of the final name after completion. A publication
+  refusal leaves the written partial and preserves any existing destination.
 - **SEC-2104**: Machine output MUST contain only the selected data shape, with
   no colour, progress, status banner or terminal control sequence.
 - **SEC-2105**: Interactive format choice MUST remain outside plain, JSON,

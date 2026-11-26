@@ -591,10 +591,13 @@ before output, and multiple result sets become separate INSERT statements.
 `--insert-table` is refused with every other format. Review generated SQL before
 executing it; the client writes data and never executes the statements it emits.
 
-The destination is never written directly. Rows go to `<path>.partial`, which is
-flushed, synced and renamed only when the export completes, so a file at the
-destination is always a complete file. An existing destination stops the export
-unless `--force` is given.
+The writer reserves `<path>.partial` exclusively. An existing partial stops the
+export in both modes. Wait for an active writer to finish or choose another
+destination. Inspect a leftover partial before moving it. The writer flushes,
+syncs and closes its partial before publishing it. Default publication uses an
+atomic move that preserves a destination created during the export. A filesystem
+that refuses that move leaves the partial available for recovery. `--force`
+authorizes atomic replacement of the final path after successful writing.
 
 An interrupted export exits 9 and leaves the partial file. Progress counts only
 complete row encodings accepted by the writer. When the partial-file flush
