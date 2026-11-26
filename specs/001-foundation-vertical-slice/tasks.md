@@ -208,6 +208,13 @@ when the behaviour exists and a test or recorded evidence proves it.
 
 [Owned PTY and focused evidence](../../docs/status.md#wave-93---restore-the-unix-terminal-on-sigterm-during-a-key-chord---26-november-2026)
 
+- [x] T061 Add live Linux socket coverage for cancellation in an explicit
+  transaction. Require SQLSTATE 57014 and failed transaction state, 25P02 on
+  a subsequent query, explicit rollback and a successful query on the same
+  socket backend. Preserve T059's autocommit case.
+
+[Socket test scope](../../docs/status.md#wave-98---verify-explicit-rollback-after-unix-socket-cancellation---26-november-2026)
+
 ## Dependencies
 
 Phase 1 and 2 block everything. Within Phase 3, T015 to T020 are independent of
