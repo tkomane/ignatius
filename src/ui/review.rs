@@ -17,6 +17,7 @@ pub(crate) enum Kind {
     Copy,
     Update,
     Production,
+    Import,
     Analyze,
     Parameter,
 }
@@ -31,6 +32,9 @@ pub(crate) fn active_kind(model: &Model) -> Option<Kind> {
     }
     if model.name_prompt.is_some() || model.connection_details || model.prefix_pending {
         return None;
+    }
+    if model.pending_import.is_some() {
+        return Some(Kind::Import);
     }
     if model.pending_run.is_some() {
         return Some(Kind::Production);
@@ -302,6 +306,47 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
                 "The prior SELECT is a snapshot and will not be rerun automatically.",
                 Token::Text,
             );
+        }
+        Kind::Import => {
+            let pending = model.pending_import.as_ref()?;
+            let options = &pending.options;
+            doc.title = "Confirm production import";
+            doc.accept = "import once";
+            let display = |name: &str| sanitize_for_display(&crate::diagnostics::redact_text(name));
+            let database = display(&pending.connection.database);
+            push(
+                &mut rows,
+                format!("[PROD] Database: {database}"),
+                Token::EnvironmentProduction,
+            );
+            push(
+                &mut rows,
+                format!(
+                    "Destination: {}.{}",
+                    display(&crate::query::identifiers::quote_identifier(
+                        &options.schema
+                    )),
+                    display(&crate::query::identifiers::quote_identifier(&options.table))
+                ),
+                Token::Text,
+            );
+            push(
+                &mut rows,
+                if options.dry_run {
+                    "Dry run: COPY rows, then roll back."
+                } else {
+                    "Import: commit the copied rows."
+                },
+                Token::Warning,
+            );
+            push(
+                &mut rows,
+                format!("Type the database name to continue: {database}"),
+                Token::Text,
+            );
+            doc.input = Some(Input::Name(display(&pending.typed)));
+            doc.typed_satisfied =
+                !pending.typed.is_empty() && pending.typed == pending.connection.database;
         }
         Kind::Production | Kind::Analyze => {
             let (sql, impact, typed, required) = if kind == Kind::Production {

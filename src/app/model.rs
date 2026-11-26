@@ -867,6 +867,27 @@ impl ImportWizardStep {
     }
 }
 
+/// Physical query session and resolved target captured for one import.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportConnection {
+    /// Profile generation in which the user session was installed.
+    pub generation: u64,
+    /// Runtime-minted identity even when the same profile reconnects.
+    pub session_id: NoticeSessionId,
+    /// PostgreSQL database named by the connected session.
+    pub database: String,
+    /// Resolved target classification used to admit this import.
+    pub environment: Environment,
+}
+
+/// One production import waiting for its exact database name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingImport {
+    pub connection: ImportConnection,
+    pub options: crate::transfer::ImportOptions,
+    pub typed: String,
+}
+
 /// Interactive state for the bulk data import wizard (`028-data-import-export-and-backup`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ImportWizardState {
@@ -945,6 +966,11 @@ impl ImportWizardState {
 
     /// Rebuilds the preview SQL statement from current mappings and options.
     pub fn rebuild_sql(&mut self) {
+        self.copy_sql = crate::transfer::build_copy_from_sql(&self.options());
+    }
+
+    /// The exact COPY configuration shown in the wizard.
+    pub(crate) fn options(&self) -> crate::transfer::ImportOptions {
         let active_cols: Vec<String> = if let Some(ref prev) = self.preview {
             prev.column_mappings
                 .iter()
@@ -955,7 +981,7 @@ impl ImportWizardState {
             Vec::new()
         };
 
-        let options = crate::transfer::ImportOptions {
+        crate::transfer::ImportOptions {
             schema: self.schema.clone(),
             table: self.table.clone(),
             file_path: self.file_path.clone(),
@@ -968,9 +994,7 @@ impl ImportWizardState {
             columns: active_cols,
             dry_run: self.dry_run,
             transactional: self.transactional,
-        };
-
-        self.copy_sql = crate::transfer::build_copy_from_sql(&options);
+        }
     }
 
     /// Toggles the skipped state of the selected column mapping.
@@ -3996,6 +4020,10 @@ pub struct Model {
     pub schema_diff_request: u64,
     /// Interactive bulk data import wizard overlay state.
     pub import_wizard: Option<ImportWizardState>,
+    /// Production confirmation for one captured import configuration.
+    pub(crate) pending_import: Option<PendingImport>,
+    /// Execution request still outstanding, including after the wizard closes.
+    pub(crate) import_in_flight: Option<u64>,
     /// Request counter for in-flight import operations.
     pub import_wizard_request: u64,
     /// Interactive routine runner and PL/pgSQL profiler overlay state.
@@ -4204,6 +4232,27 @@ impl Model {
     pub fn allocate_update_request(&mut self) -> u64 {
         self.next_update_request += 1;
         self.next_update_request
+    }
+
+    /// Discards import state tied to a retired physical connection.
+    pub(crate) fn retire_import(&mut self) {
+        self.import_wizard = None;
+        self.pending_import = None;
+        self.import_in_flight = None;
+    }
+
+    /// Captures a ready query session through its existing physical installation identity.
+    pub(crate) fn import_connection(&self) -> Option<ImportConnection> {
+        let ConnectionState::Connected(info) = &self.connection else {
+            return None;
+        };
+        let source = self.notice_state.sources[NoticeSource::User.index()].as_ref()?;
+        (source.generation == self.connection_generation).then(|| ImportConnection {
+            generation: source.generation,
+            session_id: source.session_id.clone(),
+            database: info.database.clone(),
+            environment: info.environment.clone(),
+        })
     }
 
     /// The environment classification of the current connection.

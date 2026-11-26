@@ -88,7 +88,9 @@ fn review_sql_row_mask(
                 }
             }
         }
-        crate::ui::review::Kind::Copy | crate::ui::review::Kind::Parameter => {}
+        crate::ui::review::Kind::Copy
+        | crate::ui::review::Kind::Parameter
+        | crate::ui::review::Kind::Import => {}
     }
     mask
 }
@@ -136,7 +138,7 @@ fn styled_review_rail_spans(line: &str, base_style: Style, key_style: Style) -> 
 }
 
 /// Draws precisely the rows and fixed interaction areas used for admission.
-fn render_sending_review(
+pub(crate) fn render_sending_review(
     model: &Model,
     kind: crate::ui::review::Kind,
     presentation: &Presentation,
@@ -151,7 +153,8 @@ fn render_sending_review(
     let title_icon = match kind {
         crate::ui::review::Kind::Production
         | crate::ui::review::Kind::Update
-        | crate::ui::review::Kind::Analyze => Icon::Warning,
+        | crate::ui::review::Kind::Analyze
+        | crate::ui::review::Kind::Import => Icon::Warning,
         crate::ui::review::Kind::Copy | crate::ui::review::Kind::Parameter => Icon::Info,
     };
     let title_line = Line::from(Span::styled(

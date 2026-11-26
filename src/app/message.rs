@@ -1039,6 +1039,8 @@ pub enum Effect {
     },
     /// Execute a bulk data import into the database.
     ExecuteImport {
+        /// Query session on which this exact configuration was admitted.
+        connection: crate::app::model::ImportConnection,
         /// Identity used to reject a late response.
         request: u64,
         /// Import options.

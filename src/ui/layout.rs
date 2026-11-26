@@ -449,6 +449,17 @@ fn render_overlays(
             render_chords(keymap, presentation, area, b);
         });
     }
+    if model.pending_import.is_some() {
+        render_layer(false, &mut |b| {
+            crate::ui::widgets::overlays::render_sending_review(
+                model,
+                crate::ui::review::Kind::Import,
+                presentation,
+                area,
+                b,
+            );
+        });
+    }
     if model.pending_run.is_some() {
         render_layer(false, &mut |b| {
             render_confirmation(model, presentation, area, b);

@@ -317,6 +317,7 @@ pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>
         return Some(close);
     }
     if model.prefix_pending
+        || model.pending_import.is_some()
         || model.pending_run.is_some()
         || model.pending_plan.is_some()
         || model.pending_copy.is_some()

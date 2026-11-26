@@ -238,6 +238,16 @@ impl CancelHandle {
     }
 }
 
+/// The selected physical session retired before this import was sent.
+pub(crate) fn import_session_changed() -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticKind::Connection,
+        "the import connection changed before COPY started",
+        "starting the reviewed import",
+    )
+    .next_action("open the import wizard and review the current destination")
+}
+
 /// COPY and deferred checks during commit can expose input values in server
 /// diagnostic text.
 fn from_import_error(err: &tokio_postgres::Error, phase: &str) -> Diagnostic {
@@ -1217,6 +1227,17 @@ impl Session {
         options: &crate::transfer::ImportOptions,
         data: &[u8],
     ) -> Result<crate::transfer::ImportResult, Diagnostic> {
+        self.execute_import_while_current(options, data, || true)
+            .await
+    }
+
+    /// Executes on this captured session while its one-shot admission remains current.
+    pub(crate) async fn execute_import_while_current(
+        &self,
+        options: &crate::transfer::ImportOptions,
+        data: &[u8],
+        current: impl Fn() -> bool,
+    ) -> Result<crate::transfer::ImportResult, Diagnostic> {
         if options.dry_run && !options.transactional {
             return Err(Diagnostic::new(
                 DiagnosticKind::Usage,
@@ -1227,21 +1248,36 @@ impl Session {
         }
 
         let _guard = self.user_sql_gate.lock().await;
+        // A previous query can outlive this approval while it holds the gate.
+        if !current() {
+            return Err(import_session_changed());
+        }
         let start = std::time::Instant::now();
 
         if options.transactional {
             self.require_autocommit("the transaction-wrapped import", "importing data", "COPY")
                 .await?;
+            if !current() {
+                return Err(import_session_changed());
+            }
             self.client
                 .batch_execute("BEGIN;")
                 .await
                 .map_err(|e| from_query_error(&e, 1))?;
         }
 
-        let rows = match self.copy_import(options, data).await {
+        // BEGIN may have waited for the server after admission. Only this empty,
+        // client-owned wrapper may be rolled back when the approval has expired.
+        let copied = if current() {
+            self.copy_import(options, data)
+                .await
+                .map_err(|error| from_import_error(&error, "COPY import"))
+        } else {
+            Err(import_session_changed())
+        };
+        let rows = match copied {
             Ok(rows) => rows,
-            Err(error) => {
-                let mut diagnostic = from_import_error(&error, "COPY import");
+            Err(mut diagnostic) => {
                 if options.transactional && self.client.batch_execute("ROLLBACK;").await.is_err() {
                     diagnostic
                         .headline

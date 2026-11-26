@@ -289,6 +289,7 @@ pub(super) fn covered(model: &Model) -> bool {
         || model.password_prompt.is_some()
         || model.parameter_prompt.is_some()
         || model.name_prompt.is_some()
+        || model.pending_import.is_some()
         || model.pending_run.is_some()
         || model.pending_plan.is_some()
         || model.pending_copy.is_some()

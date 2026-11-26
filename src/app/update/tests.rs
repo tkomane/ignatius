@@ -10779,6 +10779,214 @@ fn import_wizard_overlay_lifecycle_navigation_and_editor_loading() {
     assert!(model.import_wizard.is_none());
 }
 
+fn import_review_model(environment: Environment, dry_run: bool) -> Model {
+    let mut model = connected();
+    let mut info = session();
+    info.database = "review_db".into();
+    info.environment = environment;
+    update(&mut model, Message::Connected(info));
+    update(
+        &mut model,
+        Message::NoticeSourceInstalled {
+            source: crate::app::model::NoticeSource::User,
+            session_id: crate::app::model::NoticeSessionId::new(),
+        },
+    );
+    update(&mut model, Message::Resized(100, 30));
+    update(&mut model, Message::Action(Action::ImportData));
+    let request = model.import_wizard_request;
+    update(
+        &mut model,
+        Message::ImportPreviewLoaded {
+            request,
+            result: Box::new(Ok(crate::transfer::ImportPreview {
+                headers: vec!["id".into()],
+                sample_rows: vec![vec!["synthetic-private-row".into()]],
+                column_mappings: vec![crate::transfer::ImportColumnMapping {
+                    source_column: "id".into(),
+                    target_column: "id".into(),
+                    target_type: "text".into(),
+                    is_nullable: false,
+                    skip: false,
+                }],
+                estimated_rows: 1,
+            })),
+        },
+    );
+    if dry_run {
+        update(&mut model, Message::Action(Action::Insert('d')));
+    }
+    update(&mut model, Message::Action(Action::Insert('3')));
+    model
+}
+
+fn type_import_name(model: &mut Model, name: &str) {
+    for ch in name.chars() {
+        assert!(update(model, Message::Action(Action::Insert(ch))).is_empty());
+    }
+}
+
+#[test]
+fn production_import_requires_exact_name_for_each_commit_and_dry_run() {
+    for dry_run in [false, true] {
+        let mut model = import_review_model(Environment::Production, dry_run);
+        assert!(
+            update(&mut model, Message::Action(Action::Activate)).is_empty(),
+            "opening the production review must not dispatch COPY"
+        );
+        let frame = split_frame(&model);
+        assert!(frame.contains("Confirm production import"));
+        assert!(frame.contains("Type the database name to continue: review_db"));
+        assert!(frame.contains(r#"Destination: "public"."orders""#));
+        assert!(frame.contains(if dry_run {
+            "Dry run: COPY rows, then roll back."
+        } else {
+            "Import: commit the copied rows."
+        }));
+        assert!(!frame.contains("synthetic-private-row"));
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        update(&mut model, Message::Pasted("review_db".into()));
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        type_import_name(&mut model, "review_dB");
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        update(&mut model, Message::Action(Action::Backspace));
+        type_import_name(&mut model, "b");
+        let effects = update(&mut model, Message::Action(Action::Activate));
+        let [Effect::ExecuteImport { options, .. }] = effects.as_slice() else {
+            panic!("one approved COPY")
+        };
+        assert_eq!(options.dry_run, dry_run);
+        assert_eq!(options.table, "orders");
+        assert_eq!(options.columns, ["id"]);
+        assert!(
+            update(&mut model, Message::Action(Action::Activate)).is_empty(),
+            "repeated activation while executing must not dispatch COPY"
+        );
+        update(&mut model, Message::Action(Action::Dismiss));
+        assert!(
+            update(&mut model, Message::Action(Action::ImportData)).is_empty(),
+            "closing and reopening cannot submit a second in-flight COPY"
+        );
+    }
+}
+
+#[test]
+fn production_import_cancellation_and_stale_target_send_nothing() {
+    for change in [
+        "cancel",
+        "loss",
+        "generation",
+        "session",
+        "database",
+        "options",
+    ] {
+        let mut model = import_review_model(Environment::Production, false);
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        type_import_name(&mut model, "review_db");
+        match change {
+            "cancel" => {
+                assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+                assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+            }
+            "loss" => {
+                update(&mut model, Message::ConnectionLost);
+            }
+            "generation" => {
+                model.connection_generation += 1;
+            }
+            "session" => {
+                let source = crate::app::model::NoticeSource::User;
+                let generation = model.connection_generation;
+                let session_id = model.notice_state.sources[source.index()]
+                    .as_ref()
+                    .unwrap()
+                    .session_id
+                    .clone();
+                update(&mut model, Message::NoticeRetirementStarted(generation));
+                update(
+                    &mut model,
+                    Message::NoticeRetiringSourceInstalled {
+                        generation,
+                        source,
+                        session_id: session_id.clone(),
+                    },
+                );
+                update(
+                    &mut model,
+                    Message::NoticeRetired {
+                        generation,
+                        source,
+                        session_id,
+                        counts: Default::default(),
+                    },
+                );
+                assert!(
+                    model.import_wizard.is_none(),
+                    "retirement invalidates the old wizard immediately"
+                );
+                update(&mut model, Message::NoticeRetirementFinished(generation));
+                update(
+                    &mut model,
+                    Message::NoticeSourceInstalled {
+                        source: crate::app::model::NoticeSource::User,
+                        session_id: crate::app::model::NoticeSessionId::new(),
+                    },
+                );
+            }
+            "database" => {
+                let ConnectionState::Connected(info) = &mut model.connection else {
+                    panic!("connected")
+                };
+                info.database = "other_db".into();
+            }
+            "options" => {
+                model.import_wizard.as_mut().unwrap().dry_run = true;
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            update(&mut model, Message::Action(Action::Activate)).is_empty(),
+            "{change}"
+        );
+    }
+}
+
+#[test]
+fn local_import_executes_once_and_completion_allows_a_new_submission() {
+    let mut model = import_review_model(Environment::Local, false);
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    let [Effect::ExecuteImport { request, .. }] = effects.as_slice() else {
+        panic!("one local COPY")
+    };
+    let result = || {
+        Box::new(Ok(crate::transfer::ImportResult {
+            rows_imported: 1,
+            bytes_processed: 5,
+            elapsed_ms: 1,
+            status: "Committed 1 row".into(),
+        }))
+    };
+    update(
+        &mut model,
+        Message::ImportExecuted {
+            request: request.wrapping_sub(1),
+            result: result(),
+        },
+    );
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    update(
+        &mut model,
+        Message::ImportExecuted {
+            request: *request,
+            result: result(),
+        },
+    );
+    assert!(matches!(
+        update(&mut model, Message::Action(Action::Activate)).as_slice(),
+        [Effect::ExecuteImport { .. }]
+    ));
+}
+
 #[test]
 fn routine_runner_lifecycle_navigation_execution_and_editor_load() {
     let mut model = connected();
