@@ -4,6 +4,25 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 91 - Verify cancellation over a PostgreSQL Unix socket - 26 November 2026
+
+- **W05 / 001 T059.** The existing Linux socket job now verifies ordinary
+  cancellation as well as query execution. Both sessions prove Unix-socket
+  transport on PostgreSQL. An independent backend observes the exact tagged
+  running statement before cancellation. The original backend returns
+  SQLSTATE `57014` and succeeds on a later autocommit query within the
+  test's 20-second deadline.
+  [Foundation tasks](../specs/001-foundation-vertical-slice/tasks.md)
+- **Hosted rehearsal.** The exact `447343e` candidate passed both socket
+  tests in 0.18 seconds on hosted Ubuntu 26.04 with the reviewed PostgreSQL
+  18.7 fixture. The image index digest was
+  `sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71`.
+  [Linux socket job](https://github.com/tkomane/ignatius/actions/runs/45729927329/job/139609115539)
+- **Local scope.** The socket test binary compiled on macOS arm64. Both
+  socket tests reported skips because the local fixture URI was unset.
+  The tagged-query observer predicate matched the owned TCP fixture.
+  Linux desktop hand-use acceptance remains open under T052.
+
 ## Wave 90 - Clear completed error markers on tab changes - 26 November 2026
 
 - **W02 / 013 T028.** An actual editor tab change or restored workspace

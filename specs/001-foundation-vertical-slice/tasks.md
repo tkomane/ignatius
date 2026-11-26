@@ -196,9 +196,11 @@ when the behaviour exists and a test or recorded evidence proves it.
 - [x] T056 Private repository with CI on three platforms and three server versions
 - [x] T057 Advertised keys that no operating system claims by default
 - [x] T058 Visual system: glyph tiers, icons, capsules, striping, motion
-- [ ] T059 Prove normal cancellation and same-backend recovery over an
+- [x] T059 Prove normal cancellation and same-backend recovery over an
   actual PostgreSQL Unix socket in the existing Linux-hosted integration
   job. Record fixture version, bounded completion and SQLSTATE 57014.
+
+[Linux socket rehearsal and local scope](../../docs/status.md#wave-91---verify-cancellation-over-a-postgresql-unix-socket---26-november-2026)
 
 ## Dependencies
 
