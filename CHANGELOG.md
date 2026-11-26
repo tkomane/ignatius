@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Import previews and runs report source file read errors. A failed
+  read prevents COPY and clears the old preview.
 - Fixed: The import wizard requires the exact database name before a
   production-classified import or dry run.
 - Fixed: Replace Cell checks the query backend's effective read-only setting

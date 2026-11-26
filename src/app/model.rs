@@ -969,6 +969,20 @@ impl ImportWizardState {
         self.copy_sql = crate::transfer::build_copy_from_sql(&self.options());
     }
 
+    /// Whether a completed preview can supply the current import options.
+    pub(crate) fn can_run(&self) -> bool {
+        !self.loading && self.preview.is_some()
+    }
+
+    /// Discards the source preview and everything carried over from its mappings.
+    pub(crate) fn invalidate_preview(&mut self) {
+        self.preview = None;
+        self.selected_column_idx = 0;
+        self.scroll_y = 0;
+        self.result = None;
+        self.rebuild_sql();
+    }
+
     /// The exact COPY configuration shown in the wizard.
     pub(crate) fn options(&self) -> crate::transfer::ImportOptions {
         let active_cols: Vec<String> = if let Some(ref prev) = self.preview {

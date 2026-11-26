@@ -2754,6 +2754,7 @@ pub(crate) fn render_schema_diff(
 /// Renders the interactive Bulk Data Import Wizard overlay (`028-data-import-export-and-backup`).
 pub(crate) fn render_import_wizard(
     state: &crate::app::model::ImportWizardState,
+    executing: bool,
     presentation: &Presentation,
     area: Rect,
     buf: &mut Buffer,
@@ -2989,7 +2990,11 @@ pub(crate) fn render_import_wizard(
                 }
             } else {
                 lines.push(Line::from(Span::styled(
-                    "No columns mapped. Return to Step 1 to load preview.",
+                    if state.loading {
+                        "Analyzing source file structure and sample data..."
+                    } else {
+                        "No columns mapped. Press [r] to load a source preview."
+                    },
                     theme.style(Token::Muted),
                 )));
             }
@@ -3051,17 +3056,27 @@ pub(crate) fn render_import_wizard(
                 ]));
             } else if state.loading {
                 lines.push(Line::from(Span::styled(
-                    "Streaming data into database via COPY protocol...",
+                    if state.preview.is_some() {
+                        "Reading the source file and running the import..."
+                    } else {
+                        "Analyzing source file structure and sample data..."
+                    },
                     theme.style(Token::Focus),
                 )));
-            } else if let Some(ref err) = state.error {
+            } else if let Some(ref err) = state.error
+                && state.preview.is_some()
+            {
                 lines.push(Line::from(Span::styled(
                     format!("Execution Failed: {err}"),
                     theme.style(Token::Danger),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
-                    "Ready to execute. Press [Enter] to run import or [e] to load in SQL editor.",
+                    if state.can_run() {
+                        "Ready to execute. Press [Enter] to run import or [e] to load in SQL editor."
+                    } else {
+                        "Press [r] to load a source preview before running."
+                    },
                     theme.style(Token::Focus),
                 )));
             }
@@ -3069,43 +3084,61 @@ pub(crate) fn render_import_wizard(
         }
     }
 
-    let footer_hints = vec![
-        Span::styled(
-            " [Tab/1/2/3] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Step  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[↑/↓] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Navigate  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[Space] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Toggle Skip  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[d] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Dry-run  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[e] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Load in Editor  ", theme.style(Token::Muted)),
-        Span::styled(
-            "[Enter] ",
-            theme.style(Token::Focus).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Run  ", theme.style(Token::Muted)),
+    let mut footer_hints = Vec::new();
+    if !executing {
+        footer_hints.extend([
+            Span::styled(
+                " [Tab/1/2/3] ",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Step  ", theme.style(Token::Muted)),
+            Span::styled(
+                "[↑/↓] ",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Navigate  ", theme.style(Token::Muted)),
+            Span::styled(
+                "[Space] ",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Toggle Skip  ", theme.style(Token::Muted)),
+            Span::styled(
+                "[d] ",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Dry-run  ", theme.style(Token::Muted)),
+            Span::styled(
+                "[r] ",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Preview  ", theme.style(Token::Muted)),
+        ]);
+    }
+    if state.can_run() {
+        footer_hints.extend([
+            Span::styled(
+                "[e] ",
+                theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Load in Editor  ", theme.style(Token::Muted)),
+        ]);
+        if state.step == crate::app::model::ImportWizardStep::Execute {
+            footer_hints.extend([
+                Span::styled(
+                    "[Enter] ",
+                    theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Run  ", theme.style(Token::Muted)),
+            ]);
+        }
+    }
+    footer_hints.extend([
         Span::styled(
             "[Esc] ",
             theme.style(Token::Focus).add_modifier(Modifier::BOLD),
         ),
         Span::styled("Close", theme.style(Token::Muted)),
-    ];
+    ]);
     Paragraph::new(Line::from(footer_hints)).render(footer_area, buf);
 }
 

@@ -10988,6 +10988,76 @@ fn local_import_executes_once_and_completion_allows_a_new_submission() {
 }
 
 #[test]
+fn import_file_reload_discards_stale_preview_result_and_blocks_run() {
+    use crate::app::model::ImportWizardStep;
+    use crate::diagnostics::{Diagnostic, DiagnosticKind};
+
+    let mut model = import_review_model(Environment::Local, false);
+    let stale_request = model.import_wizard_request;
+    let wizard = model.import_wizard.as_mut().unwrap();
+    let old_preview = wizard.preview.clone().unwrap();
+    wizard.result = Some(crate::transfer::ImportResult {
+        rows_imported: 1,
+        bytes_processed: 4,
+        elapsed_ms: 1,
+        status: "Committed 1 row".into(),
+    });
+    assert!(wizard.copy_sql.contains("(\"id\")"));
+
+    let effects = update(&mut model, Message::Action(Action::Insert('r')));
+    let [Effect::LoadImportPreview { request, .. }] = effects.as_slice() else {
+        panic!("expected a new preview");
+    };
+    let request = *request;
+    let wizard = model.import_wizard.as_ref().unwrap();
+    assert!(wizard.loading);
+    assert!(wizard.preview.is_none());
+    assert!(wizard.result.is_none());
+    assert!(!wizard.copy_sql.contains("(\"id\")"));
+
+    update(
+        &mut model,
+        Message::ImportPreviewLoaded {
+            request: stale_request,
+            result: Box::new(Ok(old_preview.clone())),
+        },
+    );
+    assert!(model.import_wizard.as_ref().unwrap().loading);
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.import_in_flight.is_none());
+    assert!(model.pending_import.is_none());
+
+    update(
+        &mut model,
+        Message::ImportPreviewLoaded {
+            request,
+            result: Box::new(Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "Could not read import file",
+                "previewing the import file",
+            ))),
+        },
+    );
+    let wizard = model.import_wizard.as_ref().unwrap();
+    assert!(!wizard.loading && wizard.preview.is_none());
+    assert_eq!(wizard.step, ImportWizardStep::SourceFile);
+    assert_eq!(wizard.error.as_deref(), Some("Could not read import file"));
+
+    // A duplicate result with the completed request ID cannot revive it.
+    update(
+        &mut model,
+        Message::ImportPreviewLoaded {
+            request,
+            result: Box::new(Ok(old_preview)),
+        },
+    );
+    update(&mut model, Message::Action(Action::Insert('3')));
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.import_wizard.as_ref().unwrap().preview.is_none());
+    assert!(model.import_in_flight.is_none());
+}
+
+#[test]
 fn routine_runner_lifecycle_navigation_execution_and_editor_load() {
     let mut model = connected();
     let initial_text = model.editor.text().to_string();

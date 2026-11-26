@@ -323,7 +323,13 @@ fn render_overlays(
     }
     if let Some(wizard) = &model.import_wizard {
         render_layer(false, &mut |b| {
-            render_import_wizard(wizard, presentation, area, b);
+            render_import_wizard(
+                wizard,
+                model.import_in_flight.is_some(),
+                presentation,
+                area,
+                b,
+            );
         });
     }
     if let Some(runner) = &model.routine_runner {

@@ -514,6 +514,12 @@ destination and commit or rollback intent. Type the exact database name and
 accept to run either mode. Each approval is specific to one import and one
 query session. The CLI requires `--confirm-production` for these targets.
 
+The wizard requires a completed preview. An unreadable source or invalid
+UTF-8 preview clears cached data and shows the file error. If the file
+becomes unreadable after preview, the wizard stops before COPY and returns
+to the source step. A readable header-only CSV remains a valid zero-row
+import.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson

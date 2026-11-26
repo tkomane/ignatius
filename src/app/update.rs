@@ -12,7 +12,7 @@
 //! - Nothing is ever re-run automatically.
 
 use crate::app::grid::GridCommand;
-use crate::app::message::{Action, Direction, Effect, Message};
+use crate::app::message::{Action, Direction, Effect, ImportFailure, Message};
 use crate::app::model::{
     ConnectingStep, ConnectionState, ExportFormat, Focus, LayoutNotice, Model, ParameterPrompt,
     PasteNotice, PendingUpdate, QueryPhase, SubmissionSource, UpdateCandidate, UpdateLookup,
@@ -858,10 +858,10 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             Vec::new()
         }
         Message::ImportPreviewLoaded { request, result } => {
-            if request != model.import_wizard_request {
+            if request != model.import_wizard_request || model.import_in_flight.is_some() {
                 return Vec::new();
             }
-            if let Some(wizard) = &mut model.import_wizard {
+            if let Some(wizard) = model.import_wizard.as_mut().filter(|wizard| wizard.loading) {
                 wizard.loading = false;
                 match *result {
                     Ok(prev) => {
@@ -870,6 +870,8 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         wizard.rebuild_sql();
                     }
                     Err(diagnostic) => {
+                        wizard.invalidate_preview();
+                        wizard.step = crate::app::model::ImportWizardStep::SourceFile;
                         wizard.error = Some(diagnostic.headline);
                     }
                 }
@@ -891,7 +893,13 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         wizard.result = Some(res);
                         wizard.error = None;
                     }
-                    Err(diagnostic) => {
+                    Err(ImportFailure::Source(diagnostic)) => {
+                        wizard.invalidate_preview();
+                        wizard.step = crate::app::model::ImportWizardStep::SourceFile;
+                        wizard.error =
+                            Some(format!("No COPY was started. {}", diagnostic.headline));
+                    }
+                    Err(ImportFailure::Execution(diagnostic)) => {
                         wizard.result = None;
                         wizard.error = Some(diagnostic.headline);
                     }
@@ -3219,6 +3227,7 @@ fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 model.import_wizard_request = model.import_wizard_request.wrapping_add(1);
                 let request = model.import_wizard_request;
                 if let Some(wizard) = &mut model.import_wizard {
+                    wizard.invalidate_preview();
                     wizard.loading = true;
                     wizard.error = None;
                     return vec![Effect::LoadImportPreview {
@@ -3231,7 +3240,11 @@ fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
             }
         }
         Action::Insert('e' | 'E') => {
-            let sql = model.import_wizard.as_ref().map(|w| w.copy_sql.clone());
+            let sql = model
+                .import_wizard
+                .as_ref()
+                .filter(|wizard| wizard.can_run())
+                .map(|wizard| wizard.copy_sql.clone());
             if let Some(sql) = sql {
                 edit_editor(model, |editor| {
                     editor.set_text(sql);
@@ -3246,6 +3259,9 @@ fn import_wizard_action(model: &mut Model, action: Action) -> Vec<Effect> {
             };
             if wizard.step != crate::app::model::ImportWizardStep::Execute {
                 wizard.step = wizard.step.next();
+                return Vec::new();
+            }
+            if !wizard.can_run() {
                 return Vec::new();
             }
             let options = wizard.options();
@@ -3276,6 +3292,7 @@ fn import_confirmation_action(model: &mut Model, action: Action) -> Vec<Effect> 
     if current.as_ref() != Some(&pending.connection)
         || model.import_wizard.as_ref().is_none_or(|wizard| {
             wizard.step != crate::app::model::ImportWizardStep::Execute
+                || !wizard.can_run()
                 || wizard.options() != pending.options
         })
     {

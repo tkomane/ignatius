@@ -23,6 +23,11 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   Cancelling, switching sessions or entering a mismatched name prevents
   the import from starting. A queued import rechecks its approved session
   before starting under the user SQL gate.
+- **FR-2805.** The wizard requires a completed preview from the current
+  source. A preview read or decode failure removes cached rows, mappings
+  and results. An execution-time read failure reports the error before
+  COPY and returns to the source step. A readable header-only source can
+  complete a zero-row import.
 - **SC-2801.** With disposable PostgreSQL, valid dry-run returns the row count
   and leaves zero imported rows. Contradictory options leave zero rows.
   A refused nested import leaves the caller's transaction and its sentinel
@@ -31,3 +36,6 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
 - **SC-2802.** Synthetic production confirmation emits one import after
   exact typed approval and none after an empty, mismatched or dismissed
   review. A retired session cannot begin a queued import.
+- **SC-2803.** Failed preview and execution reads emit no COPY. A statement
+  trigger or independent backend observation distinguishes this from a
+  confirmed zero-row COPY with a readable source.

@@ -1163,8 +1163,12 @@ fn notice_doctor_warning_is_inside_existing_report_and_contains_only_client_fact
     assert_eq!(checks.len(), 2);
 }
 
-#[allow(clippy::print_stderr)]
 fn notice_runtime_fixture() -> Option<(tokio::runtime::Runtime, Session)> {
+    runtime_fixture(true)
+}
+
+#[allow(clippy::print_stderr)]
+fn runtime_fixture(read_only: bool) -> Option<(tokio::runtime::Runtime, Session)> {
     let Ok(uri) = std::env::var("IGNATIUS_TEST_PG_URI") else {
         eprintln!("skipping: IGNATIUS_TEST_PG_URI is not set");
         return None;
@@ -1180,7 +1184,7 @@ fn notice_runtime_fixture() -> Option<(tokio::runtime::Runtime, Session)> {
         &Config::default().connection,
     )
     .unwrap();
-    target.read_only = true;
+    target.read_only = read_only;
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let opened = runtime
         .block_on(session::connect_reported(&target, Duration::from_secs(5)))
@@ -1226,6 +1230,207 @@ fn notice_installed(session: Session) -> Arc<InstalledSession> {
         source: crate::app::model::NoticeSource::User,
         retired: std::sync::atomic::AtomicBool::new(false),
     })
+}
+
+#[tokio::test]
+async fn import_file_preview_distinguishes_read_errors_and_readable_zero_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.csv");
+    for (contents, expected) in [
+        (None, Err("Could not read import file")),
+        (
+            Some(&b"id\nsynthetic-private-row\xff"[..]),
+            Err("valid UTF-8"),
+        ),
+        (Some(&b"id,note\n"[..]), Ok(&["id", "note"][..])),
+        (Some(&b""[..]), Ok(&[][..])),
+    ] {
+        if let Some(contents) = contents {
+            std::fs::write(&path, contents).unwrap();
+        }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        spawn_load_import_preview(
+            tx,
+            5,
+            path.to_str().unwrap().to_owned(),
+            "public".into(),
+            "orders".into(),
+            Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            1,
+        );
+        let Some(Message::ForConnection {
+            generation: 1,
+            message,
+        }) = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+        else {
+            panic!("expected a current-generation import preview");
+        };
+        let Message::ImportPreviewLoaded { request: 5, result } = *message else {
+            panic!("expected the matching preview request");
+        };
+        match expected {
+            Err(reason) => {
+                let diagnostic = result.expect_err("an unreadable source must fail preview");
+                assert!(diagnostic.headline.contains(reason), "{diagnostic:?}");
+                assert!(!format!("{diagnostic:?}").contains("synthetic-private-row"));
+            }
+            Ok(headers) => {
+                let preview = result.expect("a readable zero-row source still has a preview");
+                assert_eq!(preview.headers, headers);
+                assert!(preview.sample_rows.is_empty());
+                assert_eq!(preview.estimated_rows, 0);
+                assert_eq!(preview.column_mappings.len(), headers.len());
+            }
+        }
+    }
+}
+
+#[test]
+fn import_file_removed_after_preview_never_reaches_copy() {
+    use crate::app::Action;
+    use crate::app::model::{ConnectionState, ImportWizardState};
+
+    let Some((runtime, opened)) = runtime_fixture(false) else {
+        return;
+    };
+    let installed = notice_installed(opened);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.csv");
+    runtime.block_on(async {
+        let setup = installed
+            .execute(
+                "CREATE TEMP TABLE import_file_target (id integer); \
+                 CREATE TEMP TABLE import_file_attempts (marker integer); \
+                 CREATE FUNCTION pg_temp.track_import_file() RETURNS trigger \
+                 LANGUAGE plpgsql AS $fn$ \
+                 BEGIN INSERT INTO pg_temp.import_file_attempts VALUES (1); RETURN NULL; END; \
+                 $fn$; \
+                 CREATE TRIGGER track_import_file AFTER INSERT ON pg_temp.import_file_target \
+                 FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.track_import_file()",
+                10,
+                JobId(9_903),
+            )
+            .await;
+        assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+        let slot: SessionSlot = Arc::new(tokio::sync::RwLock::new(Some(Arc::clone(&installed))));
+        let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut model = Model::new(10);
+        model.connection = ConnectionState::Connected(Box::new(installed.info().clone()));
+        model.connection_generation = 1;
+        update(
+            &mut model,
+            Message::NoticeSourceInstalled {
+                source: installed.source,
+                session_id: installed.session_id.clone(),
+            },
+        );
+        let mut wizard = ImportWizardState::new("pg_temp".into(), "import_file_target".into());
+        wizard.file_path = path.to_str().unwrap().to_owned();
+        model.import_wizard = Some(wizard);
+
+        for (contents, remove_after_preview, expected_attempts) in
+            [(&b"id\n18\n"[..], true, "0"), (&b"id\n"[..], false, "1")]
+        {
+            std::fs::write(&path, contents).unwrap();
+            let effects = update(&mut model, Message::Action(Action::Insert('r')));
+            let [
+                Effect::LoadImportPreview {
+                    request,
+                    file_path,
+                    schema,
+                    table,
+                },
+            ] = effects.as_slice()
+            else {
+                panic!("expected one import preview");
+            };
+            spawn_load_import_preview(
+                tx.clone(),
+                *request,
+                file_path.clone(),
+                schema.clone(),
+                table.clone(),
+                Arc::clone(&generation),
+                1,
+            );
+            let preview = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            update(&mut model, preview);
+            let state = model.import_wizard.as_ref().expect("wizard still open");
+            assert_eq!(state.preview.as_ref().unwrap().headers, ["id"]);
+            if remove_after_preview {
+                std::fs::remove_file(&path).unwrap();
+            }
+            update(&mut model, Message::Action(Action::Insert('3')));
+            let effects = update(&mut model, Message::Action(Action::Activate));
+            let [
+                Effect::ExecuteImport {
+                    connection,
+                    request,
+                    options,
+                    data,
+                },
+            ] = effects.as_slice()
+            else {
+                panic!("expected one current import request");
+            };
+            spawn_execute_import(
+                tx.clone(),
+                Arc::clone(&slot),
+                *request,
+                options.clone(),
+                data.clone(),
+                Arc::clone(&generation),
+                connection.clone(),
+            );
+            let completion = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            update(&mut model, completion);
+            assert!(model.import_in_flight.is_none());
+
+            // COPY fires a statement trigger even when the input has zero rows.
+            let attempts = installed
+                .execute(
+                    "SELECT count(*) FROM pg_temp.import_file_attempts",
+                    1,
+                    JobId(9_904),
+                )
+                .await;
+            assert_eq!(attempts.status, ExecutionStatus::Succeeded);
+            assert_eq!(
+                attempts.statements[0].result_set.as_ref().unwrap().rows[0][0].raw(),
+                Some(expected_attempts),
+                "remove_after_preview={remove_after_preview}"
+            );
+            let state = model.import_wizard.as_ref().unwrap();
+            if remove_after_preview {
+                assert!(state.preview.is_none());
+                assert!(state.result.is_none());
+                assert!(
+                    state
+                        .error
+                        .as_deref()
+                        .unwrap()
+                        .contains("No COPY was started")
+                );
+                update(&mut model, Message::Action(Action::Insert('3')));
+                assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+            } else {
+                assert!(state.error.is_none());
+                let result = state.result.as_ref().unwrap();
+                assert_eq!(result.rows_imported, 0);
+                assert_eq!(result.bytes_processed, contents.len() as u64);
+                assert_eq!(result.status, "Committed 0 rows");
+            }
+        }
+    });
 }
 
 #[test]
