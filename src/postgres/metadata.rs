@@ -482,6 +482,7 @@ pub async fn completion_catalog(
     use crate::query::completion::{
         CatalogColumn, CatalogObject, CatalogObjectKind, CatalogRelation,
     };
+    use std::collections::HashMap;
 
     const RELATIONS: &str = "SELECT n.nspname::text AS schema, \
          c.relname::text AS name, c.relkind::text AS relkind, \
@@ -552,27 +553,21 @@ pub async fn completion_catalog(
         }
     }));
 
-    let mut relations = Vec::<CatalogRelation>::new();
+    let mut relations = Vec::new();
+    let mut relation_positions = HashMap::new();
     for row in &column_rows {
-        let schema: String = row.get("schema");
-        let name: String = row.get("relation");
-        let Some(relation) = relations
-            .iter_mut()
-            .find(|relation| relation.schema == schema && relation.name == name)
-        else {
+        let schema: &str = row.get("schema");
+        let name: &str = row.get("relation");
+        let position = *relation_positions.entry((schema, name)).or_insert_with(|| {
+            let position = relations.len();
             relations.push(CatalogRelation {
-                schema: schema.clone(),
-                name: name.clone(),
+                schema: schema.to_owned(),
+                name: name.to_owned(),
                 columns: Vec::new(),
             });
-            let relation = relations.last_mut().expect("just pushed");
-            relation.columns.push(CatalogColumn {
-                name: row.get("name"),
-                data_type: row.get("data_type"),
-            });
-            continue;
-        };
-        relation.columns.push(CatalogColumn {
+            position
+        });
+        relations[position].columns.push(CatalogColumn {
             name: row.get("name"),
             data_type: row.get("data_type"),
         });

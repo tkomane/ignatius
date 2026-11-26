@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Improved: Completion catalogue loading indexes relation names while assembling
+  their columns, speeding up larger catalogues.
+
 - Fixed: SQL buffers and queries preserve UTF-8 dollar-quoted literals and
   statement boundaries after dollar-bearing unquoted identifiers.
 - Fixed: Import previews and runs report source file read errors. A failed
