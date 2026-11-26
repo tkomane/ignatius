@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 103 - Confirm writes to production-classified sync destinations - 26 November 2026
+
+- **W04 / 039 T013.** Sync append and truncate require
+  `--confirm-production` for a production-classified destination. The
+  refusal occurs before either connection authenticates or connects.
+  Target profiles keep their configured environment. Literal targets can use
+  `--target-environment`, and source classification stays independent.
+  [Feature 039 tasks](../specs/039-cross-database-copy-and-sync-pipelines/tasks.md)
+- **Focused verification.** Eight CLI subprocess checks passed. They
+  exercised provider and connection preflight, an explicitly classified
+  literal destination, profile classification and output protection.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** The
+  production-labelled synthetic destination kept its original rows after
+  unconfirmed profile and literal attempts and a dry run. An explicit
+  confirmation committed the two expected replacement rows, as observed
+  independently in PostgreSQL.
+
 ## Wave 102 - Commit binary sync destination writes together - 26 November 2026
 
 - **W03 / 039 T012.** One destination transaction owns grouped truncation

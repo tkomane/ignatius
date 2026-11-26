@@ -4656,6 +4656,10 @@ pub struct SyncArgs {
     /// Target connection target: a URI, a keyword string, @profile, or a database name.
     #[arg(short = 't', long, value_name = "TARGET_TARGET")]
     pub target: Option<String>,
+    /// Classify a literal destination, for example production.
+    /// A destination profile supplies its own classification.
+    #[arg(long, value_name = "NAME", requires = "target", value_parser = Environment::parse)]
+    pub target_environment: Option<Environment>,
     /// Optional positional connection target used as source if --source is omitted.
     pub target_pos: Option<String>,
     /// Filter synchronization to one schema.
@@ -4673,6 +4677,9 @@ pub struct SyncArgs {
     /// Run dry-run verification queries without writing or truncating.
     #[arg(long)]
     pub dry_run: bool,
+    /// Confirm writing into a production-classified destination.
+    #[arg(long)]
+    pub confirm_production: bool,
     /// Output representation format: table (default), json, or plain.
     #[arg(short = 'f', long, value_enum, default_value = "table")]
     pub format: CliSyncFormat,
@@ -4682,6 +4689,7 @@ pub struct SyncArgs {
     /// Overwrite destination file without prompting if it already exists.
     #[arg(long)]
     pub force: bool,
+    /// Connection options for the source.
     #[command(flatten)]
     pub connection: ConnectionOptions,
 }
@@ -4722,35 +4730,62 @@ fn run_sync(
     }
 
     let loaded = config::load(paths)?;
+    let env = EnvSnapshot::from_process();
     let src_str = args.source.as_deref().or(args.target_pos.as_deref());
     let (src_requested, src_conn_args) =
         resolve_target_and_profile(src_str, &args.connection, &loaded.config)?;
     let src_target = crate::connection::resolve(
         src_requested,
         &src_conn_args,
-        &EnvSnapshot::from_process(),
+        &env,
         &loaded.config.connection,
     )?;
-    let src_target = authenticate_target(src_target, &loaded.config)?;
 
+    let tgt_target = if let Some(tgt_str) = args.target.as_deref() {
+        if args.target_environment.is_some() && tgt_str.starts_with('@') {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "--target-environment requires a literal destination",
+                "choosing the sync destination classification",
+            )
+            .next_action("use the environment setting of the destination profile"));
+        }
+        let (tgt_requested, mut tgt_conn_args) = resolve_target_and_profile(
+            Some(tgt_str),
+            &ConnectionOptions::default(),
+            &loaded.config,
+        )?;
+        if let Some(environment) = &args.target_environment {
+            tgt_conn_args.environment = Some(environment.clone());
+        }
+        let tgt_target = crate::connection::resolve(
+            tgt_requested,
+            &tgt_conn_args,
+            &env,
+            &loaded.config.connection,
+        )?;
+        if !args.dry_run && tgt_target.environment.is_production() && !args.confirm_production {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "refusing to synchronize into a production destination without confirmation",
+                "checking whether sync can write to the destination",
+            )
+            .likely_cause("the destination is classified as production")
+            .next_action("pass --confirm-production to write, or --dry-run to verify"));
+        }
+        Some(tgt_target)
+    } else {
+        None
+    };
+
+    let src_target = authenticate_target(src_target, &loaded.config)?;
     let rt = runtime()?;
     let src_session = rt.block_on(crate::postgres::session::connect(
         &src_target,
         std::time::Duration::from_secs(30),
     ))?;
 
-    let report = if let Some(ref tgt_str) = args.target {
-        let (tgt_requested, tgt_conn_args) = resolve_target_and_profile(
-            Some(tgt_str.as_str()),
-            &ConnectionOptions::default(),
-            &loaded.config,
-        )?;
-        let tgt_target = crate::connection::resolve(
-            tgt_requested,
-            &tgt_conn_args,
-            &EnvSnapshot::from_process(),
-            &loaded.config.connection,
-        )?;
+    let report = if let Some(tgt_target) = tgt_target {
         let tgt_target = authenticate_target(tgt_target, &loaded.config)?;
         let mut tgt_session = rt.block_on(crate::postgres::session::connect(
             &tgt_target,

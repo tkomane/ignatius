@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Sync writes to a production-classified destination require
+  `--confirm-production` before either connection starts.
 - Fixed: Binary sync commits all destination writes together. Truncation
   can replace related tables in one transaction.
 - Improved: Completion catalogue loading uses less peak memory by mapping
