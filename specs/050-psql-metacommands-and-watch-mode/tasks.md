@@ -19,3 +19,11 @@ passed. The fix passed all three. An owned macOS arm64 PTY and PostgreSQL
 18.7 confirmed the first watch repeated, ended on the second profile, and
 bare `\watch` needed a query from that profile before repeating it.
 [Wave 80](../../docs/status.md#wave-80---retire-watch-state-on-profile-switch---25-november-2026)
+
+- [x] T010 Associate positioned watch failures with the submitted SQL.
+  Preserve editor caret and focus for retained queries, and verify normal
+  position mapping for initial companion SQL and ordinary editor queries.
+  Exercise changed tabs, crash recovery and timer deferral while another
+  submission owns a prompt.
+
+[macOS PTY and reducer evidence](../../docs/status.md#wave-89---keep-watch-positions-with-the-watched-query---26-november-2026)

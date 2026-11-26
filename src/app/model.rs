@@ -2869,6 +2869,24 @@ impl PasswordPrompt {
     }
 }
 
+/// Where the SQL for a submission came from, for mapping PostgreSQL positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmissionSource {
+    /// Editor SQL is mappable while the original buffer and revision are current.
+    Editor {
+        /// Stable identity of the submitting tab.
+        buffer_id: u64,
+        /// Revision of the submitting editor.
+        revision: u64,
+        /// Original span for Run Statement, or no span for Run Buffer.
+        statement: Option<StatementSource>,
+    },
+    /// SQL submitted by a standalone watch or timer tick.
+    WatchedQuery,
+    /// SQL submitted by the explicit retained-result refresh.
+    RetainedResult,
+}
+
 /// A masked, one-shot prompt for the distinct names in a SQL template.
 ///
 /// The template and names are safe display data. Answers stay in
@@ -2878,8 +2896,8 @@ impl PasswordPrompt {
 pub struct ParameterPrompt {
     /// The unchanged SQL template that will be recorded if it runs.
     pub sql: String,
-    /// The original editor span when the user ran one statement.
-    pub source: Option<StatementSource>,
+    /// Source of the submission waiting for these parameter values.
+    pub source: Option<SubmissionSource>,
     /// Distinct names in first-use order.
     pub names: Vec<String>,
     active: usize,
@@ -2903,7 +2921,7 @@ impl std::fmt::Debug for ParameterPrompt {
 impl ParameterPrompt {
     /// Opens a prompt for a scanned template.
     #[must_use]
-    pub fn new(sql: String, source: Option<StatementSource>, names: Vec<String>) -> Self {
+    pub fn new(sql: String, source: Option<SubmissionSource>, names: Vec<String>) -> Self {
         let accepted = names
             .iter()
             .map(|_| SecretString::from(String::new()))
@@ -2993,8 +3011,8 @@ pub struct PendingRun {
     pub typed: String,
     /// The word that must be typed, which is the database's own name.
     pub required: String,
-    /// Original editor span when this is a Run Statement action.
-    pub source: Option<StatementSource>,
+    /// Source of the submission waiting for confirmation.
+    pub source: Option<SubmissionSource>,
 }
 
 impl PendingRun {
@@ -3927,10 +3945,8 @@ pub struct Model {
     pub running_refresh: bool,
     /// Whether a named-parameter prompt belongs to an explicit refresh.
     pub refresh_pending: bool,
-    /// Editor text revision captured when the current execution started.
-    pub running_editor_revision: Option<u64>,
-    /// Original source span for a Run Statement execution.
-    pub running_source: Option<StatementSource>,
+    /// Origin of the SQL for the job in flight.
+    pub running_source: Option<SubmissionSource>,
     /// A password being typed because the server asked for one.
     pub password_prompt: Option<PasswordPrompt>,
     /// A name being typed, when a query is being saved.
@@ -4068,6 +4084,16 @@ impl Model {
             size: (crate::ui::MIN_COLUMNS, crate::ui::MIN_ROWS),
             sidebar_visible: true,
             ..Self::default()
+        }
+    }
+
+    /// Captures the editor identity before prompts or asynchronous execution.
+    #[must_use]
+    pub fn editor_submission(&self, statement: Option<StatementSource>) -> SubmissionSource {
+        SubmissionSource::Editor {
+            buffer_id: self.buffers.active_buffer().id,
+            revision: self.editor.revision(),
+            statement,
         }
     }
 
