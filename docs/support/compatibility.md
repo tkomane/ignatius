@@ -524,13 +524,23 @@ becomes unreadable after preview, the wizard stops before COPY and returns
 to the source step. A readable header-only CSV remains a valid zero-row
 import.
 
-## Binary sync diagnostics
+## Binary sync transactions and diagnostics
+
+`ignatius sync` runs all destination writes in one PostgreSQL transaction.
+It requires an idle destination in a different database and reports success
+after commit is acknowledged. `--truncate` truncates the selected tables
+together. An omitted foreign-key dependent causes a refusal unless
+`--cascade` explicitly includes it. Dry runs and empty plans start no
+destination transaction.
+
+If a transfer fails, the destination transaction rolls back. If PostgreSQL
+does not acknowledge rollback or the outcome of commit is unknown, check
+the destination before another attempt.
 
 `ignatius sync` reports the source or destination phase for failures during
-binary COPY, the source dry-run count and destination truncation. It keeps a
-validated SQLSTATE when available and omits server and driver text that could
-contain copied values. After a connection loss, reconnect and check the
-destination before continuing.
+binary COPY, the source dry-run count, destination truncation and commit.
+It keeps a validated SQLSTATE when available and omits server and driver
+text that could contain copied values.
 
 ## Export
 

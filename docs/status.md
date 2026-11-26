@@ -4,6 +4,25 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 102 - Commit binary sync destination writes together - 26 November 2026
+
+- **W03 / 039 T012.** One destination transaction owns grouped truncation
+  and every selected binary COPY. An active or failed caller transaction
+  keeps its owner. The sync refuses a same-database write through an
+  alternate connection address and reports success after acknowledged
+  commit. [Feature 039 tasks](../specs/039-cross-database-copy-and-sync-pipelines/tasks.md)
+- **Focused macOS arm64 verification with PostgreSQL 18.7.** Four live
+  sync tests and seven sync unit tests passed. The live cases covered
+  the direct helper, refusal in active and failed transactions, and
+  durable parent and child rows after a later COPY failure.
+- **Executable verification.** The baseline left a prior child truncation
+  committed after PostgreSQL refused a later truncate. The fix verified
+  grouped replacement, omitted-dependent refusal, explicit CASCADE,
+  targetless dry run, empty plans, and same-database aliases. Independent
+  reads found the old rows after both a later CHECK rejection and a
+  deferred UNIQUE rejection at commit. Lost commit acknowledgment was
+  handled in code and was outside this fixture check.
+
 ## Wave 101 - Stream completion catalogue rows - 26 November 2026
 
 - **W10 / 012 T033.** Relation, function and column queries map decoded

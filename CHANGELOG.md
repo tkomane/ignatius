@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Binary sync commits all destination writes together. Truncation
+  can replace related tables in one transaction.
 - Improved: Completion catalogue loading uses less peak memory by mapping
   rows as PostgreSQL returns them.
 - Fixed: Binary sync failure diagnostics retain the transfer phase and

@@ -213,4 +213,14 @@ fn sync_report_renderers() {
     let json = report.render_json();
     assert!(json.contains("\"total_rows\": 1500"));
     assert!(json.contains("\"Completed\""));
+
+    let cyclic = SyncReport {
+        has_cycles: true,
+        ..report
+    };
+    assert!(
+        cyclic
+            .render_table()
+            .contains("A transfer uses the destination's configured constraints.")
+    );
 }

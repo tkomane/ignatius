@@ -14,10 +14,13 @@ Source Database                   Target Database
 1. **Dependency Analysis**:
    - Query `pg_constraint` with `contype = 'f'` (foreign key) linking `conrelid` and `confrelid`.
    - Build a Directed Acyclic Graph (DAG) using Kahn's algorithm for topological sorting.
-   - Detect cycles and identify tables requiring deferred constraints (`SET CONSTRAINTS ALL DEFERRED`).
+   - Detect and report cycles. The destination's configured constraint modes still apply.
 2. **Stream Execution**:
-   - If `--truncate`: execute `TRUNCATE TABLE ...` in reverse topological order.
+   - For a nonempty write plan, require destination autocommit and hold an exclusive destination borrow through the driver's transaction.
+   - Before table writes, check the destination transaction's database-scoped advisory marker from the source to reject the same database even through a connection alias.
+   - If `--truncate`: execute one `TRUNCATE TABLE ...` with tables listed in reverse topological order. Add `CASCADE` only when explicitly requested.
    - For each table in topological order: execute `COPY <table> TO STDOUT` on source and `COPY <table> FROM STDIN` on target, streaming chunks with backpressure.
+   - Roll back the destination after a failed copy and preserve the original failure. Return successful telemetry after acknowledged commit. Advise checking the destination when the outcome is unknown.
    - Map COPY startup, streaming and completion, source dry-run count and destination truncate failures through the value-free transfer diagnostic. Provide a fixed phase and validated SQLSTATE without a SQL statement ordinal.
 3. **Field Industrial TUI Cockpit**:
    - Hardware status capsules: `[SOURCE]`, `[TARGET]`, `[TABLES]`, `[SYNC STATE]`, `[THROUGHPUT]`.

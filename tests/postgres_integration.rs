@@ -53,6 +53,12 @@ impl Fixture {
     }
 }
 
+fn within_sync_timeout<T>(fixture: &Fixture, future: impl std::future::Future<Output = T>) -> T {
+    fixture
+        .block_on(async { tokio::time::timeout(Duration::from_secs(10), future).await })
+        .expect("sync test operation completes within ten seconds")
+}
+
 fn fixture(uri: &str) -> Fixture {
     let mut sanitized = uri.to_owned();
     if sanitized.contains(":ignatius_test_password_do_not_use@") {
@@ -88,6 +94,16 @@ fn connect_plain() -> Option<Fixture> {
             None
         }
     }
+}
+
+fn unique_sync_database_name(label: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "ign_sync_{label}_{}_{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -3445,7 +3461,7 @@ fn import_commit_failure_preserves_sqlstate_without_disclosing_input() {
 fn binary_sync_keeps_conflicting_values_out_of_diagnostics_and_counts_copied_bytes() {
     let uri = target_or_skip!();
     let source = fixture(&uri);
-    let destination = fixture(&uri);
+    let mut destination = fixture(&uri);
     let value = "synthetic-sync-conflicting-key";
     let table = ignatius::sync::TableKey::new("pg_temp", "sync_private_key");
     let setup = format!(
@@ -3457,14 +3473,17 @@ fn binary_sync_keeps_conflicting_values_out_of_diagnostics_and_counts_copied_byt
         assert_eq!(execution.status, ExecutionStatus::Succeeded);
     }
 
-    let copy = |truncate| {
-        source.block_on(source.session.copy_table_to_target(
-            &destination.session,
-            &table,
-            truncate,
-            false,
-            false,
-        ))
+    let mut copy = |truncate| {
+        within_sync_timeout(
+            &source,
+            source.session.copy_table_to_target(
+                &mut destination.session,
+                &table,
+                truncate,
+                false,
+                false,
+            ),
+        )
     };
     let error = copy(false).expect_err("destination rejects its duplicate key");
     for rendered in [
@@ -3504,6 +3523,383 @@ fn binary_sync_keeps_conflicting_values_out_of_diagnostics_and_counts_copied_byt
         read.statements[0].result_set.as_ref().unwrap().rows,
         vec![vec![Cell::Text(value.to_owned())]]
     );
+
+    let guard = format!("ALTER TABLE pg_temp.sync_private_key ADD CHECK (id = '{value}')");
+    let guarded = destination.block_on(destination.session.execute(&guard, 1, JobId(9624)));
+    assert_eq!(guarded.status, ExecutionStatus::Succeeded);
+    let changed = source.block_on(source.session.execute(
+        "UPDATE pg_temp.sync_private_key SET id = 'synthetic-sync-replacement'",
+        1,
+        JobId(9622),
+    ));
+    assert_eq!(changed.status, ExecutionStatus::Succeeded);
+    let failed = within_sync_timeout(
+        &source,
+        source
+            .session
+            .copy_table_to_target(&mut destination.session, &table, true, false, false),
+    )
+    .expect_err("destination CHECK rejects replacement after truncate");
+    assert!(failed.headline.contains("destination COPY"));
+    assert!(
+        failed
+            .technical
+            .iter()
+            .any(|field| field.label == "SQLSTATE" && field.value == "23514")
+    );
+    let restored = destination.block_on(destination.session.execute(
+        "SELECT id FROM pg_temp.sync_private_key",
+        1,
+        JobId(9623),
+    ));
+    assert_eq!(restored.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        restored.transaction,
+        ignatius::query::result::TransactionState::Autocommit
+    );
+    assert_eq!(
+        restored.statements[0].result_set.as_ref().unwrap().rows,
+        vec![vec![Cell::Text(value.to_owned())]],
+        "failed direct-helper replacement restores the prior destination row"
+    );
+}
+
+#[test]
+fn binary_sync_preserves_destination_caller_transactions() {
+    use ignatius::query::result::TransactionState;
+
+    let uri = target_or_skip!();
+    let source = fixture(&uri);
+    let mut destination = fixture(&uri);
+    let setup = "CREATE TEMP TABLE sync_transaction_contract (id integer PRIMARY KEY); \
+                 INSERT INTO pg_temp.sync_transaction_contract VALUES (1)";
+    for fx in [&source, &destination] {
+        let result = fx.block_on(fx.session.execute(setup, 10, JobId(9630)));
+        assert_eq!(result.status, ExecutionStatus::Succeeded);
+    }
+    let key = ignatius::sync::TableKey::new("pg_temp", "sync_transaction_contract");
+
+    let begin = destination.block_on(destination.session.execute(
+        "BEGIN; INSERT INTO pg_temp.sync_transaction_contract VALUES (9)",
+        10,
+        JobId(9631),
+    ));
+    assert_eq!(begin.transaction, TransactionState::Open);
+    let active = within_sync_timeout(
+        &source,
+        source
+            .session
+            .copy_table_to_target(&mut destination.session, &key, true, false, false),
+    )
+    .expect_err("active caller transaction must be refused");
+    assert_eq!(active.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(
+        active.headline,
+        "the destination sync did not start, because the session is not outside a transaction"
+    );
+    let sentinel = destination.block_on(destination.session.execute(
+        "SELECT count(*) FROM pg_temp.sync_transaction_contract WHERE id = 9",
+        10,
+        JobId(9632),
+    ));
+    assert_eq!(sentinel.status, ExecutionStatus::Succeeded);
+    assert_eq!(sentinel.transaction, TransactionState::Open);
+    assert_eq!(
+        sentinel.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("1".into()),
+        "caller transaction and its write remain intact"
+    );
+    let rollback = destination.block_on(destination.session.execute("ROLLBACK", 10, JobId(9633)));
+    assert_eq!(rollback.transaction, TransactionState::Autocommit);
+
+    let failed = destination.block_on(destination.session.execute(
+        "BEGIN; INSERT INTO pg_temp.sync_transaction_contract VALUES (1)",
+        10,
+        JobId(9634),
+    ));
+    assert_eq!(failed.transaction, TransactionState::Failed);
+    let rejected = within_sync_timeout(
+        &source,
+        source
+            .session
+            .copy_table_to_target(&mut destination.session, &key, true, false, false),
+    )
+    .expect_err("failed caller transaction must be refused");
+    assert_eq!(rejected.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(
+        rejected.headline,
+        "the destination sync did not start, because the session is not outside a transaction"
+    );
+    let still_failed =
+        destination.block_on(destination.session.execute("SELECT 1", 10, JobId(9635)));
+    assert_eq!(still_failed.transaction, TransactionState::Failed);
+    let rollback = destination.block_on(destination.session.execute("ROLLBACK", 10, JobId(9636)));
+    assert_eq!(rollback.transaction, TransactionState::Autocommit);
+}
+
+#[test]
+fn binary_sync_refuses_writes_to_the_same_physical_database() {
+    let uri = target_or_skip!();
+    let source = fixture(&uri);
+    let mut destination = fixture(&uri);
+    let table_name = unique_sync_database_name("same_db_table");
+    let setup = source.block_on(source.session.execute(
+        &format!(
+            "CREATE TABLE public.{table_name} (id integer PRIMARY KEY); \
+             INSERT INTO public.{table_name} VALUES (1)"
+        ),
+        10,
+        JobId(9640),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let key = ignatius::sync::TableKey::new("public", &table_name);
+    let refused = within_sync_timeout(
+        &source,
+        source
+            .session
+            .copy_table_to_target(&mut destination.session, &key, true, false, false),
+    )
+    .expect_err("same-database writes must be refused");
+    assert_eq!(refused.kind, ignatius::diagnostics::DiagnosticKind::Usage);
+    assert_eq!(
+        refused.headline,
+        "source and destination are the same PostgreSQL database"
+    );
+    let rows = destination.block_on(destination.session.execute(
+        &format!("SELECT count(*) FROM public.{table_name}"),
+        10,
+        JobId(9641),
+    ));
+    assert_eq!(rows.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        rows.transaction,
+        ignatius::query::result::TransactionState::Autocommit,
+        "same-database refusal leaves destination in autocommit"
+    );
+    assert_eq!(
+        rows.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("1".into()),
+        "refusal must not truncate or modify the destination"
+    );
+    let cleanup = source.block_on(source.session.execute(
+        &format!("DROP TABLE public.{table_name}"),
+        10,
+        JobId(9642),
+    ));
+    assert_eq!(cleanup.status, ExecutionStatus::Succeeded);
+}
+
+fn uri_with_database(uri: &str, database: &str) -> String {
+    let (base, query) = uri
+        .split_once('?')
+        .map_or((uri, None), |(base, query)| (base, Some(query)));
+    let prefix = &base[..base.rfind('/').expect("URI has a database path")];
+    query.map_or_else(
+        || format!("{prefix}/{database}"),
+        |query| format!("{prefix}/{database}?{query}"),
+    )
+}
+
+struct SyncScratchDatabases {
+    admin: Fixture,
+    names: Vec<String>,
+    cleaned: bool,
+}
+
+impl SyncScratchDatabases {
+    fn create(admin_uri: &str) -> Self {
+        let mut scratch = Self {
+            admin: fixture(admin_uri),
+            names: Vec::new(),
+            cleaned: false,
+        };
+        for (label, job) in [("source", 9650), ("target", 9651)] {
+            let name = unique_sync_database_name(label);
+            let result = scratch.admin.block_on(scratch.admin.session.execute(
+                &format!("CREATE DATABASE {name}"),
+                10,
+                JobId(job),
+            ));
+            assert_eq!(result.status, ExecutionStatus::Succeeded);
+            scratch.names.push(name);
+        }
+        scratch
+    }
+
+    fn source_uri(&self, admin_uri: &str) -> String {
+        uri_with_database(admin_uri, &self.names[0])
+    }
+
+    fn destination_uri(&self, admin_uri: &str) -> String {
+        uri_with_database(admin_uri, &self.names[1])
+    }
+
+    fn drop_owned(&self) -> Result<(), String> {
+        for name in self.names.iter().rev() {
+            let result = self.admin.block_on(self.admin.session.execute(
+                &format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"),
+                10,
+                JobId(9652),
+            ));
+            if result.status != ExecutionStatus::Succeeded {
+                return Err(format!("could not drop owned sync database {name}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn cleanup(&mut self) {
+        self.drop_owned().expect("drop generated sync databases");
+        self.cleaned = true;
+    }
+}
+
+impl Drop for SyncScratchDatabases {
+    fn drop(&mut self) {
+        if !self.cleaned
+            && let Err(error) = self.drop_owned()
+        {
+            eprintln!("{error}");
+        }
+    }
+}
+
+fn sync_atomicity_labels(fx: &Fixture, job: u64) -> Vec<Cell> {
+    let result = fx.block_on(fx.session.execute(
+        "SELECT (SELECT label FROM sync_atomicity.parent), \
+                (SELECT label FROM sync_atomicity.child)",
+        10,
+        JobId(job),
+    ));
+    assert_eq!(result.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        result.transaction,
+        ignatius::query::result::TransactionState::Autocommit
+    );
+    result.statements[0]
+        .result_set
+        .as_ref()
+        .expect("parent and child row")
+        .rows[0]
+        .clone()
+}
+
+#[test]
+fn sync_pipeline_atomically_replaces_related_tables() {
+    let admin_uri = target_or_skip!();
+    let mut scratch = SyncScratchDatabases::create(&admin_uri);
+    let source_uri = scratch.source_uri(&admin_uri);
+    let destination_uri = scratch.destination_uri(&admin_uri);
+    let source = fixture(&source_uri);
+    let mut destination = fixture(&destination_uri);
+
+    let schema = "CREATE SCHEMA sync_atomicity; \
+                 CREATE TABLE sync_atomicity.parent (id integer PRIMARY KEY, label text NOT NULL); \
+                 ";
+    let source_setup = source.block_on(source.session.execute(
+        &format!(
+            "{schema} CREATE TABLE sync_atomicity.child (id integer PRIMARY KEY, parent_id integer NOT NULL \
+                 REFERENCES sync_atomicity.parent(id), label text NOT NULL)"
+        ),
+        10,
+        JobId(9660),
+    ));
+    assert_eq!(source_setup.status, ExecutionStatus::Succeeded);
+    let destination_setup = destination.block_on(destination.session.execute(
+        &format!(
+            "{schema} CREATE TABLE sync_atomicity.child (id integer PRIMARY KEY, parent_id integer NOT NULL \
+                 REFERENCES sync_atomicity.parent(id), label text NOT NULL \
+                 CHECK (label <> 'rejected-source-label'))"
+        ),
+        10,
+        JobId(9666),
+    ));
+    assert_eq!(destination_setup.status, ExecutionStatus::Succeeded);
+
+    let seed = source.block_on(source.session.execute(
+        "INSERT INTO sync_atomicity.parent VALUES (2, 'new-parent'); \
+         INSERT INTO sync_atomicity.child VALUES (2, 2, 'new-child')",
+        10,
+        JobId(9661),
+    ));
+    assert_eq!(seed.status, ExecutionStatus::Succeeded);
+    let previous = destination.block_on(destination.session.execute(
+        "INSERT INTO sync_atomicity.parent VALUES (1, 'previous-parent'); \
+         INSERT INTO sync_atomicity.child VALUES (1, 1, 'previous-child')",
+        10,
+        JobId(9662),
+    ));
+    assert_eq!(previous.status, ExecutionStatus::Succeeded);
+
+    let tables = vec!["parent".to_owned(), "child".to_owned()];
+    let first = within_sync_timeout(
+        &source,
+        source.session.execute_sync_pipeline(
+            Some(&mut destination.session),
+            Some("sync_atomicity"),
+            &tables,
+            true,
+            false,
+            false,
+        ),
+    )
+    .expect("related table replacement commits");
+    assert_eq!(first.total_rows, 2);
+    let after_success = sync_atomicity_labels(&destination, 9663);
+    assert_eq!(
+        after_success,
+        vec![
+            Cell::Text("new-parent".into()),
+            Cell::Text("new-child".into())
+        ]
+    );
+
+    let change = source.block_on(source.session.execute(
+        "TRUNCATE sync_atomicity.child, sync_atomicity.parent CASCADE; \
+         INSERT INTO sync_atomicity.parent VALUES (3, 'replacement-parent'); \
+         INSERT INTO sync_atomicity.child VALUES (3, 3, 'rejected-source-label')",
+        10,
+        JobId(9664),
+    ));
+    assert_eq!(change.status, ExecutionStatus::Succeeded);
+    let error = within_sync_timeout(
+        &source,
+        source.session.execute_sync_pipeline(
+            Some(&mut destination.session),
+            Some("sync_atomicity"),
+            &tables,
+            true,
+            false,
+            false,
+        ),
+    )
+    .expect_err("destination CHECK must reject the later child COPY");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(error.headline, "destination COPY completion failed");
+    assert_eq!(error.statement_number, None);
+    assert!(
+        error
+            .technical
+            .iter()
+            .any(|field| field.label == "SQLSTATE" && field.value == "23514"),
+        "{error:?}"
+    );
+
+    let independent = fixture(&destination_uri);
+    let preserved = sync_atomicity_labels(&independent, 9665);
+    assert_eq!(
+        preserved,
+        vec![
+            Cell::Text("new-parent".into()),
+            Cell::Text("new-child".into())
+        ],
+        "failed later table COPY must leave the previous committed set intact"
+    );
+
+    drop(independent);
+    drop(destination);
+    drop(source);
+    scratch.cleanup();
 }
 
 #[test]
