@@ -6061,6 +6061,31 @@ fn quitting_sets_the_flag_and_asks_the_runtime_to_stop() {
     assert!(model.should_quit);
 }
 
+#[cfg(unix)]
+#[test]
+fn terminal_termination_quits_while_a_key_chord_is_pending() {
+    let mut model = connected();
+    model.editor.set_text("SELECT 42;");
+    update(&mut model, Message::Action(Action::ToggleHelp));
+    update(&mut model, Message::Action(Action::BeginPrefix));
+    assert!(model.help_open);
+    assert!(model.prefix_pending);
+
+    let mut keyboard = model.clone();
+    assert!(update(&mut keyboard, Message::Action(Action::Quit)).is_empty());
+    assert!(!keyboard.prefix_pending);
+    assert!(!keyboard.should_quit);
+
+    let effects = update(&mut model, Message::TerminalTermination);
+    assert_eq!(effects, vec![Effect::Quit]);
+    assert!(model.should_quit);
+    assert_eq!(
+        model.notice_state.retiring_generation,
+        Some(model.connection_generation)
+    );
+    assert_eq!(model.editor.text(), "SELECT 42;");
+}
+
 #[test]
 fn resizing_only_records_the_size() {
     let mut model = connected();

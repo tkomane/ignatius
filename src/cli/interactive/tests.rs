@@ -456,9 +456,9 @@ fn sigterm_is_registered_before_the_runtime_is_polled() {
             tokio::time::timeout(Duration::from_secs(2), rx.recv())
                 .await
                 .expect("queued termination reaches the watcher")
-                .expect("watcher emits a quit message")
+                .expect("watcher emits a termination message")
         });
-        assert!(matches!(message, Message::Action(crate::app::Action::Quit)));
+        assert_eq!(message, Message::TerminalTermination);
         return;
     }
 

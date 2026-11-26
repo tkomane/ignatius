@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Unix SIGTERM restores the terminal when a workbench key chord or
+  modal is active.
 - Fixed: Dry-run import requires a transaction and reports success after
   PostgreSQL acknowledges rollback. Wrapped imports leave transactions
   started by the user under the user's control.

@@ -12,7 +12,8 @@
 #![allow(clippy::print_stderr)]
 #![cfg(unix)]
 
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -353,6 +354,201 @@ fn assert_clean_terminal_restoration(session: &str) {
         "the cursor must be restored before the screen is handed back, \
          or the restore applies to a screen the user never sees"
     );
+}
+
+const SIGTERM_PROBE_ROOT: &str = "IGNATIUS_TEST_SIGTERM_PTY_ROOT";
+const SIGTERM_PROBE_TEST: &str = "sigterm_restores_after_the_client_draws";
+const COOKED_READY: &str = "SIGTERM_COOKED_INPUT_READY";
+const PTY_STEP_LIMIT: Duration = Duration::from_secs(10);
+
+fn wait_for_pty_probe(child: &mut Child, timeout: Duration, ready: impl Fn() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if ready() {
+            return true;
+        }
+        if child.try_wait().expect("poll owned PTY child").is_some() || Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn tty_flags() -> String {
+    let output = Command::new("stty")
+        .arg("-a")
+        .stdin(Stdio::inherit())
+        .output()
+        .expect("read flags on the owned PTY");
+    assert!(output.status.success(), "stty must read the owned PTY");
+    String::from_utf8(output.stdout).expect("stty flags are UTF-8")
+}
+
+fn assert_tty_input(flags: &str, raw: bool) {
+    for (cooked, raw_flag) in [("icanon", "-icanon"), ("echo", "-echo"), ("isig", "-isig")] {
+        let expected = if raw { raw_flag } else { cooked };
+        assert!(
+            flags
+                .split(|ch: char| ch.is_whitespace() || ch == ';')
+                .any(|word| word == expected),
+            "{expected} is required in {flags}"
+        );
+    }
+}
+
+fn own_signalled_client(root: &Path) {
+    assert_tty_input(&tty_flags(), false);
+    let mut client = Command::new(env!("CARGO_BIN_EXE_ignatius"))
+        .args(["--ascii", "--color", "never", "--no-history", "connect"])
+        .spawn()
+        .expect("spawn the client with the controller's PTY");
+    // Only the outer test can see the displayed chord. It confirms the frame
+    // before this controller signals its own still-unreaped client.
+    let painted = wait_for_pty_probe(
+        &mut client,
+        2 * PTY_STEP_LIMIT + Duration::from_secs(2),
+        || root.join("chord-painted").is_file(),
+    );
+    if !painted
+        || client
+            .try_wait()
+            .expect("poll client before signalling")
+            .is_some()
+    {
+        let _ = wait_for_owned_child(&mut client, Duration::ZERO);
+        panic!("the owned client did not remain alive through the displayed chord");
+    }
+
+    let raw_flags = tty_flags();
+    let sent = Command::new("kill")
+        .args(["-TERM", &client.id().to_string()])
+        .output();
+    let (status, timed_out) = wait_for_owned_child(&mut client, PTY_STEP_LIMIT);
+    assert_tty_input(&raw_flags, true);
+    assert!(
+        sent.is_ok_and(|output| output.status.success()),
+        "send one SIGTERM to the owned client"
+    );
+    assert!(
+        !timed_out,
+        "the owned client did not exit after one SIGTERM"
+    );
+    assert!(
+        status.success(),
+        "the signalled client exited with {status}"
+    );
+    assert_tty_input(&tty_flags(), false);
+
+    let mut shell = Command::new("sh")
+        .args([
+            "-c",
+            r#"IFS= read -r line && [ "$line" = "owned cooked input" ]"#,
+        ])
+        .spawn()
+        .expect("start a cooked reader on the same PTY");
+    writeln!(io::stdout(), "{COOKED_READY}").expect("publish cooked-input checkpoint");
+    let (status, timed_out) = wait_for_owned_child(&mut shell, PTY_STEP_LIMIT);
+    assert!(
+        !timed_out && status.success(),
+        "the restored PTY must read a cooked line"
+    );
+}
+
+fn drive_sigterm_pty(
+    root: &Path,
+    output: &Path,
+    controller: &mut Child,
+    input: &mut std::process::ChildStdin,
+) -> io::Result<()> {
+    let saw = |text: &str| {
+        std::fs::read(output).is_ok_and(|bytes| {
+            bytes
+                .windows(text.len())
+                .any(|window| window == text.as_bytes())
+        })
+    };
+    if !wait_for_pty_probe(controller, PTY_STEP_LIMIT, || saw("Connection picker")) {
+        return Err(io::Error::other("the connection picker did not render"));
+    }
+    // This fixture binds Ctrl+E to Dismiss. Unlike Escape, it cannot be
+    // combined with the following Ctrl+K byte as an Alt modifier.
+    input.write_all(b"\x05\x0b")?;
+    if !wait_for_pty_probe(controller, PTY_STEP_LIMIT, || {
+        saw("Shrink the sidebar or editor share")
+    }) {
+        return Err(io::Error::other("the Ctrl+K chord did not render"));
+    }
+    std::fs::write(root.join("chord-painted"), b"")?;
+    if !wait_for_pty_probe(controller, PTY_STEP_LIMIT + Duration::from_secs(2), || {
+        saw(COOKED_READY)
+    }) {
+        return Err(io::Error::other(
+            "the signalled client did not return a cooked PTY",
+        ));
+    }
+    input.write_all(b"owned cooked input\n")
+}
+
+#[test]
+fn sigterm_restores_after_the_client_draws() {
+    if let Some(root) = std::env::var_os(SIGTERM_PROBE_ROOT) {
+        own_signalled_client(Path::new(&root));
+        return;
+    }
+
+    let executable = std::env::current_exe().expect("current terminal test executable");
+    let executable = executable.to_str().expect("UTF-8 executable path");
+    let inner = format!(
+        "stty sane rows 30 cols 100 && exec '{}' --exact {SIGTERM_PROBE_TEST} --nocapture",
+        executable.replace('\'', "'\\''")
+    );
+    let mut command = Command::new("script");
+    if cfg!(target_os = "linux") {
+        command.args(["-e", "-q", "-c", &inner, "/dev/null"]);
+    } else {
+        command.args(["-q", "/dev/null", "sh", "-c", &inner]);
+    }
+    let state = isolate_terminal_command(&mut command);
+    let root = state.path();
+    std::fs::write(
+        root.join("config/config.toml"),
+        "[ui]\nmouse = true\n[profiles.qa]\nhost = \"127.0.0.1\"\nport = 1\n[keys]\ndismiss = \"ctrl+e\"\n",
+    )
+    .expect("write an isolated profile whose picker needs no database");
+    let stdout = tempfile::NamedTempFile::new_in(root).expect("private display capture");
+    let mut stderr = tempfile::tempfile().expect("private script stderr capture");
+    let controller = command
+        .env(SIGTERM_PROBE_ROOT, root)
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::piped())
+        .stdout(stdout.reopen().expect("open private display capture"))
+        .stderr(stderr.try_clone().expect("open script stderr capture"))
+        .spawn();
+    let mut controller = match controller {
+        Ok(child) => child,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            eprintln!("skipping: `script` is not available to allocate a pty");
+            return;
+        }
+        Err(error) => panic!("start the controller inside a Unix PTY: {error}"),
+    };
+    let mut input = controller.stdin.take().expect("PTY input");
+    let drive = drive_sigterm_pty(root, stdout.path(), &mut controller, &mut input);
+    let (status, timed_out) =
+        wait_for_owned_child(&mut controller, 2 * PTY_STEP_LIMIT + Duration::from_secs(5));
+    let session = std::fs::read_to_string(stdout.path()).expect("read owned PTY transcript");
+    let stderr = captured_bytes(&mut stderr);
+    assert!(
+        drive.is_ok() && !timed_out && status.success(),
+        "drive={drive:?}, status={status}, timeout={timed_out}; stderr={:?}; PTY={session:?}",
+        String::from_utf8_lossy(&stderr)
+    );
+    assert_clean_terminal_restoration(&session);
+
+    let teardown = ["\x1b[?25h", "\x1b[?1000l", "\x1b[?2004l", "\x1b[?1049l"]
+        .map(|sequence| session.rfind(sequence).expect("restore sequence"));
+    assert!(teardown.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(session.contains("owned cooked input"));
 }
 
 fn resolve_live_uri(env_var: &str) -> Option<String> {

@@ -1961,8 +1961,8 @@ fn register_then_acquire<G>(
     Ok((guard, termination))
 }
 
-/// Turns a registered termination signal into an ordinary quit, so the terminal
-/// is restored. Windows retains its existing Ctrl+C receiver.
+/// Routes Unix termination to cleanup regardless of the active input surface.
+/// Windows retains its existing Ctrl+C receiver.
 fn spawn_signal_watcher(
     tx: mpsc::UnboundedSender<Message>,
     #[cfg(unix)] mut term: tokio::signal::unix::Signal,
@@ -1970,7 +1970,7 @@ fn spawn_signal_watcher(
     #[cfg(unix)]
     tokio::spawn(async move {
         if term.recv().await.is_some() {
-            let _ = tx.send(Message::Action(crate::app::Action::Quit));
+            let _ = tx.send(Message::TerminalTermination);
         }
     });
     #[cfg(not(unix))]

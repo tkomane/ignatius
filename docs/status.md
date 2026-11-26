@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 93 - Restore the Unix terminal on SIGTERM during a key chord - 26 November 2026
+
+- **W07 / 001 T060.** The registered Unix SIGTERM reaches the existing quit
+  path even while a keyboard chord or modal owns input. Terminal cleanup,
+  notice retirement and editor recovery use the ordinary shutdown path.
+  [Foundation tasks](../specs/001-foundation-vertical-slice/tasks.md)
+- **Owned macOS arm64 PTY.** The baseline stayed alive and left the PTY raw
+  after one SIGTERM during Ctrl+K. With the fix, one signal produced a normal
+  exit, restored cursor, mouse, paste and screen state in order, and restored
+  canonical input, echo and signal flags. A reader on the same PTY received a
+  cooked line without reset. The PTY case passed in 0.89 seconds.
+- **Focused tests.** The reducer preserved the draft while its termination
+  path began notice retirement. The startup watcher still delivered a
+  signal received before the runtime first polled it. Native Windows and
+  Linux hand-use acceptance remain under T051 and T052.
+
 ## Wave 92 - Keep bulk import transactions under caller control - 26 November 2026
 
 - **W03 / 028.** CLI rejects dry-run with `--no-transaction` before reading the

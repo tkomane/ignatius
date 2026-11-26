@@ -425,6 +425,9 @@ pub enum Message {
     },
     /// A user intent.
     Action(Action),
+    /// The operating system requested termination of the Unix workbench.
+    #[cfg(unix)]
+    TerminalTermination,
     /// A user intent accompanied by the runtime's fresh terminal dimensions.
     InputAtSize {
         /// The existing intent resolved by the active keymap.

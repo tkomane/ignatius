@@ -202,6 +202,12 @@ when the behaviour exists and a test or recorded evidence proves it.
 
 [Linux socket rehearsal and local scope](../../docs/status.md#wave-91---verify-cancellation-over-a-postgresql-unix-socket---26-november-2026)
 
+- [x] T060 Verify Unix SIGTERM reaches quit while a key chord is active.
+  Exercise actual terminal acquisition, signal delivery and restoration
+  in an owned PTY with the steady-state workbench.
+
+[Owned PTY and focused evidence](../../docs/status.md#wave-93---restore-the-unix-terminal-on-sigterm-during-a-key-chord---26-november-2026)
+
 ## Dependencies
 
 Phase 1 and 2 block everything. Within Phase 3, T015 to T020 are independent of
