@@ -335,7 +335,10 @@ projected and non-NULL in the selected row are eligible; a primary-key cell is
 not an editable target.
 
 Joins, subqueries, CTEs, expressions, set operations, views, missing keys,
-read-only sessions and production-classified connections are refused. A
+read-only sessions and production-classified connections are refused. The
+query backend checks its effective transaction read-only setting before
+replacement input, including explicit read-only transactions and changes
+to the session default. A refusal preserves the caller's transaction. A
 `FROM ONLY` source is also refused because the generated statement would not
 carry `ONLY` and could reach inherited rows. The
 replacement prompt accepts literal text, including empty text, and has a

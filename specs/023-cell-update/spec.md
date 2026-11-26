@@ -189,6 +189,9 @@ generated update and verify exactly one row changes only after confirmation.
   column, source SQL and connection posture before sending.
 - **FR-2312**: Production-classified and server read-only connections MUST be
   refused before replacement input is requested or a write effect is emitted.
+  The query backend checks its effective transaction read-only setting
+  under the user SQL gate before replacement input. A refusal preserves
+  the caller's transaction and retained result.
 - **FR-2313**: A successful generated update MUST preserve the existing result,
   history, transaction, cancellation, row-count and no-automatic-rerun
   contracts, with a truthful stale-snapshot notice.

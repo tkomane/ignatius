@@ -4,6 +4,22 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 94 - Refuse reviewed cell edits in a read-only transaction - 26 November 2026
+
+- **W03 / 023 T023.** Replace Cell checks the query backend's effective
+  transaction read-only setting under the user SQL gate before asking for
+  a replacement value. A refusal preserves the retained row and the
+  caller's transaction. The catalog continues to report role privileges.
+  [Feature 023 tasks](../specs/023-cell-update/tasks.md)
+- **Focused verification.** The baseline opened a prompt after
+  `BEGIN READ ONLY`. Twelve cell-edit checks and the qualified
+  `pg_temp` integration case passed on the fix. The live regression
+  also covered a default read-only session and an explicit read-write override.
+- **Owned macOS arm64 PTY with PostgreSQL 18.7.** The fixed workbench refused
+  the action before replacement input, kept `TX ACTIVE`, and executed a
+  control query in the same transaction. After explicit rollback, Replace
+  Cell opened again. An independent session confirmed the row was unchanged.
+
 ## Wave 93 - Restore the Unix terminal on SIGTERM during a key chord - 26 November 2026
 
 - **W07 / 001 T060.** The registered Unix SIGTERM reaches the existing quit
