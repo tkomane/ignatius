@@ -1,4 +1,4 @@
-# Feature 028 - Import transaction ownership
+# Feature 028 - COPY import ownership and export completion
 
 This maintenance slice extends the [Feature 028 import and export contract](../../docs/architecture/pgadmin-parity-plan.md#feature-028-data-importexport-wizard-and-backuprestore-028-data-import-export-and-backup).
 
@@ -28,6 +28,13 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
   and results. An execution-time read failure reports the error before
   COPY and returns to the source step. A readable header-only source can
   complete a zero-row import.
+- **FR-2806.** Bulk COPY export publishes its bytes only after PostgreSQL
+  reports the COPY command completion and readiness on the same request.
+  A server rejection preserves its SQLSTATE and omits server-controlled
+  text that can disclose result values or query inputs. An unconfirmed
+  completion keeps both output routes unpublished. Explicit replacement
+  applies after confirmed completion and successful local writing. The
+  caller's transaction remains under caller control.
 - **SC-2801.** With disposable PostgreSQL, valid dry-run returns the row count
   and leaves zero imported rows. Contradictory options leave zero rows.
   A refused nested import leaves the caller's transaction and its sentinel
@@ -39,3 +46,8 @@ This maintenance slice extends the [Feature 028 import and export contract](../.
 - **SC-2803.** Failed preview and execution reads emit no COPY. A statement
   trigger or independent backend observation distinguishes this from a
   confirmed zero-row COPY with a readable source.
+- **SC-2804.** An owned deferred constraint rejects an autocommit COPY
+  after it produced data. Standard output stays empty and a forced file
+  destination retains its original bytes. The error carries SQLSTATE
+  23505 without the duplicate value. The same session can run another
+  query, and successful empty and nonempty CSV retain exact bytes.

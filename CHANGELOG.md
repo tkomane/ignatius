@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Bulk COPY export waits for PostgreSQL completion before emitting
+  stdout or replacing an output file. Failures retain SQLSTATE while omitting
+  server-controlled diagnostic text.
 - Fixed: Exports preserve occupied partial files and destinations that appear
   before publication. A failed query connection leaves no empty partial.
 - Fixed: Crash recovery keeps both editor panes and preserves the previous

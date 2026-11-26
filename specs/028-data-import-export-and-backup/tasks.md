@@ -1,4 +1,4 @@
-# Tasks - Import transaction ownership
+# Tasks - COPY import ownership and export completion
 
 - [x] T001 Refuse contradictory dry-run flags and unsafe transaction
   ownership through the CLI and session.
@@ -13,9 +13,15 @@
 - [x] T005 Report real preview and execution file errors. Prove that missing,
   invalid and removed sources produce zero COPY statements, and readable
   files recover through a fresh preview.
+- [x] T006 Wait for the bulk COPY command completion before returning data.
+  Prove suppressed output and byte-preserved files after a deferred server
+  error. Exercise value-free SQLSTATE reporting, same-session recovery
+  and ordinary successful CSV bytes.
 
 [Local evidence](../../docs/status.md#wave-92---keep-bulk-import-transactions-under-caller-control---26-november-2026)
 
 [Production approval and queue evidence](../../docs/status.md#wave-95---require-typed-approval-for-production-imports---26-november-2026)
 
 [Source read and COPY evidence](../../docs/status.md#wave-96---report-import-source-file-failures-before-copy---26-november-2026)
+
+[Bulk export completion evidence](../../docs/status.md#wave-113---confirm-bulk-copy-before-publishing-exports---26-november-2026)
