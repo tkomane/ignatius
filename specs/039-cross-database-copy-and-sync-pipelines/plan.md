@@ -12,7 +12,7 @@ Source Database                   Target Database
 ```
 
 1. **Dependency Analysis**:
-   - Query `pg_constraint` with `contype = 'f'` (foreign key) linking `conrelid` and `confrelid`.
+   - Discover permanent and unlogged tables. Query `pg_constraint` with `contype = 'f'` (foreign key) linking `conrelid` and `confrelid` and apply the same persistence filter to both endpoints.
    - Build a Directed Acyclic Graph (DAG) using Kahn's algorithm for topological sorting.
    - Detect and report cycles. The destination's configured constraint modes still apply.
 2. **Stream Execution**:

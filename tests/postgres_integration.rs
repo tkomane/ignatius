@@ -3785,6 +3785,111 @@ fn sync_atomicity_labels(fx: &Fixture, job: u64) -> Vec<Cell> {
 }
 
 #[test]
+fn catalogue_discovery_excludes_other_sessions_temp_tables() {
+    let uri = target_or_skip!();
+    let temp_owner = fixture(&uri);
+    let observer = fixture(&uri);
+    let schema = unique_sync_database_name("catalogue");
+    let (temp_parent, temp_child) = ("z_t011_temp_parent", "a_t011_temp_child");
+    let (parent, child) = ("z_persistent_parent", "a_unlogged_child");
+
+    let temporary = temp_owner.block_on(temp_owner.session.execute(
+        r#"CREATE TEMP TABLE z_t011_temp_parent (id integer PRIMARY KEY);
+           CREATE TEMP TABLE a_t011_temp_child (
+               id integer PRIMARY KEY,
+               parent_id integer NOT NULL REFERENCES z_t011_temp_parent(id)
+           )"#,
+        10,
+        JobId(9670),
+    ));
+    assert_eq!(temporary.status, ExecutionStatus::Succeeded);
+    let namespace = temp_owner.block_on(temp_owner.session.execute(
+        r#"SELECT nspname::text FROM pg_catalog.pg_namespace
+           WHERE oid = pg_catalog.pg_my_temp_schema()"#,
+        10,
+        JobId(9671),
+    ));
+    assert_eq!(namespace.status, ExecutionStatus::Succeeded);
+    let temp_schema = match &namespace.statements[0]
+        .result_set
+        .as_ref()
+        .expect("temporary namespace row")
+        .rows[0][0]
+    {
+        Cell::Text(name) => name.clone(),
+        other => panic!("unexpected temporary schema value: {other:?}"),
+    };
+    assert!(temp_schema.starts_with("pg_temp_"));
+
+    let persistent = observer.block_on(observer.session.execute(
+        &format!(
+            r#"CREATE SCHEMA {schema};
+               CREATE TABLE {schema}.{parent} (id integer PRIMARY KEY);
+               CREATE UNLOGGED TABLE {schema}.{child} (
+                   id integer PRIMARY KEY,
+                   parent_id integer NOT NULL REFERENCES {schema}.{parent}(id)
+               )"#
+        ),
+        10,
+        JobId(9672),
+    ));
+    assert_eq!(persistent.status, ExecutionStatus::Succeeded);
+
+    let global_graph = within_sync_timeout(
+        &observer,
+        observer.session.discover_table_dependencies(None),
+    )
+    .expect("global graph discovery");
+    assert!(!global_graph.nodes.iter().any(|node| {
+        node.key.schema == temp_schema
+            && (node.key.table == temp_parent || node.key.table == temp_child)
+    }));
+    let plan = global_graph.compute_sync_plan();
+    let graph_order: Vec<_> = plan
+        .insert_order
+        .iter()
+        .filter(|key| key.schema == schema)
+        .map(|key| key.table.as_str())
+        .collect();
+    assert_eq!(graph_order, [parent, child]);
+
+    let global_seed = within_sync_timeout(&observer, observer.session.analyze_seed_plan(None))
+        .expect("global seed discovery");
+    assert!(!global_seed.iter().any(|table| {
+        table.key.schema == temp_schema
+            && (table.key.table == temp_parent || table.key.table == temp_child)
+    }));
+    let seed_order: Vec<_> = global_seed
+        .iter()
+        .filter(|table| table.key.schema == schema)
+        .map(|table| table.key.table.as_str())
+        .collect();
+    assert_eq!(seed_order, [parent, child]);
+
+    let temp_graph = within_sync_timeout(
+        &observer,
+        observer
+            .session
+            .discover_table_dependencies(Some(&temp_schema)),
+    )
+    .expect("explicit temporary schema discovery");
+    assert!(temp_graph.nodes.is_empty());
+    let temp_seed = within_sync_timeout(
+        &observer,
+        observer.session.analyze_seed_plan(Some(&temp_schema)),
+    )
+    .expect("explicit temporary schema seed discovery");
+    assert!(temp_seed.is_empty());
+
+    let cleanup = observer.block_on(observer.session.execute(
+        &format!("DROP SCHEMA {schema} CASCADE"),
+        10,
+        JobId(9673),
+    ));
+    assert_eq!(cleanup.status, ExecutionStatus::Succeeded);
+}
+
+#[test]
 fn sync_pipeline_atomically_replaces_related_tables() {
     let admin_uri = target_or_skip!();
     let mut scratch = SyncScratchDatabases::create(&admin_uri);

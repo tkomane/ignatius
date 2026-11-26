@@ -10,6 +10,7 @@
    - `FixtureReport`: holds generated rows per table, total byte count, and formatters (`render_sql`, `render_jsonl`, `render_csv`, `render_table`).
 2. **PostgreSQL Catalog Inspection (`src/postgres/metadata.rs` & `src/postgres/session.rs`)**:
    - `analyze_seed_plan(client, schema)`: discovers tables, columns, constraints, enums, and foreign keys, assembling `SyntheticFixturePlan`.
+   - Match the sync graph's permanent and unlogged table scope in column discovery and referenced-table lookup.
    - `execute_synthetic_seed(client, plan, options)`: executes generated fixtures inside a guarded transaction (`BEGIN; ... COMMIT;`).
 3. **Keymap & Configuration (`src/ui/keymap.rs` & `docs/design/keymap.md`)**:
    - Chord `Ctrl+K +` (`synthetic-seed`) bound to `Action::SyntheticSeed`.

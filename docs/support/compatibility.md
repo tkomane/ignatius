@@ -526,6 +526,9 @@ import.
 
 ## Binary sync transactions and diagnostics
 
+`ignatius sync` and `ignatius seed` discover permanent and unlogged user
+tables and their dependencies. Schema filters operate within that scope.
+
 `ignatius sync` runs all destination writes in one PostgreSQL transaction.
 It requires an idle destination in a different database and reports success
 after commit is acknowledged. `--truncate` truncates the selected tables

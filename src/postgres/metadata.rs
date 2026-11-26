@@ -3215,6 +3215,7 @@ pub async fn discover_table_dependencies(
         FROM pg_class c
         JOIN pg_namespace ns ON ns.oid = c.relnamespace
         WHERE c.relkind = 'r'
+          AND c.relpersistence IN ('p', 'u')
           AND ($1::text IS NULL OR ns.nspname = $1)
           AND ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
         ORDER BY ns.nspname, c.relname;
@@ -3244,6 +3245,8 @@ pub async fn discover_table_dependencies(
         JOIN pg_class c_dst ON c_dst.oid = con.confrelid
         JOIN pg_namespace ns_dst ON ns_dst.oid = c_dst.relnamespace
         WHERE con.contype = 'f'
+          AND c_src.relpersistence IN ('p', 'u')
+          AND c_dst.relpersistence IN ('p', 'u')
           AND ($1::text IS NULL OR ns_src.nspname = $1)
           AND ns_src.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
           AND ns_dst.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
@@ -3337,8 +3340,10 @@ pub async fn analyze_seed_plan(
             JOIN pg_namespace ns_dst ON ns_dst.oid = c_dst.relnamespace
             JOIN pg_attribute a_dst ON a_dst.attrelid = con.confrelid AND a_dst.attnum = con.confkey[1]
             WHERE con.contype = 'f' AND array_length(con.conkey, 1) = 1
+              AND c_dst.relpersistence IN ('p', 'u')
         ) fk ON fk.conrelid = c.oid AND fk.attnum = a.attnum
         WHERE c.relkind = 'r'
+          AND c.relpersistence IN ('p', 'u')
           AND ($1::text IS NULL OR ns.nspname = $1)
           AND ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
         ORDER BY ns.nspname, c.relname, a.attnum;

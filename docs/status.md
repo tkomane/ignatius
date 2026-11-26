@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 104 - Keep temporary tables out of sync and seed discovery - 26 November 2026
+
+- **W03 / 039 T014 and 040 T011.** The shared dependency graph and seed
+  column discovery include permanent and unlogged user tables.
+  Temporary tables and their foreign keys no longer enter discovered
+  plans. [Sync tasks](../specs/039-cross-database-copy-and-sync-pipelines/tasks.md)
+  [Seed tasks](../specs/040-synthetic-test-fixture-generator/tasks.md)
+- **Focused macOS arm64 verification with PostgreSQL 18.7.** A separate
+  session held a temporary parent and child open. The graph and seed
+  discovery omitted both tables and their actual temporary namespace, and
+  kept the permanent parent ahead of the dependent unlogged child. The
+  live regression and fourteen sync and seed unit tests passed.
+- **Executable verification.** Baseline default sync dry-run failed on the
+  other session's temporary table, which also appeared in seed output.
+  The fix counted three rows across the permanent and unlogged tables
+  in dependency order, and generated one fixture row for each in the
+  same order. Independent PostgreSQL reads verified the original rows.
+
 ## Wave 103 - Confirm writes to production-classified sync destinations - 26 November 2026
 
 - **W04 / 039 T013.** Sync append and truncate require

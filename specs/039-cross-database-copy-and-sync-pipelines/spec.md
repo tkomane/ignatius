@@ -21,6 +21,13 @@ when available and omit server and driver text that could contain row values.
 A connection loss reports that the outcome is unknown and advises checking the
 destination before continuing.
 
+## Source discovery
+
+Discovered plans include permanent and unlogged user tables. Session-local
+temporary relations and their foreign keys are omitted, including for an
+explicit temporary namespace filter. Discovered dependencies still order
+parent rows before referencing rows.
+
 ## Destination transaction
 
 One PostgreSQL transaction owns all destination writes, including optional
