@@ -123,6 +123,8 @@ Failing to open it is not a failure of the session. The tree falls back to the
 connection that is already there, and the header says `[objects: shared
 connection]`, because a connection limit or a pooler is a real place to be and
 the reason the tree can be slow behind a long query is worth knowing.
+History status occupies a separate header part, so both messages are visible
+when the terminal has room.
 
 `ignatius connect --check` states that the interactive client opens this second
 connection, since a second connection is a real cost on a constrained server.

@@ -168,15 +168,6 @@ pub(crate) fn render_header(
     // History and metadata link notices
     let notice = if !model.records_history() {
         Some(format!("{}[history off]", presentation.icon(Icon::Info)))
-    } else if matches!(
-        model.metadata_link,
-        crate::app::model::MetadataLink::Unavailable(_)
-    ) {
-        Some(format!(
-            "{}[objects: {}]",
-            presentation.icon(Icon::Info),
-            model.metadata_link.label()
-        ))
     } else if model.history_note.is_some() {
         Some(format!("{}[not in history]", presentation.icon(Icon::Info)))
     } else {
@@ -188,6 +179,26 @@ pub(crate) fn render_header(
             vec![
                 Span::raw("  "),
                 Span::styled(notice, theme.on_stripe(Token::Info)),
+            ],
+        ));
+    }
+
+    if matches!(
+        model.metadata_link,
+        crate::app::model::MetadataLink::Unavailable(_)
+    ) {
+        left.push(Part::yielding(
+            1,
+            vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!(
+                        "{}[objects: {}]",
+                        presentation.icon(Icon::Info),
+                        model.metadata_link.label()
+                    ),
+                    theme.on_stripe(Token::Info),
+                ),
             ],
         ));
     }

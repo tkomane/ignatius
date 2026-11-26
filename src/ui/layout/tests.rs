@@ -1766,6 +1766,36 @@ fn the_header_says_when_the_tree_could_not_get_its_own_connection() {
 }
 
 #[test]
+fn shared_tree_connection_and_history_notices_are_both_visible() {
+    let mut model = connected_model(Environment::Local);
+    model.metadata_link =
+        crate::app::model::MetadataLink::Unavailable("too many connections".to_owned());
+
+    for presentation in [
+        rich(),
+        presentation(ThemeChoice::Dark, false, GlyphTier::Ascii),
+    ] {
+        model.history_disabled = true;
+        let text = render_to_string(&model, &Keymap::new(), &presentation, 160, 30);
+        assert!(text.contains("[history off]"), "{text}");
+        assert!(text.contains("[objects: shared connection"), "{text}");
+
+        model.history_disabled = false;
+        model.history_paused = true;
+        let text = render_to_string(&model, &Keymap::new(), &presentation, 160, 30);
+        assert!(text.contains("[history off]"), "{text}");
+        assert!(text.contains("[objects: shared connection"), "{text}");
+
+        model.history_paused = false;
+        model.history_note = Some("Not added to history: this statement mentions a credential.");
+        let text = render_to_string(&model, &Keymap::new(), &presentation, 160, 30);
+        assert!(text.contains("[not in history]"), "{text}");
+        assert!(text.contains("[objects: shared connection"), "{text}");
+        model.history_note = None;
+    }
+}
+
+#[test]
 fn a_session_that_keeps_no_record_says_so_in_the_header() {
     let mut model = connected_model(Environment::Local);
     let text = render_to_string(&model, &Keymap::new(), &rich(), 120, 30);

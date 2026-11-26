@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 109 - Show the shared object-tree connection with history off - 26 November 2026
+
+- **W05 / 007-object-definitions SEC-704 and SC-706.** The history and
+  shared object-tree notices now occupy independent header parts. Both
+  are visible when the available width fits them.
+  [Object definitions tasks](../specs/007-object-definitions/tasks.md)
+- **Focused verification.** All 134 layout tests passed. The new render
+  regression checks history disabled, paused and temporarily suppressed
+  alongside the fallback, including ASCII without colour.
+- **Executable verification on a macOS arm64 PTY and PostgreSQL 18.7.**
+  The baseline refreshed the tree on one backend but hid the fallback
+  while history was off. A login limited to one connection showed both
+  notices on the fixed 180-by-40 ASCII header. A schema created after the
+  refusal appeared after reload, and the original backend answered a
+  follow-up query with its read-only setting off. Quitting restored the
+  cursor, bracketed paste mode and alternate screen.
+
 ## Wave 108 - Verify restricted completion over plain and TLS - 26 November 2026
 
 - **W05 / 012 T035.** Two independent transport cases compare real SELECT
