@@ -115,7 +115,9 @@ Someone is about to change a table and wants to know what reads it.
   session, so the route, the credential and the transport protection cannot
   differ.
 - **FR-709**: It MUST be read-only at the server and MUST identify itself in
-  `application_name`.
+  `application_name`. Preserve the configured prefix when it is printable
+  ASCII and fits with ` (objects)` on a standard PostgreSQL build. Use the
+  default prefix for longer names or names the server may escape.
 - **SEC-704**: Falling back to a shared connection MUST be visible, because it
   is why the tree can wait behind a long query.
   The fallback explanation and history status must both appear when the

@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: The read-only object-tree connection stays identifiable in
+  `pg_stat_activity` when the query connection uses a long application name.
 - Fixed: The workbench can show the shared object-tree connection notice
   alongside disabled or paused history.
 - Fixed: SQL completion offers the scoped alias's columns when its name

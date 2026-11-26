@@ -386,7 +386,19 @@ impl ConnectionTarget {
     #[must_use]
     pub fn for_object_tree(&self) -> Self {
         let mut copy = self.copy_with(self.password.clone_secret());
-        copy.application_name = format!("{} (objects)", copy.application_name);
+        const OBJECT_SUFFIX: &str = " (objects)";
+        // PostgreSQL's standard builds allow 63 bytes for application_name.
+        // The server can expand non-printable bytes, so only use a custom
+        // prefix when its displayed form fits with the object marker.
+        let name = &self.application_name;
+        let prefix = if name.len() <= 63 - OBJECT_SUFFIX.len()
+            && name.bytes().all(|byte| matches!(byte, b' '..=b'~'))
+        {
+            name
+        } else {
+            crate::branding::DEFAULT_APPLICATION_NAME
+        };
+        copy.application_name = format!("{prefix}{OBJECT_SUFFIX}");
         copy.read_only = true;
         copy
     }
