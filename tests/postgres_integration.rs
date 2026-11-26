@@ -3451,6 +3451,122 @@ fn live_postgres_streaming_copy_in_and_out_with_transactional_rollback() {
 }
 
 #[test]
+fn execute_export_surfaces_deferred_unique_error_without_returning_data() {
+    use ignatius::transfer::ExportOptions;
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let sentinel = "synthetic-export-unique-sentinel";
+    let output_marker = "synthetic-export-output";
+    let setup = fx.block_on(fx.session.execute(
+        &format!(
+            "CREATE TEMP TABLE export_deferred (id text UNIQUE DEFERRABLE INITIALLY DEFERRED); \
+             INSERT INTO export_deferred VALUES ('{sentinel}'); \
+         CREATE FUNCTION pg_temp.export_duplicate() RETURNS TABLE(value text) \
+         LANGUAGE plpgsql VOLATILE AS $$ \
+         BEGIN \
+             INSERT INTO export_deferred VALUES ('{sentinel}'); \
+             RETURN QUERY SELECT '{output_marker}'::text; \
+         END; $$"
+        ),
+        10,
+        JobId(9510),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded, "{setup:?}");
+
+    let options = ExportOptions {
+        query: "SELECT value FROM pg_temp.export_duplicate()".to_owned(),
+        ..ExportOptions::default()
+    };
+    let error = fx
+        .block_on(fx.session.execute_export(&options))
+        .expect_err("deferred unique violation must fail export");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(sqlstate(&error), "23505");
+    let rendered = format!("{error:?}");
+    assert!(
+        !rendered.contains(sentinel) && !rendered.contains(output_marker),
+        "export data leaked into the diagnostic: {rendered}"
+    );
+
+    let count = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM pg_temp.export_deferred",
+        10,
+        JobId(9511),
+    ));
+    assert_eq!(count.status, ExecutionStatus::Succeeded, "{count:?}");
+    assert_eq!(
+        count.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("1".into())
+    );
+
+    let follow_up = fx.block_on(fx.session.execute(
+        "SELECT 'backend-still-usable' AS status",
+        10,
+        JobId(9512),
+    ));
+    assert_eq!(
+        follow_up.status,
+        ExecutionStatus::Succeeded,
+        "{follow_up:?}"
+    );
+    assert_eq!(
+        follow_up.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("backend-still-usable".into())
+    );
+}
+
+#[test]
+fn execute_export_csv_preserves_header_for_success_and_empty_results() {
+    use ignatius::transfer::{ExportOptions, TransferFormat};
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let successful = ExportOptions {
+        query: "SELECT 7 AS id, 'synthetic' AS note".to_owned(),
+        format: TransferFormat::Csv,
+        ..ExportOptions::default()
+    };
+    let bytes = fx
+        .block_on(fx.session.execute_export(&successful))
+        .expect("CSV export succeeds");
+    assert_eq!(bytes, b"id,note\n7,synthetic\n");
+
+    let empty = ExportOptions {
+        query: "SELECT 7 AS id, 'synthetic' AS note WHERE false".to_owned(),
+        format: TransferFormat::Csv,
+        ..ExportOptions::default()
+    };
+    let bytes = fx
+        .block_on(fx.session.execute_export(&empty))
+        .expect("empty CSV export succeeds");
+    assert_eq!(bytes, b"id,note\n");
+}
+
+#[test]
+fn execute_export_missing_column_is_private_query_error() {
+    use ignatius::transfer::ExportOptions;
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let sentinel = "synthetic-missing-export-column";
+    let options = ExportOptions {
+        query: format!("SELECT \"{sentinel}\""),
+        ..ExportOptions::default()
+    };
+
+    let error = fx
+        .block_on(fx.session.execute_export(&options))
+        .expect_err("missing export column must fail");
+    assert_eq!(error.kind, ignatius::diagnostics::DiagnosticKind::Query);
+    assert_eq!(sqlstate(&error), "42703");
+    assert!(
+        !format!("{error:?}").contains(sentinel),
+        "identifier sentinel leaked into diagnostic: {error:?}"
+    );
+}
+
+#[test]
 fn import_transaction_ownership_preserves_caller_state_and_unwrapped_route() {
     use ignatius::query::result::TransactionState;
     use ignatius::transfer::{ImportOptions, TransferFormat};

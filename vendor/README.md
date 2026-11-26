@@ -18,5 +18,10 @@ driver dependency as well.
 `src/client.rs` also matches the path import to its Unix-only use so the
 repository dependency compiles on Windows with warnings denied.
 
-When a compatible upstream release exposes these fields, remove this copy,
+`src/copy_out.rs` provides opt-in completion-aware iteration. Bulk export
+waits for the same request's COPY command tag and ReadyForQuery before
+publishing data, so PostgreSQL errors after CopyDone reach the caller.
+Ordinary COPY streams still end at CopyDone.
+
+When a compatible upstream release provides these capabilities, remove this copy,
 the Cargo patch and the patch-specific inventory and advisory checks.

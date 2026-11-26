@@ -116,10 +116,13 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 
 ### Feature 028: Data Import/Export Wizard and Backup/Restore (`028-data-import-export-and-backup`)
 
-**Status: Implemented on `main`.** The pure `src/transfer/` engine, `Session::execute_import` and `Session::execute_export` streaming extractors, `ignatius import`, `ignatius export`, `ignatius backup`, `ignatius restore` CLI subcommands, and interactive `Ctrl+K <` (`import-data`) TUI import wizard overlay are fully implemented.
+**Status: CLI commands and the import wizard are integrated.** Bulk export
+buffers COPY data through PostgreSQL completion before emitting stdout or
+publishing a file. Constant-memory file exports and the remaining format
+requirements below are open.
 
 - **Objective:** Bring enterprise-grade bulk data movement and database backup/restore into the terminal with streaming memory safety and strict write guards.
-- **Streaming COPY Workflows:**
+- **Streaming COPY workflow targets:**
   - High-throughput streaming via PostgreSQL's binary and text `COPY ... TO STDOUT` and `COPY ... FROM STDIN` protocol.
   - Supports CSV, TSV, JSONL (newline-delimited JSON), SQL `INSERT`, and Parquet.
   - Streams data with constant memory overhead regardless of dataset size (100 MB or 100 GB).
@@ -141,7 +144,7 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
   - Scriptable import and export:
     ```bash
     ignatius import "$DATABASE_URL" --table customers --file customers.csv --format csv --delimiter ","
-    ignatius export "$DATABASE_URL" "SELECT * FROM large_log" --format jsonl --output log.jsonl
+    ignatius export "$DATABASE_URL" "SELECT * FROM large_log" --format csv --output log.csv
     ignatius backup "$DATABASE_URL" --output backup.dump --format custom
     ignatius restore "$DATABASE_URL" --input backup.dump --clean
     ```

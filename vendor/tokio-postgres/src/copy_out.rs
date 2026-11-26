@@ -55,3 +55,33 @@ impl Stream for CopyOutStream {
         }
     }
 }
+
+impl CopyOutStream {
+    /// Yields COPY data and waits for this request's command completion and
+    /// ready-for-query response before ending. Errors after the last data
+    /// message are returned as stream items.
+    pub fn with_completion(self) -> impl Stream<Item = Result<Bytes, Error>> {
+        futures_util::stream::try_unfold(self.responses, |mut responses| async move {
+            match responses.next().await? {
+                Message::CopyData(body) => return Ok(Some((body.into_bytes(), responses))),
+                Message::CopyDone => {}
+                _ => return Err(Error::unexpected_message()),
+            }
+
+            let Message::CommandComplete(body) = responses.next().await? else {
+                return Err(Error::unexpected_message());
+            };
+            let tag = body.tag().map_err(Error::parse)?;
+            if !tag.strip_prefix("COPY ").is_some_and(|rows| {
+                !rows.is_empty() && rows.bytes().all(|byte| byte.is_ascii_digit())
+            }) {
+                return Err(Error::unexpected_message());
+            }
+
+            match responses.next().await? {
+                Message::ReadyForQuery(_) => Ok(None),
+                _ => Err(Error::unexpected_message()),
+            }
+        })
+    }
+}

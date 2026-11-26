@@ -254,6 +254,7 @@ pub(crate) fn import_session_changed() -> Diagnostic {
 /// Transfer failures can contain copied values in any server-supplied field.
 enum TransferOperation {
     Import,
+    Export,
     Sync,
     Seed,
 }
@@ -266,6 +267,11 @@ impl TransferOperation {
                 "whether the import committed is not known from this connection",
                 "reconnect and check the data; no import is retried automatically",
             ),
+            Self::Export => (
+                "exporting data",
+                "the server did not confirm completion of the export request",
+                "reconnect and check the source before continuing; no export is retried automatically",
+            ),
             Self::Sync => (
                 "synchronizing data",
                 "the transfer outcome is unknown from this connection",
@@ -277,11 +283,16 @@ impl TransferOperation {
                 "reconnect and check the destination before continuing; no insert is retried automatically",
             ),
         };
-        use tokio_postgres::error::Severity;
+        use tokio_postgres::error::{DbError, ErrorPosition, Severity};
 
+        let protected_values = if matches!(self, Self::Export) {
+            "exported values and query inputs"
+        } else {
+            "input values"
+        };
         let db = err.as_db_error();
         let connection_lost = err.is_closed()
-            || (matches!(self, Self::Sync | Self::Seed)
+            || (matches!(self, Self::Export | Self::Sync | Self::Seed)
                 && matches!(
                     db.and_then(tokio_postgres::error::DbError::parsed_severity),
                     Some(Severity::Fatal | Severity::Panic)
@@ -306,20 +317,27 @@ impl TransferOperation {
             };
             Diagnostic::new(kind, headline, attempted).technical(
                 "Privacy",
-                "server diagnostic text omitted to protect input values",
+                format!("server diagnostic text omitted to protect {protected_values}"),
             )
         } else {
             Diagnostic::new(
                 DiagnosticKind::Query,
-                format!("{phase} failed (driver diagnostic text omitted to protect input values)"),
+                format!(
+                    "{phase} failed (driver diagnostic text omitted to protect {protected_values})"
+                ),
                 attempted,
             )
         };
         if let Some(state) = db.and_then(|db| safe_sqlstate(db.code().code())) {
             diagnostic = diagnostic.technical("SQLSTATE", state);
         }
+        if matches!(self, Self::Export)
+            && let Some(ErrorPosition::Original(position)) = db.and_then(DbError::position)
+        {
+            diagnostic = diagnostic.at_position(*position);
+        }
         match self {
-            Self::Import => diagnostic.in_statement(1),
+            Self::Import | Self::Export => diagnostic.in_statement(1),
             Self::Sync | Self::Seed => diagnostic,
         }
     }
@@ -1581,7 +1599,7 @@ impl Session {
 
     /// Executes a bulk data export using `COPY ... TO STDOUT`.
     ///
-    /// Streams chunks of exported data.
+    /// Buffers the data until PostgreSQL confirms completion of the COPY request.
     pub async fn execute_export(
         &self,
         options: &crate::transfer::ExportOptions,
@@ -1594,13 +1612,15 @@ impl Session {
             .client
             .copy_out(&copy_sql)
             .await
-            .map_err(|e| from_query_error(&e, 1))?;
+            .map_err(|e| TransferOperation::Export.error(&e, "COPY export startup"))?;
 
-        let mut stream = std::pin::pin!(stream);
+        let mut stream = std::pin::pin!(stream.with_completion());
         let mut buffer = Vec::new();
 
         while let Some(chunk_res) = stream.next().await {
-            let chunk = chunk_res.map_err(|e| from_query_error(&e, 1))?;
+            let chunk = chunk_res.map_err(|e| {
+                TransferOperation::Export.error(&e, "COPY export data or completion")
+            })?;
             buffer.extend_from_slice(&chunk);
         }
 

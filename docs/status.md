@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 113 - Confirm bulk COPY before publishing exports - 26 November 2026
+
+- **W05 / 028 T006.** Bulk export waits for the COPY command tag and
+  ReadyForQuery on its original request. Startup, payload and completion
+  errors preserve SQLSTATE and omit server-controlled diagnostic text.
+  The current file and stdout routes still buffer the COPY payload.
+  [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
+- **Focused verification.** Five live cases passed, covering a private
+  missing-column diagnostic, deferred rejection and same-session reuse,
+  exact nonempty and header-only CSV, transactional COPY and binary sync.
+- **Executable verification on macOS arm64 and PostgreSQL 18.7.** The
+  baseline returned success and published bytes after a deferred unique
+  constraint rejected the autocommit request. The fix returned exit 7 and
+  SQLSTATE 23505 over plain and verified TLS, with empty stdout and the
+  original forced destination intact. Independent SQL still saw one row.
+  Successful COPY stdout and file exports matched exact CSV bytes.
+
 ## Wave 112 - Preserve export destinations and recovery files - 26 November 2026
 
 - **W10 / 021 T026.** Query, COPY file and retained-row exports reserve
