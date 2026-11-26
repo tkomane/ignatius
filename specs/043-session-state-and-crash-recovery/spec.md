@@ -28,7 +28,11 @@ retained tab. If no tab can be restored, keep the current workspace.
 An empty or whitespace-only file-backed tab is an editor draft. Recovery
 retains its exact text, file association and modified marker. Opening and
 restoring the draft leaves the original file on disk, ready for the operator
-to save through the ordinary editor action.
+to save through the ordinary editor action. If an operator clears a file
+while the recovery decision is pending, accepting recovery preserves that
+new draft beside the recovered tabs. Every preserved draft counts toward
+the 16-tab limit. If the two sets cannot fit, keep the current workspace
+and the unrecovered journal available for a later decision.
 
 ### Scenario 2: Headless Scriptable Recovery
 An operator working in an automated terminal environment or headless server checks if any orphaned queries remain:
