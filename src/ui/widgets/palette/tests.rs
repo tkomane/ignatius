@@ -1148,3 +1148,57 @@ fn command_palette_renders_live_mini_workbench_theme_preview_for_builtin_themes(
             .all(|cell| cell.fg == Color::Reset && cell.bg == Color::Reset)
     );
 }
+
+#[test]
+fn saved_query_collection_origin_tags_description_and_multiline_sql_render_with_tokens() {
+    let saved = vec![crate::queries::SavedQuery {
+        name: "billing/monthly-revenue".into(),
+        collection: Some("billing".into()),
+        tags: vec!["finance".into(), "monthly".into()],
+        description: Some("Monthly gross revenue".into()),
+        path: "/tmp/queries/billing/monthly-revenue.sql".into(),
+        summary: "SELECT sum(total)".into(),
+        preview: "SELECT sum(total)\nFROM orders;".into(),
+    }];
+    let pal = Palette::from_saved_queries(&saved);
+    let p_true = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let mut buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_true, AREA, &mut buf);
+    let text = buffer_to_string(&buf);
+
+    assert!(text.contains("Query: billing/monthly-revenue"), "{text}");
+    assert!(text.contains("Origin: Saved / billing"), "{text}");
+    assert!(text.contains("Tags: #finance #monthly"), "{text}");
+    assert!(
+        text.contains("Description: Monthly gross revenue"),
+        "{text}"
+    );
+    assert!(text.contains("SQL:"), "{text}");
+    assert!(text.contains("FROM orders;"), "{text}");
+
+    let info_fg = p_true.theme.color(Token::Info).unwrap();
+    let tag_pos = cell(&buf, "#finance");
+    assert_eq!(buf[tag_pos].fg, info_fg);
+
+    let p_ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_ascii, AREA, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(ascii_text.is_ascii(), "{ascii_text}");
+    assert!(
+        ascii_text.contains("Origin: Saved / billing"),
+        "{ascii_text}"
+    );
+    assert!(
+        ascii_text.contains("Tags: #finance #monthly"),
+        "{ascii_text}"
+    );
+}

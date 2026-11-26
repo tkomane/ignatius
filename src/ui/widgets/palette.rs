@@ -778,7 +778,7 @@ pub(crate) fn render_palette(
                 } else {
                     let value_token = match key {
                         "Query" => Token::Focus,
-                        "Origin" => Token::Info,
+                        "Origin" | "Tags" => Token::Info,
                         _ => Token::Text,
                     };
                     preview_lines.push(Line::from(vec![

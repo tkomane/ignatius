@@ -2333,3 +2333,91 @@ fn result_diff_cli_runs_offline_across_formats_and_writes_output() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn queries_cli_lists_filters_and_shows_saved_queries_offline() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let cfg_dir = std::env::temp_dir().join(format!("ignatius-cli-queries-{unique}"));
+    let queries_dir = cfg_dir.join("queries");
+    let library = crate::queries::Library::new(&queries_dir);
+    library
+        .save(
+            "billing/monthly-revenue",
+            "-- @tags: finance, monthly\n-- @description: Monthly gross revenue\nSELECT sum(total) FROM orders;",
+        )
+        .expect("save billing query");
+    library
+        .save(
+            "ops/locks",
+            "-- @tag: locks\nSELECT pid FROM pg_stat_activity;",
+        )
+        .expect("save ops query");
+    library
+        .save("health", "SELECT 1;")
+        .expect("save root query");
+
+    let cli = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "queries",
+        "list",
+        "--collection",
+        "billing",
+        "--tag",
+        "#finance",
+        "--format",
+        "json",
+    ])
+    .expect("parse queries list");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(run(&cli, &mut out, &mut err), ExitCode::Success);
+    assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
+    let listed: serde_json::Value = serde_json::from_slice(&out).expect("valid queries list json");
+    let arr = listed.as_array().expect("json array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["name"], "billing/monthly-revenue");
+    assert_eq!(arr[0]["collection"], "billing");
+    assert_eq!(arr[0]["tags"], serde_json::json!(["finance", "monthly"]));
+    assert_eq!(arr[0]["description"], "Monthly gross revenue");
+
+    let show_cli = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "queries",
+        "show",
+        "billing/monthly-revenue",
+    ])
+    .expect("parse queries show");
+    let mut show_out = Vec::new();
+    let mut show_err = Vec::new();
+    assert_eq!(
+        run(&show_cli, &mut show_out, &mut show_err),
+        ExitCode::Success
+    );
+    assert!(show_err.is_empty());
+    let sql = String::from_utf8(show_out).unwrap();
+    assert!(sql.contains("SELECT sum(total) FROM orders;"), "{sql}");
+
+    let bad_cli = Cli::try_parse_from([
+        "ignatius",
+        "--config-dir",
+        cfg_dir.to_str().unwrap(),
+        "queries",
+        "show",
+        "../secret",
+    ])
+    .expect("parse invalid show");
+    let mut bad_out = Vec::new();
+    let mut bad_err = Vec::new();
+    assert_eq!(run(&bad_cli, &mut bad_out, &mut bad_err), ExitCode::Usage);
+    assert!(bad_out.is_empty());
+    assert!(!bad_err.is_empty());
+
+    let _ = std::fs::remove_dir_all(&cfg_dir);
+}

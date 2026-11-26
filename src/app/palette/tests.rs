@@ -469,3 +469,70 @@ fn commands_palette_supports_preview_only_when_theme_entries_match() {
     assert!(!filtered_to_command.supports_preview());
     assert!(filtered_to_command.selected_preview().is_none());
 }
+
+#[test]
+fn saved_query_library_palette_searches_collections_and_tags_and_renders_multiline_preview() {
+    let queries = vec![
+        crate::queries::SavedQuery {
+            name: "billing/monthly-revenue".into(),
+            collection: Some("billing".into()),
+            tags: vec!["finance".into(), "monthly".into()],
+            description: Some("Monthly gross revenue".into()),
+            path: "/tmp/billing/monthly-revenue.sql".into(),
+            summary: "SELECT sum(total)".into(),
+            preview: "SELECT sum(total)\nFROM orders;".into(),
+        },
+        crate::queries::SavedQuery {
+            name: "health".into(),
+            collection: None,
+            tags: vec!["ops".into()],
+            description: None,
+            path: "/tmp/health.sql".into(),
+            summary: "SELECT 1;".into(),
+            preview: "SELECT 1;".into(),
+        },
+    ];
+
+    let mut pal = Palette::from_saved_queries(&queries);
+    pal.query = "billing".into();
+    assert_eq!(pal.matches().len(), 1);
+    assert_eq!(pal.matches()[0].label, "billing/monthly-revenue");
+
+    pal.query = "#ops".into();
+    assert_eq!(pal.matches().len(), 1);
+    assert_eq!(pal.matches()[0].label, "health");
+    let health_preview = pal.selected_preview().expect("health preview").join("\n");
+    assert!(
+        health_preview.contains("Origin: Saved\n"),
+        "{health_preview}"
+    );
+    assert!(health_preview.contains("Tags: #ops"), "{health_preview}");
+    assert!(
+        health_preview.contains("SQL: SELECT 1;"),
+        "{health_preview}"
+    );
+
+    pal.query = "#finance".into();
+    assert_eq!(pal.matches().len(), 1);
+    let billing_preview = pal.selected_preview().expect("billing preview").join("\n");
+    assert!(
+        billing_preview.contains("Query: billing/monthly-revenue"),
+        "{billing_preview}"
+    );
+    assert!(
+        billing_preview.contains("Origin: Saved / billing"),
+        "{billing_preview}"
+    );
+    assert!(
+        billing_preview.contains("Tags: #finance #monthly"),
+        "{billing_preview}"
+    );
+    assert!(
+        billing_preview.contains("Description: Monthly gross revenue"),
+        "{billing_preview}"
+    );
+    assert!(
+        billing_preview.contains("SQL:\n  SELECT sum(total)\n  FROM orders;"),
+        "{billing_preview}"
+    );
+}
