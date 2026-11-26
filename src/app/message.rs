@@ -410,6 +410,15 @@ pub struct MouseModifiers {
     pub alt: bool,
 }
 
+/// An interactive import failed before or during execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportFailure {
+    /// The previewed source could no longer be read. A fresh preview is required.
+    Source(Diagnostic),
+    /// The import could not be executed with the admitted options and session.
+    Execution(Diagnostic),
+}
+
 /// Everything that can change the model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
@@ -686,7 +695,7 @@ pub enum Message {
         /// Which request this answers, so a late answer is discarded.
         request: u64,
         /// Result summary, or why the import failed.
-        result: Box<Result<crate::transfer::ImportResult, Diagnostic>>,
+        result: Box<Result<crate::transfer::ImportResult, ImportFailure>>,
     },
     /// Routine signatures finished loading from catalog.
     RoutinesLoaded {

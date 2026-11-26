@@ -4,6 +4,24 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 96 - Report import source file failures before COPY - 26 November 2026
+
+- **W03 / 028 T005.** The wizard reports unreadable or invalid source input,
+  clears cached preview and result data and requires a completed preview
+  before it can run. A read failure after preview returns to the source
+  step before COPY begins.
+  [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
+- **Focused verification.** Three regressions failed on the baseline.
+  Eight import checks passed on the fix. A disposable PostgreSQL statement
+  trigger counted zero COPY statements for a removed source and one for
+  a readable header-only source with zero affected rows.
+- **Owned macOS arm64 PTY with PostgreSQL 18.7.** Initial absence, invalid
+  UTF-8 after a valid preview and removal before execution preserved the
+  query backend's last statement and start time. An independent session
+  saw zero durable rows for all three failures. The wizard recovered
+  through a fresh preview and reported the verified zero-row and one-row
+  import results.
+
 ## Wave 95 - Require typed approval for production imports - 26 November 2026
 
 - **W03 / 028 T004.** The wizard shows the resolved database, destination

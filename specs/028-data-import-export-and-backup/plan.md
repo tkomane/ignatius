@@ -17,3 +17,8 @@ of the options, target and installed query session. Check that session after
 waiting for the user SQL gate. The runtime uses the same installed query
 backend that the user approved. Verify the reducer and the live workbench
 against a disposable database with an explicit production label.
+
+Use the existing preview request and query session identities to track the
+source. Preserve the established parsing, mapping and transaction paths for
+readable files. Prove initial absence, invalid text, removal after preview,
+and recovery through a readable header-only and one-row source.
