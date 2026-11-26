@@ -8,6 +8,9 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Dry-run import requires a transaction and reports success after
+  PostgreSQL acknowledges rollback. Wrapped imports leave transactions
+  started by the user under the user's control.
 - Improved: Cloud providers have a 1 MiB stdout limit and a 64 KiB stderr
   retention limit. Failure diagnostics omit incomplete output.
 - Fixed: A failed retained-result refresh keeps its error position with

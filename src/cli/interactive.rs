@@ -1204,7 +1204,7 @@ async fn event_loop(
                 } => {
                     spawn_execute_import(
                         tx.clone(),
-                        reader(&session, &metadata),
+                        Arc::clone(&session),
                         request,
                         options,
                         data,

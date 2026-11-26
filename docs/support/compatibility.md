@@ -492,6 +492,20 @@ racing server observations after the retirement boundary.
 Counts cover observed messages, not complete server warning delivery or proof
 that a person read them. Metadata/idle observations do not prove statement cause.
 
+## Bulk import transactions
+
+`ignatius import` and the interactive import wizard normally wrap COPY in an
+Ignatius-owned transaction. The wizard uses the connected query backend.
+Wrapped import requires autocommit and refuses before COPY if a transaction
+is already active, failed or its state is unavailable. End a caller-owned
+transaction before retrying. CLI import with `--no-transaction` leaves
+transaction control with the caller.
+
+`--dry-run` requires the wrapper and conflicts with `--no-transaction`. Its
+row count is reported after PostgreSQL acknowledges rollback. COPY and commit
+errors retain SQLSTATE when available and omit diagnostic text that could
+contain input values. Production confirmation also applies to dry runs.
+
 ## Export
 
 `--output` streams a result into a file. Supported formats: **csv, tsv, ndjson

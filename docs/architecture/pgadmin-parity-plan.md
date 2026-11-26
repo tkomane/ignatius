@@ -126,7 +126,11 @@ Every feature in the M6 pgAdmin replacement suite adheres strictly to the Ignati
 - **Interactive TUI Import Wizard:**
   - **Header Detection & Type Guessing:** Reads sample rows from the input file and presents an interactive column-mapping grid.
   - **Target Column Mapping:** Users map input columns to table columns, select null value representations, and set encoding/quoting rules.
-  - **Dry-Run & Transactional Guard:** Runs the import inside a transaction (`BEGIN; ... COMMIT;`). If any row violates constraints or types, Ignatius rolls back completely, reports the exact file line number and server error, and leaves the database uncorrupted.
+  - **Dry-Run & Transactional Guard:** Transaction-wrapped import requires an
+    autocommit session. Dry-run requires that wrapper and reports success
+    after PostgreSQL acknowledges rollback. COPY and commit failures retain
+    SQLSTATE when available and omit server prose that can contain input
+    values. [Transaction ownership contract](../../specs/028-data-import-export-and-backup/spec.md).
   - **Production Guard:** Imports into production profiles require typing the database name or passing `--confirm-production`.
 - **Backup and Restore Orchestration (`pg_dump` / `pg_restore`):**
   - Provides a safe subprocess harness wrapping native PostgreSQL client tools (`pg_dump`, `pg_restore`).

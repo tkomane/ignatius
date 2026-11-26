@@ -2351,7 +2351,7 @@ pub struct ImportArgs {
     #[arg(long, value_name = "TEXT", default_value = "")]
     pub null: String,
     /// Dry-run test: executes inside a transaction and rolls back.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "no_transaction")]
     pub dry_run: bool,
     /// Do not wrap the import in a transaction.
     #[arg(long)]
