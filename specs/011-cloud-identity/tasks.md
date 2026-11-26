@@ -63,7 +63,9 @@ The receipt also recorded `bare-gcp=missing-program` and
 startup contract remain prerequisites for an automatic provider route.
 [Windows job and receipt](https://github.com/tkomane/ignatius/actions/runs/45716059236/job/139562288603)
 
-- [ ] T006 Apply the shared provider output and retention limits (FR-1110).
+- [x] T006 Apply the shared provider output and retention limits (FR-1110).
   Prove complete-stream handling, overflow, draining and diagnostic
   precedence. Verify the provider mechanism on disposable TLS PostgreSQL
   and the Windows x64 MSI launch with the existing version-only probe.
+
+[Focused, TLS and Windows evidence](../../docs/status.md#wave-88---bound-cloud-provider-output-capture---26-november-2026)
