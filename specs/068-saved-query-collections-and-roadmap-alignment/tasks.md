@@ -11,7 +11,7 @@
 - [x] T004 Add offline `ignatius queries list [--collection <NAME>] [--tag <TAG>] [--format text|json]` and `ignatius queries show <NAME>` in `src/cli/mod.rs` respecting `--config-dir` (`paths.queries_dir`) with zero database or network calls.
 - [x] T005 Add unit, reducer, widget, resource-bounds, and subprocess CLI contract tests across `src/queries/tests.rs`, `src/app/palette/tests.rs`, `src/app/update/tests.rs`, `src/ui/widgets/palette/tests.rs`, `src/cli/tests.rs`, `tests/cli_contract.rs`, and `tests/resource_bounds_contract.rs`, then verify with `cargo --locked xtask verify`.
 
-## Phase 2: PR 3B - Documentation, Roadmap, and README Alignment (`feat/m22-docs-readme`)
+## Phase 2: PR 3B - Documentation, Roadmap, and README Alignment (`docs/m22-roadmap-and-readme-sync`)
 
-- [ ] T006 Sync `docs/status.md`, `docs/product/roadmap.md`, and `README.md` with verified M20-M22 deliverables and direct "PostgreSQL workbench for your terminal" framing without closing owner-gated tasks (`001` T051/T052, `007` T032/T033, `008` T033/T035).
-- [ ] T007 Verify documentation contracts and hygiene gates (`cargo --locked xtask verify` and `cargo --locked xtask security`).
+- [x] T006 Sync `docs/status.md`, `docs/product/roadmap.md`, `docs/product/agent-delivery-plan.md`, `docs/support/compatibility.md`, `CHANGELOG.md`, `specs/066-*` / `067-*` / `068-*`, and `README.md` with verified M20-M22 deliverables and direct "PostgreSQL workbench for your terminal" framing without closing owner-gated tasks (`001` T051/T052, `007` T032/T033, `008` T033/T035).
+- [x] T007 Verify documentation contracts and hygiene gates (`cargo --locked xtask verify` and `cargo --locked xtask security`).

@@ -1,8 +1,84 @@
 # Status
 
-**Updated: 2026-11-26.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-27.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 118 - M22: Saved query collections, offline CLI, and documentation alignment - 27 November 2026
+
+- **W16 / 068 PR #197 (`3111f0e`, branch `feat/m22-query-collections` @ `3cd2cb9`) and PR #198 (branch `docs/m22-roadmap-and-readme-sync`).**
+  Added single-level saved query collections (`collection/name` under `queries_dir`)
+  with strict lexical/segment checks (max one `/`, no `\`, `.`, `..`, `:`,
+  control characters, or Windows-reserved device names), `symlink_metadata`
+  non-symlink directory and regular-file validation, 1 MiB read caps,
+  `-- @tag:` / `-- @tags:` / `-- @description:` SQL header parsing, Saved
+  Queries palette search and bounded multi-line SQL preview, and offline
+  `ignatius queries list [--collection <NAME>] [--tag <TAG>] [--format text|json]`
+  and `ignatius queries show <NAME>` in PR #197. PR #198 reconciles Spec-Kit
+  tasks (`066` T007-T010, `067`, `068`), `docs/product/roadmap.md`,
+  `docs/product/agent-delivery-plan.md`, `docs/status.md`,
+  `docs/support/compatibility.md`, `CHANGELOG.md`, and `README.md`, keeping
+  owner/human-gated tasks (`001` T051/T052, `007` T032/T033, `008` T033/T035)
+  open. [Feature 068 tasks](../specs/068-saved-query-collections-and-roadmap-alignment/tasks.md)
+- **Verification scope for PR #197 (`3cd2cb9`).** Passed local macOS arm64
+  `cargo --locked xtask verify` (1,986 `--lib` unit tests, all CLI/doc/resource-bound
+  contracts, and plain + verified TLS Docker PostgreSQL 18.7 integration; Unix
+  socket skipped locally because `IGNATIUS_TEST_PG_SOCKET_URI` is unset) and
+  `cargo --locked xtask security` (`gitleaks` and `cargo-deny` skipped locally).
+  Hosted PR #197 checks passed 21/21 executed checks (PostgreSQL 14-18, PG 18
+  Unix socket, Linux/macOS/Windows, MSRV, dependency advisories, secret scan,
+  and CodeQL; Reviewed PostgreSQL fixtures skipped). `main` CI/CodeQL on
+  `3111f0e` was in progress when PR #198 branched; PR #198 passes local
+  `cargo --locked xtask verify` and `cargo --locked xtask security` on macOS
+  arm64 against live plain and verified TLS Docker PostgreSQL 18.7 (with Unix
+  socket, `gitleaks`, and `cargo-deny` skipped locally).
+
+## Wave 117 - M21: Adaptive multi-column chords, tab pinning, and result snapshot diffing - 26 November 2026
+
+- **W16 / 067 PR #195 (`e28dfbb`, `feat/m21-result-snapshot-diff`) and PR #196 (`7c4cd15`, `feat/m21-chords-and-buffer-tabs`).**
+  Implemented strictly in-memory `PinnedResult` snapshots (`pin-result`,
+  bounded at 10,000 rows, 512 columns, 64 KiB/cell, cleared on target/profile
+  switch or quit), the scrollable `ResultDiff` A/B overlay (`compare-result`)
+  with `SchemaDelta`, `Keyed` vs explicit `Positional` alignment, and
+  `[+]`/`[-]`/`[~]`/`[=]` badges, plus offline `ignatius result-diff` over
+  bounded local JSON/NDJSON files (16 MiB cap, symlink/non-regular refusal,
+  atomic `--output`) in PR #195. PR #196 upgraded `render_chords` to 1, 2, or 3
+  balanced columns so all 58 `Ctrl+K` chords remain visible on `120x30+`
+  terminals in Unicode and ASCII, and added session buffer pinning
+  (`Ctrl+K 9` / `pin-buffer`, refusing accidental closes until unpinned) and
+  single-line session tab renaming (`Ctrl+K 0` / `rename-buffer`).
+  [Feature 067 tasks](../specs/067-multi-column-chords-tabs-and-result-diff/tasks.md)
+- **Verification scope.** Both PRs passed local macOS arm64
+  `cargo --locked xtask verify` against plain and verified TLS Docker
+  PostgreSQL 18.7 (1,970 / 1,976 `--lib` unit tests, all contract suites; Unix
+  socket skipped locally) and `cargo --locked xtask security` (`gitleaks` and
+  `cargo-deny` skipped locally). Hosted PR and `main` CI and CodeQL passed on
+  both `e28dfbb` and `7c4cd15` across PostgreSQL 14-18, PostgreSQL 18 Unix
+  socket, Linux, macOS, Windows, and MSRV.
+
+## Wave 116 - M20: Optimistic cell concurrency guard and target_session_attrs routing - 26 November 2026
+
+- **W16 / 066 PR #193 (`7d68ed5`, `feat/m20-target-session-attrs`) and PR #194 (`759f4f9`, `feat/m20-optimistic-cell-update`).**
+  Implemented libpq-compatible `target_session_attrs` (`any`, `read-write`,
+  `read-only`, `primary`, `standby`) across CLI (`--target-session-attrs`),
+  URI/keyword strings, `pg_service.conf`, `PGTARGETSESSIONATTRS`, TOML profiles
+  (`target-session-attrs`), `doctor`, and `Session::bootstrap()` using
+  `transaction_read_only` and `pg_is_in_recovery()` with `DiagnosticKind::Connection`
+  refusal and zero silent downgrade or retry (#193). Guarded ordinary
+  cell-to-`UPDATE` edits (`Ctrl+K u`) in `src/query/update.rs` with `IS NULL`
+  or bytewise `pg_catalog.format('%s', ...)` `C`-collation checks using
+  secret-bound `:__ignatius_old_value`, review disclosure in `src/ui/review.rs`,
+  and truthful `Some(0)` conflict notices in `src/app/update.rs` without retry
+  (#194).
+  [Feature 066 tasks](../specs/066-optimistic-cell-concurrency-and-session-routing/tasks.md)
+- **Verification scope.** Both PRs passed local macOS arm64
+  `cargo --locked xtask verify` against plain and verified TLS Docker
+  PostgreSQL 18.7 (1,950 / 1,956 `--lib` unit tests, 91+ `postgres_integration`
+  tests, all contract suites; Unix socket skipped locally). Hosted PR checks
+  passed 21/21 executed checks on both #193 and #194 (PostgreSQL 14-18, PG 18
+  Unix socket, Linux/macOS/Windows, MSRV, and CodeQL), and `main` CI and
+  CodeQL passed at `759f4f9` (the superseded `7d68ed5` main run was cancelled
+  when #194 merged immediately after it).
 
 ## Wave 115 - Confirm bulk COPY import completion - 26 November 2026
 

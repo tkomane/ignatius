@@ -1,6 +1,6 @@
 # Roadmap
 
-**Reconciled 2026-11-25; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-11-27; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
 The implemented source through Feature 025 (`US1-US10`, `T001-T059`) and the
 Waves 13-15 4-tier TUI elevation and showcase suite (`PR53`, `PR54`, `PR57`) is
@@ -138,6 +138,9 @@ below; broadening the feature list does not move a milestone forward.
 | M17 Living Surfaces | Bounded, truthful motion and depth: state first, input wins, reduced motion is stillness, safety rails never move | W16 (Feature 063) | Hard-edge theme curtain, result settle, heartbeat comet meter, static recession behind overlays, header safety capsules at every width, animated real-buffer showcase |
 | M18 Tactile Craft, Truthful Motion & DevSecOps | Reproducible local security gate, cancellable safe benchmarks, SQL-aware editor/motion craft, exclusive plan bottleneck bars, and studio showcase | W16 (Feature 064) | `cargo xtask security`, EOF-safe benchmark cancel + `--allow-write`, `FormatRipple`/`NoticeSettle`/`BenchSettle`, 4.5:1 built-in contrast pins, exclusive plan self-time bars, `boot-reveal` APNG & editorial README |
 | M19 Terminal Workbench Identity & Kinetic UX | Reframed terminal PostgreSQL workbench identity, gleaming boot reveal, `FocusPulse`/`TabGlide`/`PlanSweep`, live Spotlight theme previews, floating modal shadows, and 6-APNG showcase | W16 (Feature 065) | `IDENTITY_LINE` reframe + gleaming crest (`#144`), kinetic transitions + luminous curtain seam + Objects/Results/Editor polish (`#145`), live theme previews + modal shadows + Plan KPI strip (`#146`), refreshed 14 stills + 6 APNGs + hero SVGs + `README.md` |
+| M20 Optimistic Cell Concurrency & Session Role Routing | Safe optimistic cell-to-UPDATE conflict detection and libpq-compatible `target_session_attrs` session routing | W16 (Feature 066) | Observed-cell `WHERE` predicate and 0-row conflict notice (`#194`), `target_session_attrs` across CLI/URI/env/profile/session bootstrap (`#193`) |
+| M21 Adaptive Chords, Tab Pin/Rename & Result Snapshot Diff | 3-column `Ctrl+K` chord guide, session tab pinning/renaming, and bounded in-memory/CLI A/B result-set diffing | W16 (Feature 067) | Adaptive 1/2/3-column `render_chords` + pinned/renamable tabs (`#196`), ephemeral `PinnedResult` + `ResultDiff` overlay + offline `ignatius result-diff` (`#195`) |
+| M22 Saved Query Collections & Roadmap Alignment | Single-level saved query collections, SQL header tags/descriptions, rich palette preview, offline `ignatius queries`, and reconciled docs | W16 (Feature 068) | Safe `collection/name` paths, `-- @tag:`/`-- @description:` metadata, palette search/preview, offline `ignatius queries list\|show` (`#197`), reconciled status/roadmap/compatibility/README (`#198`) |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -278,6 +281,45 @@ hand use and the exact release-candidate gates remain open.
 [Feature 065 tasks](../../specs/065-terminal-workbench-identity-and-kinetic-ux/tasks.md) and
 [current evidence](../status.md#wave-71---roadmap-evidence-and-resource-boundaries---25-november-2026).
 
+M20 (`066-optimistic-cell-concurrency-and-session-routing`) is delivered in
+source on `main` as of 2026-11-26 (PR #193 `7d68ed5` and PR #194 `759f4f9`):
+
+- [066 Optimistic Cell Concurrency and Session Role Routing](../../specs/066-optimistic-cell-concurrency-and-session-routing/spec.md)
+  guards ordinary cell-to-`UPDATE` edits (`Ctrl+K u`) with `IS NULL` or
+  bytewise `pg_catalog.format('%s', ...)` `C`-collation predicates using
+  secret-bound `:__ignatius_old_value` and truthful `Some(0)` conflict notices
+  without retrying (#194), and adds libpq-compatible `target_session_attrs`
+  (`any`, `read-write`, `read-only`, `primary`, `standby`) across CLI, URI/kv,
+  `pg_service.conf`, `PGTARGETSESSIONATTRS`, TOML profiles, `doctor`, and
+  `Session::bootstrap()` using `transaction_read_only` and
+  `pg_is_in_recovery()` without silent retry or downgrade (#193). Recorded in
+  [Wave 116](../status.md#wave-116---m20-optimistic-cell-concurrency-guard-and-target_session_attrs-routing---26-november-2026).
+
+M21 (`067-multi-column-chords-tabs-and-result-diff`) is delivered in source on
+`main` as of 2026-11-26 (PR #195 `e28dfbb` and PR #196 `7c4cd15`):
+
+- [067 Adaptive Multi-Column Chords, Tab Pinning/Renaming, and Result Snapshot Diffing](../../specs/067-multi-column-chords-tabs-and-result-diff/spec.md)
+  adds adaptive 1/2/3-column layout to `render_chords` so all 58 `Ctrl+K`
+  chords stay legible at `120x30+` in Unicode and ASCII alongside session buffer
+  pinning (`Ctrl+K 9`) and renaming (`Ctrl+K 0`) with close refusal notices and
+  exact tab hit-testing (#196), plus strictly in-memory `PinnedResult` snapshots
+  (`pin-result`), the interactive `ResultDiff` A/B overlay (`compare-result`)
+  with `SchemaDelta`, `Keyed` vs explicit `Positional` alignment, and offline
+  `ignatius result-diff` (#195). Recorded in
+  [Wave 117](../status.md#wave-117---m21-adaptive-multi-column-chords-tab-pinning-and-result-snapshot-diffing---26-november-2026).
+
+M22 (`068-saved-query-collections-and-roadmap-alignment`) is delivered in source
+on `main` as of 2026-11-27 (PR #197 `3111f0e` and PR #198):
+
+- [068 Saved Query Collections, Tag Metadata, Offline CLI, and Roadmap Alignment](../../specs/068-saved-query-collections-and-roadmap-alignment/spec.md)
+  adds single-level `collection/name` folders under `queries_dir` with strict
+  segment, symlink, regular-file, and 1 MiB bounds, `-- @tag:` / `-- @tags:` /
+  `-- @description:` SQL header parsing, Saved Queries palette search and
+  bounded SQL preview, and offline `ignatius queries list|show` (#197),
+  alongside Spec-Kit, roadmap, status, compatibility, CHANGELOG, and README
+  reconciliation (#198). Recorded in
+  [Wave 118](../status.md#wave-118---m22-saved-query-collections-offline-cli-and-documentation-alignment---27-november-2026).
+
 ```mermaid
 flowchart LR
     %% Planning dependencies, not a runtime deployment.
@@ -304,6 +346,9 @@ flowchart LR
     M16 --> M17["M17 Living Surfaces (063)"]
     M17 --> M18["M18 Tactile Craft, Motion & DevSecOps (064)"]
     M18 --> M19["M19 Workbench Identity & Kinetic UX (065)"]
+    M19 --> M20["M20 Optimistic Cell Guard & Session Routing (066)"]
+    M20 --> M21["M21 3-Col Chords, Tab Pin/Rename & Result Diff (067)"]
+    M21 --> M22["M22 Saved Query Collections & Roadmap Sync (068)"]
 ```
 
 ## Start here

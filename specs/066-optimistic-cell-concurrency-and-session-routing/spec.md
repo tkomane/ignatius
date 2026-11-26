@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m20-optimistic-cell-update` (PR 1A) and `feat/m20-target-session-attrs` (PR 1B)
 **Created**: 2026-11-26
-**Status**: In Progress (PR 1A implemented; PR 1B pending)
+**Status**: Complete (PR 1B #193 `7d68ed5` and PR 1A #194 `759f4f9` merged on `main`)
 **Milestone**: M20 - Optimistic Cell Concurrency & Session Role Routing
 
 ## Problem Statement

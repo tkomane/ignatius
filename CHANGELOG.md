@@ -8,6 +8,32 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Saved query collections (`collection/name` under `queries_dir`),
+  SQL header metadata (`-- @tag:`, `-- @tags:`, `-- @description:`), Saved
+  Queries palette search and bounded multi-line SQL previews, and offline
+  `ignatius queries list [--collection <NAME>] [--tag <TAG>] [--format text|json]`
+  / `ignatius queries show <NAME>` with strict segment, symlink, and 1 MiB
+  bounds (`Feature 068`, `#197`, `#198`).
+- New: Strictly in-memory pinned result baseline snapshots (`pin-result`) and
+  scrollable `ResultDiff` A/B comparison overlay (`compare-result`) with
+  `SchemaDelta`, `Keyed` vs explicit `Positional` alignment, `[+]`/`[-]`/`[~]`/`[=]`
+  badges, automatic clearing on target/profile switch or quit, and offline
+  `ignatius result-diff` over bounded local JSON/NDJSON exports (`Feature 067`, `#195`).
+- New: Adaptive 1/2/3-column `Ctrl+K` chord menu fitting all 58 workbench chords
+  on `120x30+` terminals, plus session buffer tab pinning (`Ctrl+K 9` /
+  `pin-buffer`, refusing accidental closes until unpinned) and single-line
+  in-session tab renaming (`Ctrl+K 0` / `rename-buffer`) (`Feature 067`, `#196`).
+- New: Libpq-compatible `target_session_attrs` (`any`, `read-write`,
+  `read-only`, `primary`, `standby`) across `--target-session-attrs`, URI/kv
+  connection strings, `pg_service.conf`, `PGTARGETSESSIONATTRS`, and profile
+  `target-session-attrs`, verified on PostgreSQL via `transaction_read_only` and
+  `pg_is_in_recovery()` with zero silent downgrade or retry (`Feature 066`, `#193`).
+- Security: Ordinary result-cell updates (`Ctrl+K u`) now enforce optimistic
+  concurrency checks in the `WHERE` predicate (`IS NULL`, or bytewise
+  `pg_catalog.format('%s', ...)` `C`-collation equality against secret-bound
+  `:__ignatius_old_value`), reporting `Some(0)` affected rows as a concurrent
+  modification or deletion conflict without retrying (`Feature 066`, `#194`).
+
 - Fixed: Bulk COPY export waits for PostgreSQL completion before emitting
   stdout or replacing an output file. Failures retain SQLSTATE while omitting
   server-controlled diagnostic text.
