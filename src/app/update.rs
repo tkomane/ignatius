@@ -863,6 +863,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                         wizard.error = None;
                     }
                     Err(diagnostic) => {
+                        wizard.result = None;
                         wizard.error = Some(diagnostic.headline);
                     }
                 }

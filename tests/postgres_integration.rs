@@ -3279,11 +3279,21 @@ fn live_postgres_streaming_copy_in_and_out_with_transactional_rollback() {
         JobId(9503),
     ));
     assert_eq!(check_res.status, ExecutionStatus::Succeeded);
+    assert_eq!(
+        check_res.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("0".into())
+    );
 
     // 4. Invalid data triggers automatic rollback and error
     let bad_csv = b"id,title,amount\n5,Bad Item,NOT_A_NUMBER\n";
     let bad_res = fx.block_on(fx.session.execute_import(&import_options, bad_csv));
     assert!(bad_res.is_err(), "bad csv import must fail");
+    let bad_error = bad_res.expect_err("invalid input is rejected");
+    assert!(bad_error.headline.contains("COPY import failed"));
+    assert!(
+        !format!("{bad_error:?}").contains("NOT_A_NUMBER"),
+        "COPY diagnostics must not disclose imported input values"
+    );
 
     // Clean up
     let _ = fx.block_on(fx.session.execute(
@@ -3291,6 +3301,144 @@ fn live_postgres_streaming_copy_in_and_out_with_transactional_rollback() {
         100,
         JobId(9504),
     ));
+}
+
+#[test]
+fn import_transaction_ownership_preserves_caller_state_and_unwrapped_route() {
+    use ignatius::query::result::TransactionState;
+    use ignatius::transfer::{ImportOptions, TransferFormat};
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE import_ownership_contract (id integer PRIMARY KEY)",
+        10,
+        JobId(9600),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let options = ImportOptions {
+        schema: "pg_temp".into(),
+        table: "import_ownership_contract".into(),
+        file_path: "synthetic.csv".into(),
+        format: TransferFormat::Csv,
+        delimiter: b',',
+        has_header: true,
+        null_string: String::new(),
+        quote: b'"',
+        escape: b'"',
+        columns: Vec::new(),
+        dry_run: true,
+        transactional: true,
+    };
+    let count = |job| {
+        let execution = fx.block_on(fx.session.execute(
+            "SELECT count(*) FROM pg_temp.import_ownership_contract",
+            10,
+            JobId(job),
+        ));
+        assert_eq!(execution.status, ExecutionStatus::Succeeded);
+        execution.statements[0]
+            .result_set
+            .as_ref()
+            .expect("count row")
+            .rows[0][0]
+            .clone()
+    };
+
+    let dry = fx.block_on(fx.session.execute_import(&options, b"id\n1\n"));
+    assert!(dry.expect("valid dry run").status.contains("rolled back"));
+    assert_eq!(count(9601), Cell::Text("0".into()));
+
+    let mut contradictory = options.clone();
+    contradictory.transactional = false;
+    let rejected = fx.block_on(fx.session.execute_import(&contradictory, b"id\n2\n"));
+    assert!(rejected.is_err(), "dry-run without transaction is refused");
+    assert_eq!(count(9602), Cell::Text("0".into()));
+
+    let begun = fx.block_on(fx.session.execute(
+        "BEGIN; INSERT INTO pg_temp.import_ownership_contract VALUES (9)",
+        10,
+        JobId(9603),
+    ));
+    assert_eq!(begun.transaction, TransactionState::Open);
+    let mut write = options.clone();
+    write.dry_run = false;
+    let nested = fx.block_on(fx.session.execute_import(&write, b"id\n3\n"));
+    assert!(
+        nested.is_err(),
+        "transaction-wrapped import refuses caller transaction"
+    );
+    let sentinel = count(9604);
+    assert_eq!(
+        sentinel,
+        Cell::Text("1".into()),
+        "caller sentinel remains visible"
+    );
+    let rolled_back = fx.block_on(fx.session.execute("ROLLBACK", 10, JobId(9605)));
+    assert_eq!(rolled_back.transaction, TransactionState::Autocommit);
+    assert_eq!(count(9606), Cell::Text("0".into()));
+
+    let mut unwrapped = write;
+    unwrapped.transactional = false;
+    let imported = fx.block_on(fx.session.execute_import(&unwrapped, b"id\n4\n"));
+    assert_eq!(
+        imported
+            .expect("intentional unwrapped import")
+            .rows_imported,
+        1
+    );
+    assert_eq!(count(9607), Cell::Text("1".into()));
+}
+
+#[test]
+fn import_commit_failure_preserves_sqlstate_without_disclosing_input() {
+    use ignatius::query::result::TransactionState;
+    use ignatius::transfer::{ImportOptions, TransferFormat};
+
+    let uri = target_or_skip!();
+    let fx = fixture(&uri);
+    let setup = fx.block_on(fx.session.execute(
+        "CREATE TEMP TABLE import_deferred (id text UNIQUE DEFERRABLE INITIALLY DEFERRED)",
+        10,
+        JobId(9610),
+    ));
+    assert_eq!(setup.status, ExecutionStatus::Succeeded);
+    let options = ImportOptions {
+        schema: "pg_temp".into(),
+        table: "import_deferred".into(),
+        file_path: "synthetic.csv".into(),
+        format: TransferFormat::Csv,
+        delimiter: b',',
+        has_header: false,
+        null_string: String::new(),
+        quote: b'"',
+        escape: b'"',
+        columns: Vec::new(),
+        dry_run: false,
+        transactional: true,
+    };
+    let error = fx
+        .block_on(fx.session.execute_import(
+            &options,
+            b"synthetic-duplicate-fixture\nsynthetic-duplicate-fixture\n",
+        ))
+        .expect_err("deferred unique violation at commit");
+    let diagnostic = format!("{error:?}");
+    assert!(error.headline.contains("import commit failed"));
+    assert!(diagnostic.contains("23505"));
+    assert!(!diagnostic.contains("synthetic-duplicate-fixture"));
+
+    let count = fx.block_on(fx.session.execute(
+        "SELECT count(*) FROM pg_temp.import_deferred",
+        10,
+        JobId(9611),
+    ));
+    assert_eq!(count.status, ExecutionStatus::Succeeded);
+    assert_eq!(count.transaction, TransactionState::Autocommit);
+    assert_eq!(
+        count.statements[0].result_set.as_ref().unwrap().rows[0][0],
+        Cell::Text("0".into())
+    );
 }
 
 #[test]

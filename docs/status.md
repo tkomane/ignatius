@@ -4,6 +4,27 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 92 - Keep bulk import transactions under caller control - 26 November 2026
+
+- **W03 / 028.** CLI rejects dry-run with `--no-transaction` before reading the
+  file or connecting. The wizard uses the query backend for COPY. Wrapped
+  imports require autocommit, and dry-run reports success after PostgreSQL
+  acknowledges rollback. COPY and commit diagnostics omit server text
+  that can contain row values and retain SQLSTATE when available.
+  [Feature 028 tasks](../specs/028-data-import-export-and-backup/tasks.md)
+- **Focused macOS arm64 verification with PostgreSQL 18.7.** The baseline
+  failed the argument-conflict and session-ownership regressions. The fix
+  passed the CLI regression and three live import tests covering COPY
+  failure, dry-run row counts, a caller-owned transaction, explicit
+  unwrapped mode and a deferred unique constraint at commit.
+- **Executable witnesses.** The baseline CLI claimed rollback while an
+  observer saw one imported row. The fixed CLI refused the conflicting
+  flags, left zero rows after a valid dry run and committed one row when
+  explicitly run unwrapped. In a real macOS PTY, the fixed wizard refused
+  a wrapped import and preserved the query backend, transaction identity
+  and uncommitted row. After the user rolled back, the same wizard imported
+  one CSV row. A separate PostgreSQL session verified the durable row counts.
+
 ## Wave 91 - Verify cancellation over a PostgreSQL Unix socket - 26 November 2026
 
 - **W05 / 001 T059.** The existing Linux socket job now verifies ordinary

@@ -238,6 +238,47 @@ impl CancelHandle {
     }
 }
 
+/// COPY and deferred checks during commit can expose input values in server
+/// diagnostic text.
+fn from_import_error(err: &tokio_postgres::Error, phase: &str) -> Diagnostic {
+    if let Some(db) = err.as_db_error() {
+        let (kind, headline) = if *db.code() == tokio_postgres::error::SqlState::QUERY_CANCELED {
+            (
+                DiagnosticKind::Cancelled,
+                format!("PostgreSQL cancelled {phase}"),
+            )
+        } else {
+            (DiagnosticKind::Query, format!("{phase} failed"))
+        };
+        let mut diagnostic = Diagnostic::new(kind, headline, "importing data")
+            .in_statement(1)
+            .technical(
+                "Privacy",
+                "server diagnostic text omitted to protect input values",
+            );
+        if let Some(state) = safe_sqlstate(db.code().code()) {
+            diagnostic = diagnostic.technical("SQLSTATE", state);
+        }
+        return diagnostic;
+    }
+    if err.is_closed() {
+        return Diagnostic::new(
+            DiagnosticKind::Connection,
+            format!("the connection closed during {phase}"),
+            "importing data",
+        )
+        .in_statement(1)
+        .likely_cause("whether the import committed is not known from this connection")
+        .next_action("reconnect and check the data; no import is retried automatically");
+    }
+    Diagnostic::new(
+        DiagnosticKind::Query,
+        format!("{phase} failed (driver diagnostic text omitted to protect input values)"),
+        "importing data",
+    )
+    .in_statement(1)
+}
+
 impl Session {
     /// The driver client, for catalog readers in sibling modules.
     #[must_use]
@@ -437,8 +478,12 @@ impl Session {
                 .await;
         }
         let _gate = self.user_sql_gate.lock().await;
-        self.require_autocommit("the analysed plan comparison", "comparing analysed plans")
-            .await?;
+        self.require_autocommit(
+            "the analysed plan comparison",
+            "comparing analysed plans",
+            "benchmark or plan statement",
+        )
+        .await?;
         crate::postgres::plandiff::explain_extended(&self.client, sql, true, label).await
     }
 
@@ -447,7 +492,12 @@ impl Session {
     /// Called with the SQL gate held, before work that brackets itself in
     /// `BEGIN` and `ROLLBACK`: inside a user's transaction that `ROLLBACK`
     /// would end the transaction and discard its work.
-    async fn require_autocommit(&self, what: &str, task: &str) -> Result<(), Diagnostic> {
+    async fn require_autocommit(
+        &self,
+        what: &str,
+        task: &str,
+        statement: &str,
+    ) -> Result<(), Diagnostic> {
         use crate::query::result::TransactionState;
         match self.transaction_state().await {
             TransactionState::Autocommit => Ok(()),
@@ -456,13 +506,13 @@ impl Session {
                 format!("{what} did not start, because the connection is closed"),
                 task,
             )
-            .next_action("reconnect, then try again; no benchmark or plan statement was sent")),
+            .next_action(format!("reconnect, then try again; no {statement} was sent"))),
             TransactionState::Unknown => Err(Diagnostic::new(
                 DiagnosticKind::Query,
                 format!("{what} did not start, because the session's transaction state could not be read"),
                 task,
             )
-            .next_action("try again; no benchmark or plan statement was sent")),
+            .next_action(format!("try again; no {statement} was sent"))),
             state => Err(Diagnostic::new(
                 DiagnosticKind::Query,
                 format!("{what} did not start, because the session is not outside a transaction"),
@@ -473,7 +523,7 @@ impl Session {
                 state.label()
             ))
             .next_action(
-                "end the transaction in the workbench, then try again; no benchmark or plan statement was sent",
+                format!("end the transaction in the workbench, then try again; no {statement} was sent"),
             )),
         }
     }
@@ -537,8 +587,12 @@ impl Session {
         if cancel.is_some_and(crate::postgres::bench::BenchmarkCancelHandle::is_cancelled) {
             return Err(crate::postgres::bench::cancelled_diagnostic());
         }
-        self.require_autocommit("the benchmark", "starting a query benchmark")
-            .await?;
+        self.require_autocommit(
+            "the benchmark",
+            "starting a query benchmark",
+            "benchmark or plan statement",
+        )
+        .await?;
         if cancel.is_some_and(crate::postgres::bench::BenchmarkCancelHandle::is_cancelled) {
             return Err(crate::postgres::bench::cancelled_diagnostic());
         }
@@ -1127,76 +1181,67 @@ impl Session {
 
     /// Executes a bulk data import using `COPY ... FROM STDIN`.
     ///
-    /// Streams input chunks into the database. If `transactional` is true, wraps the COPY
-    /// in `BEGIN ... COMMIT` with `ROLLBACK` on error. If `dry_run` is true, rolls back
-    /// at the end.
+    /// Streams input chunks into the database. A transactional import owns its
+    /// transaction and must start in autocommit. Dry-run requires acknowledged
+    /// rollback.
     pub async fn execute_import(
         &self,
         options: &crate::transfer::ImportOptions,
         data: &[u8],
     ) -> Result<crate::transfer::ImportResult, Diagnostic> {
-        use futures_util::SinkExt;
+        if options.dry_run && !options.transactional {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                "dry-run import requires a transaction",
+                "importing data",
+            )
+            .next_action("enable transactional import; no COPY was started"));
+        }
 
         let _guard = self.user_sql_gate.lock().await;
         let start = std::time::Instant::now();
 
         if options.transactional {
+            self.require_autocommit("the transaction-wrapped import", "importing data", "COPY")
+                .await?;
             self.client
                 .batch_execute("BEGIN;")
                 .await
                 .map_err(|e| from_query_error(&e, 1))?;
         }
 
-        let copy_sql = crate::transfer::build_copy_from_sql(options);
-        let sink_res = self.client.copy_in(&copy_sql).await;
-        let sink = match sink_res {
-            Ok(s) => s,
-            Err(e) => {
-                if options.transactional {
-                    let _ = self.client.batch_execute("ROLLBACK;").await;
+        let rows = match self.copy_import(options, data).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                let mut diagnostic = from_import_error(&error, "COPY import");
+                if options.transactional && self.client.batch_execute("ROLLBACK;").await.is_err() {
+                    diagnostic
+                        .headline
+                        .push_str(". Rollback could not be confirmed");
+                    diagnostic = diagnostic.next_action(
+                        "check the connection and transaction state before continuing",
+                    );
                 }
-                return Err(from_query_error(&e, 1));
-            }
-        };
-
-        let mut sink = std::pin::pin!(sink);
-
-        // Stream data in 64KB chunks to keep bounded memory overhead
-        let chunk_size = 64 * 1024;
-        let mut offset = 0;
-
-        while offset < data.len() {
-            let end = (offset + chunk_size).min(data.len());
-            let chunk = bytes::Bytes::copy_from_slice(&data[offset..end]);
-            if let Err(e) = sink.as_mut().send(chunk).await {
-                if options.transactional {
-                    let _ = self.client.batch_execute("ROLLBACK;").await;
-                }
-                return Err(from_query_error(&e, 1));
-            }
-            offset = end;
-        }
-
-        let rows = match sink.finish().await {
-            Ok(r) => r,
-            Err(e) => {
-                if options.transactional {
-                    let _ = self.client.batch_execute("ROLLBACK;").await;
-                }
-                return Err(from_query_error(&e, 1));
+                return Err(diagnostic);
             }
         };
 
         let status = if options.dry_run {
-            if options.transactional {
-                let _ = self.client.batch_execute("ROLLBACK;").await;
-            }
+            self.client.batch_execute("ROLLBACK;").await.map_err(|_| {
+                Diagnostic::new(
+                    DiagnosticKind::Query,
+                    "dry-run import completed, but rollback could not be confirmed",
+                    "rolling back dry-run import",
+                )
+                .likely_cause("the server did not acknowledge ROLLBACK")
+                .next_action("check the transaction state before continuing")
+            })?;
             format!("Dry-run successful: verified {rows} rows (rolled back)")
         } else if options.transactional {
             self.client
                 .batch_execute("COMMIT;")
                 .await
-                .map_err(|e| from_query_error(&e, 1))?;
+                .map_err(|error| from_import_error(&error, "import commit"))?;
             format!("Committed {rows} rows")
         } else {
             format!("Imported {rows} rows")
@@ -1208,6 +1253,25 @@ impl Session {
             elapsed_ms: start.elapsed().as_millis() as u64,
             status,
         })
+    }
+
+    /// Owns the COPY sink so it drops before a caller attempts transaction cleanup.
+    async fn copy_import(
+        &self,
+        options: &crate::transfer::ImportOptions,
+        data: &[u8],
+    ) -> Result<u64, tokio_postgres::Error> {
+        use futures_util::SinkExt;
+
+        let copy_sql = crate::transfer::build_copy_from_sql(options);
+        let sink = self.client.copy_in(&copy_sql).await?;
+        let mut sink = std::pin::pin!(sink);
+        for chunk in data.chunks(64 * 1024) {
+            sink.as_mut()
+                .send(bytes::Bytes::copy_from_slice(chunk))
+                .await?;
+        }
+        sink.finish().await
     }
 
     /// Executes a bulk data export using `COPY ... TO STDOUT`.

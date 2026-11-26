@@ -103,6 +103,30 @@ fn an_unknown_flag_is_a_usage_error() {
 }
 
 #[test]
+fn import_rejects_dry_run_without_transaction_before_reading_input() {
+    let output = binary()
+        .args([
+            "import",
+            "postgres://127.0.0.1/unused",
+            "--table",
+            "items",
+            "--file",
+            "/definitely/not/a/readable/import.csv",
+            "--dry-run",
+            "--no-transaction",
+        ])
+        .output()
+        .expect("run conflicting import");
+    assert_eq!(code(&output), 2, "Clap usage conflict: {}", stderr(&output));
+    assert!(!stderr(&output).contains("could not read import file"));
+    assert!(
+        stderr(&output).contains("cannot be used with"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn an_invalid_sslmode_is_a_usage_error_and_names_the_alternatives() {
     let output = binary()
         .args(["query", "-c", "SELECT 1", "--sslmode", "sort-of"])
