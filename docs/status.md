@@ -4,6 +4,23 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 111 - Restore both editor panes after a crash - 26 November 2026
+
+- **W10 / 043 T014.** Version 1 journals optionally record the secondary
+  tab's original position. Recovery remaps both panes through filtered
+  tabs and uses the next retained tab when the secondary position is
+  unavailable. The prior journal survives until an atomic checkpoint
+  replaces it. [Feature 043 tasks](../specs/043-session-state-and-crash-recovery/tasks.md)
+- **Focused verification.** Both saved-pane regressions and the early
+  journal removal failed on the baseline. The fix passed 28 recovery and
+  reducer tests and nine recovery executable contracts.
+- **Owned offline macOS arm64 PTYs.** The baseline reopened C/A after
+  checkpointing C/B. The fix reopened C/B through two successive crashes
+  in each orientation, retained the dirty draft and left all three saved
+  files intact. An exact 24 MiB legacy journal survived a checkpoint size
+  refusal byte for byte. Closing one synthetic tab let the next checkpoint
+  save both pane positions. The journeys ended with a clean quit.
+
 ## Wave 110 - Keep the object-tree backend identifiable - 26 November 2026
 
 - **W05 / 007-object-definitions T002.** Object-tree connections retain

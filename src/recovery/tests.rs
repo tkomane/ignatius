@@ -226,6 +226,109 @@ fn restore_selection_uses_surviving_journal_positions() {
     }
 }
 
+#[test]
+fn v1_round_trip_restores_active_and_secondary_pane_identities() {
+    let mut source = BufferManager::new();
+    source.active_buffer_mut().editor.set_text("SELECT 'A';");
+    source.new_buffer(Some("B.sql".into()), Some("SELECT 'B';".into()));
+    source.new_buffer(Some("C.sql".into()), Some("SELECT 'C';".into()));
+    source.active_idx = 2;
+    source.secondary_idx = Some(1);
+    source.split_mode = EditorSplitMode::Vertical;
+
+    let journal = RecoveryJournal::from_buffers(&source, "pane-identities", false);
+    let json = serde_json::to_string(&journal).expect("serialize v1 journal");
+    let journal: RecoveryJournal = serde_json::from_str(&json).expect("deserialize v1 journal");
+    let mut restored = BufferManager::new();
+
+    assert_eq!(journal.restore_into(&mut restored), 3);
+    assert_eq!(restored.active_buffer().title, "C.sql");
+    assert_eq!(
+        restored.secondary_buffer().expect("secondary pane").title,
+        "B.sql"
+    );
+    assert_eq!(restored.split_mode, EditorSplitMode::Vertical);
+}
+
+#[test]
+fn secondary_identity_is_remapped_after_an_empty_tab_is_filtered() {
+    let mut source = BufferManager::new();
+    source.active_buffer_mut().editor.set_text("SELECT 'A';");
+    source.new_buffer(None, None);
+    source.new_buffer(Some("B.sql".into()), Some("SELECT 'B';".into()));
+    source.new_buffer(Some("C.sql".into()), Some("SELECT 'C';".into()));
+    source.active_idx = 3;
+    source.secondary_idx = Some(2);
+    source.split_mode = EditorSplitMode::Horizontal;
+
+    let journal = RecoveryJournal::from_buffers(&source, "filtered-secondary", false);
+    let json = serde_json::to_string(&journal).expect("serialize v1 journal");
+    let journal: RecoveryJournal = serde_json::from_str(&json).expect("deserialize v1 journal");
+    let mut restored = BufferManager::new();
+    restored.new_buffer(Some("stale.sql".into()), Some("SELECT 'stale';".into()));
+    restored.secondary_idx = Some(0);
+
+    assert_eq!(journal.restore_into(&mut restored), 3);
+    assert_eq!(restored.active_buffer().title, "C.sql");
+    assert_eq!(
+        restored.secondary_buffer().expect("secondary pane").title,
+        "B.sql"
+    );
+    assert_eq!(restored.split_mode, EditorSplitMode::Horizontal);
+}
+
+#[test]
+fn a_legacy_v1_journal_without_secondary_identity_uses_next_distinct_tab() {
+    let mut source = BufferManager::new();
+    source.active_buffer_mut().editor.set_text("SELECT 'A';");
+    source.new_buffer(Some("B.sql".into()), Some("SELECT 'B';".into()));
+    source.new_buffer(Some("C.sql".into()), Some("SELECT 'C';".into()));
+    source.active_idx = 2;
+    source.secondary_idx = Some(1);
+    source.split_mode = EditorSplitMode::Vertical;
+
+    let journal = RecoveryJournal::from_buffers(&source, "legacy-pane", false);
+    let mut json = serde_json::to_value(journal).expect("serialize journal");
+    json.as_object_mut()
+        .expect("journal object")
+        .remove("secondary_buffer_idx");
+    let journal: RecoveryJournal = serde_json::from_value(json).expect("deserialize legacy v1");
+    let mut restored = BufferManager::new();
+    restored.new_buffer(Some("stale.sql".into()), Some("SELECT 'stale';".into()));
+    restored.new_buffer(Some("stale-2.sql".into()), Some("SELECT 'stale-2';".into()));
+    restored.active_idx = 2;
+    restored.secondary_idx = Some(2);
+
+    assert_eq!(journal.restore_into(&mut restored), 3);
+    assert_eq!(restored.active_buffer().title, "C.sql");
+    assert_eq!(
+        restored
+            .secondary_buffer()
+            .expect("secondary pane")
+            .editor
+            .text(),
+        "SELECT 'A';"
+    );
+    assert_eq!(restored.split_mode, EditorSplitMode::Vertical);
+}
+
+#[test]
+fn restoring_an_unsplit_journal_clears_stale_secondary_state() {
+    let mut source = BufferManager::new();
+    source.active_buffer_mut().editor.set_text("SELECT 'A';");
+    source.new_buffer(Some("B.sql".into()), Some("SELECT 'B';".into()));
+
+    let journal = RecoveryJournal::from_buffers(&source, "unsplit-pane", false);
+    let mut restored = BufferManager::new();
+    restored.new_buffer(Some("stale.sql".into()), Some("SELECT 'stale';".into()));
+    restored.split_mode = EditorSplitMode::Vertical;
+    restored.secondary_idx = Some(0);
+
+    assert_eq!(journal.restore_into(&mut restored), 2);
+    assert_eq!(restored.split_mode, EditorSplitMode::None);
+    assert_eq!(restored.secondary_idx, None);
+}
+
 #[cfg(unix)]
 #[test]
 fn the_journal_and_its_directory_are_owner_only_on_unix() {

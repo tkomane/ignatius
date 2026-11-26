@@ -8,6 +8,8 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- Fixed: Crash recovery keeps both editor panes and preserves the previous
+  journal if the restored workspace cannot be checkpointed.
 - Fixed: The read-only object-tree connection stays identifiable in
   `pg_stat_activity` when the query connection uses a long application name.
 - Fixed: The workbench can show the shared object-tree connection notice

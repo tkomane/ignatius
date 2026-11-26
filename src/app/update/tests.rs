@@ -11437,10 +11437,19 @@ fn install_recovery_banner(
 }
 
 #[test]
-fn restore_session_restores_exact_buffers_syncs_editor_and_removes_the_journal() {
+fn restore_session_restores_exact_buffers_and_retains_journal_until_checkpoint() {
+    use crate::recovery::{RECOVERY_FILE_NAME, RecoveryJournal, RecoverySession};
+
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let recovery_dir = temp_dir.path().join("recovery");
-    let journal = seed_recovery_journal(&recovery_dir);
+    seed_recovery_journal(&recovery_dir);
+    let recovery_file = recovery_dir.join(RECOVERY_FILE_NAME);
+    let original = std::fs::read(&recovery_file).expect("original journal bytes");
+    let mut session = RecoverySession::new(recovery_dir.clone(), true);
+    let journal = session
+        .take_startup()
+        .expect("check pending journal")
+        .expect("pending journal");
 
     let mut model = Model::new(100);
     install_recovery_banner(&mut model, &recovery_dir, journal);
@@ -11467,12 +11476,23 @@ fn restore_session_restores_exact_buffers_syncs_editor_and_removes_the_journal()
         model.buffers.active_editor().text(),
         "the editor pane follows the restored active buffer"
     );
-    assert!(
-        !recovery_dir
-            .join(crate::recovery::RECOVERY_FILE_NAME)
-            .exists(),
-        "the consumed journal is removed"
+    assert_eq!(
+        std::fs::read(&recovery_file).expect("prior checkpoint survives restore"),
+        original
     );
+
+    session.decide();
+    assert!(
+        session
+            .checkpoint(&model.buffers, false)
+            .expect("checkpoint")
+    );
+    let replaced = RecoveryJournal::load_from_disk(&recovery_dir)
+        .expect("load replacement")
+        .expect("replacement journal");
+    assert_ne!(replaced.session_id, "session-reducer");
+    assert_eq!(replaced.active_buffer_idx, 1);
+    assert_eq!(replaced.buffers[1].sql, "SELECT 'second';");
 }
 
 #[test]
@@ -11624,7 +11644,7 @@ fn restore_preserves_cleared_file_backed_drafts_with_exact_state_and_saved_bytes
         );
     }
     assert!(
-        !recovery_dir
+        recovery_dir
             .join(crate::recovery::RECOVERY_FILE_NAME)
             .exists()
     );
@@ -11868,10 +11888,10 @@ fn journal_path_blocked_by_a_directory(recovery_dir: &std::path::Path) {
 }
 
 #[test]
-fn a_failed_restore_discard_is_reported_instead_of_swallowed() {
+fn a_failed_checkpoint_after_restore_is_reported_without_losing_the_restored_draft() {
     use crate::app::model::SessionRecoveryBanner;
     use crate::buffer::BufferManager;
-    use crate::recovery::RecoveryJournal;
+    use crate::recovery::{RECOVERY_FILE_NAME, RecoveryJournal, RecoverySession};
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let recovery_dir = temp_dir.path().join("recovery");
@@ -11885,17 +11905,24 @@ fn a_failed_restore_discard_is_reported_instead_of_swallowed() {
     let journal = RecoveryJournal::from_buffers(&source, "session-blocked", false);
 
     let mut model = Model::new(100);
-    model.recovery_banner = Some(SessionRecoveryBanner::new(journal, recovery_dir));
+    model.recovery_banner = Some(SessionRecoveryBanner::new(journal, recovery_dir.clone()));
 
     let effects = update(&mut model, Message::Action(Action::RestoreSession));
     assert!(effects.is_empty());
     assert!(model.recovery_banner.is_none());
+    assert!(model.error.is_none());
+
+    let mut recovery = RecoverySession::new(recovery_dir.clone(), true);
+    recovery.decide();
+    let error = recovery
+        .checkpoint(&model.buffers, false)
+        .expect_err("the blocked journal path refuses publication");
     assert_eq!(model.buffers.buffers[0].editor.text(), "SELECT 'restored';");
-    let error = model
-        .error
-        .expect("a journal that could not be removed must be reported");
+    assert!(recovery_dir.join(RECOVERY_FILE_NAME).is_dir());
     assert!(
-        error.headline.contains("failed to remove recovery journal"),
+        error
+            .headline
+            .contains("failed to atomically publish recovery journal"),
         "{}",
         error.headline
     );
