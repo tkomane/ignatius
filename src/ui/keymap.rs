@@ -143,6 +143,8 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("query-bench", Action::QueryBench),
     ("schema-snapshot", Action::SchemaSnapshot),
     ("sql-runbook", Action::SqlRunbook),
+    ("pin-result", Action::PinResultSnapshot),
+    ("compare-result", Action::CompareResultSnapshot),
 ];
 
 /// The action a configuration name means.
@@ -969,6 +971,12 @@ fn description_of(action: &Action) -> &'static str {
     if matches!(action, Action::SwitchTheme) {
         return "Switch theme";
     }
+    if matches!(action, Action::PinResultSnapshot) {
+        return "Pin the current result set as an A/B baseline snapshot";
+    }
+    if matches!(action, Action::CompareResultSnapshot) {
+        return "Compare the pinned baseline against the current result set";
+    }
     Keymap::new()
         .bindings
         .iter()
@@ -1086,6 +1094,8 @@ const fn short_label(action: &Action) -> &'static str {
         Action::QueryBench => "Bench",
         Action::SchemaSnapshot => "Snapshot",
         Action::SqlRunbook => "Runbook",
+        Action::PinResultSnapshot => "Pin result",
+        Action::CompareResultSnapshot => "Compare result",
     }
 }
 

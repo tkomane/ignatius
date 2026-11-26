@@ -14800,3 +14800,137 @@ fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished
     assert!(model.query_bench.is_none());
     assert_ne!(model.query_bench_request, first_req);
 }
+
+#[test]
+fn pin_and_compare_result_snapshot_lifecycle_and_connection_clear() {
+    let mut model = connected();
+    model.connection_profiles = vec![crate::app::connection_picker::ConnectionProfileSummary {
+        name: "staging".to_owned(),
+        description: None,
+        location: "localhost:5432".to_owned(),
+        database: "orders".to_owned(),
+        user: "app".to_owned(),
+        transport: "prefer".to_owned(),
+        target_session_attrs: None,
+        environment: "staging".to_owned(),
+        read_only: false,
+        auth: None,
+        provider_presentation: None,
+        validation: None,
+    }];
+
+    // Refuses cleanly with a notice when no retained result is on screen.
+    let effects = update(&mut model, Message::Action(Action::PinResultSnapshot));
+    assert!(effects.is_empty());
+    assert!(model.pinned_result.is_none());
+    assert!(
+        model
+            .result_diff_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("No retained result"))
+    );
+
+    // Populate a baseline result and pin it.
+    let mut base_set =
+        crate::query::result::ResultSet::new(vec!["id".into(), "status".into()], 100);
+    base_set.push(vec![
+        crate::query::value::Cell::Text("1".into()),
+        crate::query::value::Cell::Text("open".into()),
+    ]);
+    base_set.push(vec![
+        crate::query::value::Cell::Text("2".into()),
+        crate::query::value::Cell::Text("closed".into()),
+    ]);
+    model.last_sql = Some("SELECT id, status FROM orders ORDER BY id".into());
+    model.last_execution = Some(Execution {
+        job: JobId(1),
+        statements: vec![StatementResult {
+            result_set: Some(base_set),
+            rows_affected: None,
+            elapsed: Duration::from_millis(3),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: Duration::from_millis(3),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: Default::default(),
+    });
+
+    let _ = update(&mut model, Message::Action(Action::PinResultSnapshot));
+    let pinned = model.pinned_result.as_ref().expect("baseline pinned");
+    assert_eq!(pinned.retained_rows, 2);
+    assert!(!pinned.truncated);
+    assert!(
+        model
+            .result_diff_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("2 retained row"))
+    );
+
+    // Execute a second query and compare.
+    let mut curr_set =
+        crate::query::result::ResultSet::new(vec!["id".into(), "status".into()], 100);
+    curr_set.push(vec![
+        crate::query::value::Cell::Text("1".into()),
+        crate::query::value::Cell::Text("paid".into()),
+    ]);
+    curr_set.push(vec![
+        crate::query::value::Cell::Text("3".into()),
+        crate::query::value::Cell::Text("new".into()),
+    ]);
+    model.editor.set_text("SELECT 1;");
+    model.last_execution = Some(Execution {
+        job: JobId(2),
+        statements: vec![StatementResult {
+            result_set: Some(curr_set.clone()),
+            rows_affected: None,
+            elapsed: Duration::from_millis(4),
+            notices: Vec::new(),
+        }],
+        status: crate::query::result::ExecutionStatus::Succeeded,
+        elapsed: Duration::from_millis(4),
+        error: None,
+        transaction: crate::query::result::TransactionState::Autocommit,
+        notice_report: Default::default(),
+    });
+
+    let _ = update(&mut model, Message::Action(Action::CompareResultSnapshot));
+    assert!(model.result_diff.is_some());
+
+    // Cycle key column ('k') to switch from positional to keyed ("id"), then filter ('f') & scroll.
+    let _ = update(&mut model, Message::Action(Action::Insert('k')));
+    {
+        let diff_state = model.result_diff.as_ref().expect("diff overlay open");
+        assert_eq!(
+            diff_state.diff.alignment,
+            crate::result_diff::AlignmentMode::Keyed {
+                column: "id".into()
+            }
+        );
+        assert_eq!(diff_state.diff.changed_count, 1);
+        assert_eq!(diff_state.diff.removed_count, 1);
+        assert_eq!(diff_state.diff.added_count, 1);
+    }
+    let _ = update(&mut model, Message::Action(Action::Insert('f')));
+    assert_eq!(
+        model.result_diff.as_ref().unwrap().filter,
+        crate::app::model::ResultDiffFilter::DifferencesOnly
+    );
+    let _ = update(&mut model, Message::Action(Action::Move(Direction::Down)));
+    let _ = update(&mut model, Message::Action(Action::Move(Direction::Right)));
+    assert_eq!(model.result_diff.as_ref().unwrap().vertical_scroll, 1);
+    assert_eq!(model.result_diff.as_ref().unwrap().horizontal_scroll, 1);
+
+    // Dismissing preserves retained result and editor state.
+    let _ = update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.result_diff.is_none());
+    assert_eq!(model.editor.text(), "SELECT 1;");
+    assert_eq!(model.visible_result(), Some(&curr_set));
+    assert!(model.pinned_result.is_some());
+
+    // Switching connection target/profile automatically clears pinned_result.
+    let _ = begin_connection(&mut model, Some("staging".to_owned()));
+    assert!(model.pinned_result.is_none());
+    assert!(model.result_diff.is_none());
+}

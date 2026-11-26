@@ -406,6 +406,9 @@ With Results populated, `Ctrl+K $` (`result-analytics`) opens Zero-Query Result 
 - `j` / `k` / `Up` / `Down` step through columns; `e` opens the row export palette supporting CSV, TSV, JSON, NDJSON, Markdown, standalone Field Industrial HTML reports (`.html`), and Apache Parquet (`.parquet`).
 The scriptable `ignatius analytics` CLI subcommand provides non-interactive parity.
 
+From the command palette (or optional `[keys]` bindings `pin-result` and `compare-result`), users can pin an in-memory result baseline (`pin-result`) and compare it against a later retained result (`compare-result`) in a scrollable A/B diff overlay without touching disk. Inside the diff overlay, `f` cycles row filters (`All`, `Differences only`, `Added`, `Removed`, `Changed`), `k` cycles candidate key columns, arrow/page keys scroll vertically and horizontally, and `Esc` closes cleanly.
+The offline `ignatius result-diff` CLI subcommand compares two local JSON or NDJSON exports without opening a database connection.
+
 With the editor focused and a statement present, `Ctrl+K '` (`query-bench`) opens the Query Latency Benchmark & A/B Regression Suite overlay:
 - Opening on a single statement benchmarks Baseline (A); opening on a two-statement buffer splits them into Baseline (A) and Candidate (B) for A/B comparison (default `2` warmup and `10` measured iterations).
 - `1` / `2` switch between `Summary & A/B Compare` and `Latency Samples` (with per-iteration timings and a 12-bucket latency sparkline).

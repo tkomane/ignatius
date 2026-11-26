@@ -131,6 +131,16 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             let was_connecting = matches!(model.connection, ConnectionState::Connecting { .. });
             model.banner.finish();
             model.retire_import();
+            if let Some(target) = model
+                .pinned_result
+                .as_ref()
+                .and_then(|pinned| pinned.connection_target.as_deref())
+                && target != info.target
+            {
+                model.pinned_result = None;
+                model.result_diff = None;
+                model.result_diff_notice = None;
+            }
             model.connection = ConnectionState::Connected(info);
             model.error = None;
             model.connecting_step = None;
@@ -368,6 +378,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
                 model.last_execution = Some(*execution);
                 model.last_sql = completed_sql.clone();
                 model.cell_update_notice = None;
+                model.result_diff_notice = None;
                 model.refresh_notice = running_refresh.then(|| match outcome {
                     crate::history::Outcome::Succeeded => {
                         "Retained result refreshed once; no follow-up query was run.".to_owned()
@@ -1806,6 +1817,9 @@ fn pane_input_owned(model: &Model) -> bool {
 }
 
 fn quit(model: &mut Model) -> Vec<Effect> {
+    model.pinned_result = None;
+    model.result_diff = None;
+    model.result_diff_notice = None;
     model.should_quit = true;
     vec![Effect::Quit]
 }
@@ -1955,6 +1969,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.result_analytics.is_some() {
         return result_analytics_action(model, action);
+    }
+    if model.result_diff.is_some() {
+        return result_diff_action(model, action);
     }
     if model.query_bench.is_some() {
         return query_bench_action(model, action);
@@ -2220,6 +2237,8 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::DataBrowser => data_browser_open(model),
         Action::PlanDiff => plan_diff_open(model),
         Action::ResultAnalytics => result_analytics_open(model),
+        Action::PinResultSnapshot => pin_result_snapshot(model),
+        Action::CompareResultSnapshot => compare_result_snapshot(model),
         Action::QueryBench => query_bench_open(model),
         Action::SchemaSnapshot => schema_snapshot_open(model),
         Action::SqlRunbook => sql_runbook_open(model),
@@ -4671,6 +4690,167 @@ fn result_analytics_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::Insert('e' | 'E') => {
             model.result_analytics = None;
             return update(model, Message::Action(Action::ExportRows));
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Captures the currently retained result set as an in-memory A/B diff baseline (`067` Slice 2).
+fn pin_result_snapshot(model: &mut Model) -> Vec<Effect> {
+    let Some(set) = model.visible_result() else {
+        model.result_diff_notice =
+            Some("No retained result on screen to pin as baseline.".to_owned());
+        return Vec::new();
+    };
+    let key_pref = model
+        .pinned_result
+        .as_ref()
+        .and_then(|pinned| pinned.key_column.clone());
+    let target = model.connection.info().map(|info| info.target.clone());
+    match crate::result_diff::PinnedResult::capture(
+        set,
+        model.last_sql.as_deref(),
+        key_pref,
+        target,
+    ) {
+        Ok(pinned) => {
+            let suffix = if pinned.truncated {
+                format!(
+                    " (truncated, {} of {} seen)",
+                    pinned.retained_rows, pinned.rows_seen
+                )
+            } else {
+                String::new()
+            };
+            model.result_diff_notice = Some(format!(
+                "Pinned baseline snapshot: {} retained row(s){suffix}.",
+                pinned.retained_rows
+            ));
+            model.pinned_result = Some(pinned);
+        }
+        Err(reason) => {
+            model.result_diff_notice = Some(reason);
+        }
+    }
+    Vec::new()
+}
+
+/// Opens the pinned result snapshot A/B diff overlay (`067` Slice 2).
+fn compare_result_snapshot(model: &mut Model) -> Vec<Effect> {
+    if model.result_diff.is_some() {
+        model.result_diff = None;
+        return Vec::new();
+    }
+    let Some(pinned) = model.pinned_result.as_ref() else {
+        model.result_diff_notice =
+            Some("No pinned baseline snapshot; pin a result first.".to_owned());
+        return Vec::new();
+    };
+    let Some(current) = model.visible_result() else {
+        model.result_diff_notice =
+            Some("No retained result on screen to compare against baseline.".to_owned());
+        return Vec::new();
+    };
+    if !current.is_available() {
+        model.result_diff_notice =
+            Some("Result data unavailable; cannot compare against pinned baseline.".to_owned());
+        return Vec::new();
+    }
+    let state = crate::app::model::ResultDiffState::new(pinned, current);
+    model.result_diff_notice = None;
+    model.result_diff = Some(state);
+    Vec::new()
+}
+
+/// Handles input while the Result Snapshot A/B Diff overlay is open.
+fn result_diff_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Dismiss | Action::CompareResultSnapshot => {
+            model.result_diff = None;
+        }
+        Action::Quit => return quit(model),
+        Action::Move(Direction::Up) => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.scroll_vertical(-1);
+            }
+        }
+        Action::Move(Direction::Down) => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.scroll_vertical(1);
+            }
+        }
+        Action::MovePage(Direction::Up) => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.scroll_vertical(-10);
+            }
+        }
+        Action::MovePage(Direction::Down) => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.scroll_vertical(10);
+            }
+        }
+        Action::MoveBufferStart | Action::MoveLineStart => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.vertical_scroll = 0;
+            }
+        }
+        Action::MoveBufferEnd | Action::MoveLineEnd => {
+            if let Some(diff) = &mut model.result_diff {
+                let last = diff.filtered_entries().len().saturating_sub(1);
+                diff.vertical_scroll = last;
+            }
+        }
+        Action::Move(Direction::Left) | Action::Insert('h' | 'H') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.scroll_horizontal(-1);
+            }
+        }
+        Action::Move(Direction::Right) | Action::Insert('l' | 'L') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.scroll_horizontal(1);
+            }
+        }
+        Action::Insert('f' | 'F') | Action::Activate => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.cycle_filter();
+            }
+        }
+        Action::Insert('1') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.set_filter(crate::app::model::ResultDiffFilter::All);
+            }
+        }
+        Action::Insert('2') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.set_filter(crate::app::model::ResultDiffFilter::DifferencesOnly);
+            }
+        }
+        Action::Insert('3') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.set_filter(crate::app::model::ResultDiffFilter::Added);
+            }
+        }
+        Action::Insert('4') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.set_filter(crate::app::model::ResultDiffFilter::Removed);
+            }
+        }
+        Action::Insert('5') => {
+            if let Some(diff) = &mut model.result_diff {
+                diff.set_filter(crate::app::model::ResultDiffFilter::Changed);
+            }
+        }
+        Action::Insert('k' | 'K') => {
+            let current_opt = model.visible_result().cloned();
+            if let (Some(pinned), Some(current), Some(diff_state)) = (
+                model.pinned_result.as_mut(),
+                current_opt.as_ref(),
+                model.result_diff.as_mut(),
+            ) {
+                diff_state.cycle_key_column(pinned, current);
+                pinned.key_column.clone_from(&diff_state.selected_key);
+            }
         }
         _ => {}
     }
@@ -8491,6 +8671,9 @@ fn begin_connection(model: &mut Model, profile: Option<String>) -> Vec<Effect> {
     model.pending_update = None;
     model.cell_update_notice = None;
     model.refresh_notice = None;
+    model.result_diff_notice = None;
+    model.pinned_result = None;
+    model.result_diff = None;
     model.clipboard_notice = None;
     model.inspector = None;
     model.definition = None;
@@ -8692,6 +8875,54 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         entries.push(PaletteEntry {
             label,
             detail: keys.join(" / "),
+            group: crate::app::discovery::palette_group(&action),
+            command: PaletteCommand::Run(action),
+        });
+    }
+
+    for (action, label) in [
+        (
+            Action::PinResultSnapshot,
+            "Pin the current result set as an A/B baseline snapshot",
+        ),
+        (
+            Action::CompareResultSnapshot,
+            "Compare the pinned baseline against the current result set",
+        ),
+    ] {
+        if entries
+            .iter()
+            .any(|entry| entry.command == PaletteCommand::Run(action.clone()))
+        {
+            continue;
+        }
+        let mut keys: Vec<String> = Vec::new();
+        for binding in snapshot
+            .bindings
+            .iter()
+            .filter(|binding| binding.action == action)
+        {
+            if !keys.contains(&binding.key) {
+                keys.push(binding.key.clone());
+            }
+        }
+        let key_prefix = if keys.is_empty() {
+            "Command palette".to_owned()
+        } else {
+            keys.join(" / ")
+        };
+        let detail = if crate::app::discovery::action_is_available(model, &action) {
+            key_prefix
+        } else {
+            format!(
+                "{key_prefix}; {}",
+                crate::app::discovery::action_prerequisite(model, &action)
+                    .unwrap_or_else(|| "not useful in this state".to_owned())
+            )
+        };
+        entries.push(PaletteEntry {
+            label: label.to_owned(),
+            detail,
             group: crate::app::discovery::palette_group(&action),
             command: PaletteCommand::Run(action),
         });

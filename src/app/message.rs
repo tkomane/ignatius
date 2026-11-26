@@ -181,6 +181,10 @@ pub enum Action {
     SchemaSnapshot,
     /// Open the interactive SQL Markdown runbook overlay.
     SqlRunbook,
+    /// Pin the currently retained result set as an in-memory A/B diff baseline.
+    PinResultSnapshot,
+    /// Compare the pinned baseline snapshot against the currently retained result set.
+    CompareResultSnapshot,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -328,6 +332,8 @@ impl Action {
             Self::QueryBench,
             Self::SchemaSnapshot,
             Self::SqlRunbook,
+            Self::PinResultSnapshot,
+            Self::CompareResultSnapshot,
         ]
     }
 }
