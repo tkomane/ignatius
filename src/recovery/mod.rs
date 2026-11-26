@@ -34,7 +34,7 @@ pub const MAX_JOURNAL_BYTES: u64 = 24 * 1024 * 1024;
 /// Whether a captured buffer carries state worth retaining across a crash.
 /// File-backed tabs preserve their exact editor contents, including empty and
 /// whitespace-only buffers; scratch tabs need nonblank SQL to qualify.
-fn has_recovery_content(file_path: Option<&Path>, sql: &str) -> bool {
+pub(crate) fn has_recovery_content(file_path: Option<&Path>, sql: &str) -> bool {
     file_path.is_some() || !sql.trim().is_empty()
 }
 

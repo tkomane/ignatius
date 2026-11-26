@@ -5296,19 +5296,15 @@ fn restore_session_action(model: &mut Model) -> Vec<Effect> {
     };
     // Anything typed after the capsule appeared was never checkpointed. Refuse
     // rather than exceed the tab bound and silently drop either side.
-    let in_flight = model.buffers.clone();
-    let dirty_in_flight = in_flight
-        .buffers
-        .iter()
-        .filter(|b| b.editor.is_modified() && !b.editor.text().trim().is_empty())
-        .count();
-    let restorable = banner
-        .journal
-        .buffers
-        .iter()
-        .filter(|b| !b.sql.trim().is_empty() || b.file_path.is_some())
-        .count();
-    if dirty_in_flight > 0 && dirty_in_flight + restorable > crate::buffer::MAX_EDITOR_BUFFERS {
+    let in_flight = model.buffers.buffers.iter().filter(|b| {
+        b.editor.is_modified()
+            && crate::recovery::has_recovery_content(b.file_path.as_deref(), b.editor.text())
+    });
+    let preserved_in_flight_count = in_flight.clone().count();
+    let restorable = banner.journal.recoverable_buffer_count();
+    if preserved_in_flight_count > 0
+        && preserved_in_flight_count + restorable > crate::buffer::MAX_EDITOR_BUFFERS
+    {
         model.recovery_banner = Some(banner);
         model.error = Some(
             crate::diagnostics::Diagnostic::new(
@@ -5321,17 +5317,14 @@ fn restore_session_action(model: &mut Model) -> Vec<Effect> {
         );
         return Vec::new();
     }
-    banner.journal.restore_into(&mut model.buffers);
-    for mut buffer in in_flight.buffers {
-        if model.buffers.buffers.len() >= crate::buffer::MAX_EDITOR_BUFFERS {
-            break;
+    if restorable > 0 {
+        let preserved_in_flight: Vec<_> = in_flight.cloned().collect();
+        banner.journal.restore_into(&mut model.buffers);
+        for mut buffer in preserved_in_flight {
+            buffer.id = model.buffers.next_id;
+            model.buffers.next_id = model.buffers.next_id.wrapping_add(1);
+            model.buffers.buffers.push(buffer);
         }
-        if !buffer.editor.is_modified() || buffer.editor.text().trim().is_empty() {
-            continue;
-        }
-        buffer.id = model.buffers.next_id;
-        model.buffers.next_id = model.buffers.next_id.wrapping_add(1);
-        model.buffers.buffers.push(buffer);
     }
     // A journal can legitimately yield zero restorable buffers (every tab was
     // empty). The editor still has to follow whatever the workspace holds now,

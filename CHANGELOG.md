@@ -15,7 +15,8 @@ source can generate user-facing notes.
 - Fixed: A profile switch stops the previous connection's `\watch` loop.
   Bare `\watch` uses SQL from the current connection.
 - Fixed: Crash recovery retains a file-backed draft after its text was
-  cleared, including its path and modified marker.
+  cleared, including its path and modified marker. Accepting a pending
+  crash journal also preserves file-backed drafts cleared after startup.
 - Fixed: The Windows x64 built-in Entra provider can launch the standard
   Azure CLI MSI when the native `az` executable is missing and the installed
   `wbin` directory is on PATH.
