@@ -13146,5 +13146,219 @@ fn render_result_diff_frame(
     }
 }
 
+/// Renders the compact floating literal Find & Replace bar over the SQL editor.
+pub(crate) fn render_find_replace(
+    model: &Model,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let Some(fr) = &model.find_replace else {
+        return;
+    };
+    if area.width < 12 || area.height < 4 {
+        return;
+    }
+
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let (matches, capped) = model.editor.find_matches(&fr.query, fr.case_sensitive);
+    let count_text = if fr.query.is_empty() || matches.is_empty() {
+        "0 matches".to_owned()
+    } else if capped {
+        "10,000+ matches".to_owned()
+    } else {
+        let active = fr.active_match.min(matches.len().saturating_sub(1));
+        format!("Match {} of {}", active + 1, matches.len())
+    };
+    let case_pill = if fr.case_sensitive { "[Aa]" } else { "[aa]" };
+
+    let anchor = crate::ui::layout::pane_geometry(model, area)
+        .editor
+        .filter(|ed| ed.width >= 28 && ed.height >= 4)
+        .unwrap_or(area);
+    let width = 76u16
+        .min(anchor.width.saturating_sub(2))
+        .max(24u16.min(anchor.width))
+        .min(anchor.width);
+    let content_width = usize::from(width.saturating_sub(2));
+
+    let keycap_pairs = [
+        ("Enter/Up", "match"),
+        ("Tab", "field"),
+        ("Alt+C", "case"),
+        ("Alt+R", "one"),
+        ("Alt+A", "all"),
+        ("Esc", "close"),
+    ];
+    let mut hint_lines: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_used = 0usize;
+    for (key, label) in keycap_pairs {
+        let cap = format!(" {key} ");
+        let gap = usize::from(current_used > 0);
+        let pair_w = gap + display_width(&cap) + display_width(label);
+        if current_used > 0 && current_used + pair_w > content_width {
+            hint_lines.push(Line::from(std::mem::take(&mut current_spans)));
+            current_used = 0;
+        }
+        let gap = usize::from(current_used > 0);
+        let pair_w = gap + display_width(&cap) + display_width(label);
+        if current_used + pair_w > content_width {
+            continue;
+        }
+        if gap > 0 {
+            current_spans.push(Span::raw(" "));
+        }
+        current_spans.push(Span::styled(cap, theme.recessed_pill(Token::Focus)));
+        current_spans.push(Span::styled(label, theme.style(Token::Text)));
+        current_used += pair_w;
+    }
+    if !current_spans.is_empty() {
+        hint_lines.push(Line::from(current_spans));
+    }
+
+    let desired_rows = 3u16
+        + u16::from(fr.show_replace)
+        + u16::from(model.find_notice.is_some())
+        + u16::try_from(hint_lines.len()).unwrap_or(1);
+    let height = desired_rows.min(anchor.height).max(1);
+    let x = anchor
+        .right()
+        .saturating_sub(width)
+        .saturating_sub(1)
+        .max(anchor.x);
+    let y = anchor
+        .y
+        .saturating_add(1)
+        .min(anchor.bottom().saturating_sub(height))
+        .max(anchor.y);
+    let bar_area = Rect::new(x, y, width, height);
+
+    ratatui::widgets::Clear.render(bar_area, buf);
+
+    let title_text = if fr.show_replace {
+        format!("{}Find & Replace", presentation.icon(Icon::Editor))
+    } else {
+        format!("{}Find", presentation.icon(Icon::Editor))
+    };
+    let title_line = Line::from(Span::styled(
+        title_text,
+        theme.style(Token::Focus).add_modifier(Modifier::BOLD),
+    ));
+
+    let mut lines = Vec::new();
+
+    let find_focused = fr.active_field == crate::app::model::FindReplaceField::Find;
+    let find_label = "Find: ";
+    let suffix_width = display_width(case_pill) + 1 + display_width(&count_text);
+    let cursor_str = if find_focused {
+        input_cursor(presentation)
+    } else {
+        ""
+    };
+    let query_budget = content_width
+        .saturating_sub(display_width(find_label) + display_width(cursor_str) + 1 + suffix_width);
+    let query_display = truncate_to_width(&sanitize_for_display(&fr.query), query_budget, unicode);
+    let used_find = display_width(find_label)
+        + display_width(&query_display)
+        + display_width(cursor_str)
+        + 1
+        + suffix_width;
+    let find_pad = content_width.saturating_sub(used_find);
+    let mut find_spans = vec![
+        Span::styled(
+            find_label,
+            theme.style(if find_focused {
+                Token::Header
+            } else {
+                Token::Muted
+            }),
+        ),
+        Span::styled(
+            query_display,
+            theme.style(if find_focused {
+                Token::Focus
+            } else {
+                Token::Text
+            }),
+        ),
+    ];
+    if !cursor_str.is_empty() {
+        find_spans.push(Span::styled(cursor_str, theme.style(Token::Focus)));
+    }
+    find_spans.push(Span::raw(" ".repeat(1 + find_pad)));
+    find_spans.push(Span::styled(
+        case_pill,
+        theme.recessed_pill(if fr.case_sensitive {
+            Token::Focus
+        } else {
+            Token::Muted
+        }),
+    ));
+    find_spans.push(Span::raw(" "));
+    find_spans.push(Span::styled(
+        count_text,
+        theme.style(if !fr.query.is_empty() && matches.is_empty() {
+            Token::Warning
+        } else {
+            Token::Muted
+        }),
+    ));
+    lines.push(Line::from(find_spans));
+
+    if fr.show_replace {
+        let replace_focused = fr.active_field == crate::app::model::FindReplaceField::Replace;
+        let replace_label = "Replace: ";
+        let replace_cursor = if replace_focused {
+            input_cursor(presentation)
+        } else {
+            ""
+        };
+        let replace_budget = content_width
+            .saturating_sub(display_width(replace_label) + display_width(replace_cursor));
+        let replace_display = truncate_to_width(
+            &sanitize_for_display(&fr.replacement),
+            replace_budget,
+            unicode,
+        );
+        let mut replace_spans = vec![
+            Span::styled(
+                replace_label,
+                theme.style(if replace_focused {
+                    Token::Header
+                } else {
+                    Token::Muted
+                }),
+            ),
+            Span::styled(
+                replace_display,
+                theme.style(if replace_focused {
+                    Token::Focus
+                } else {
+                    Token::Text
+                }),
+            ),
+        ];
+        if !replace_cursor.is_empty() {
+            replace_spans.push(Span::styled(replace_cursor, theme.style(Token::Focus)));
+        }
+        lines.push(Line::from(replace_spans));
+    }
+
+    if let Some(notice) = &model.find_notice {
+        lines.push(Line::from(Span::styled(
+            truncate_to_width(&sanitize_for_display(notice), content_width, unicode),
+            theme.style(Token::Info),
+        )));
+    }
+
+    lines.extend(hint_lines);
+
+    Paragraph::new(lines)
+        .block(overlay_block_line(title_line, presentation))
+        .render(bar_area, buf);
+}
+
 #[cfg(test)]
 mod tests;

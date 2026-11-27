@@ -350,6 +350,13 @@ pub fn overlay_hint_actions(model: &Model) -> Option<Vec<(Action, &'static str)>
             (Action::Dismiss, "Cancel"),
         ]);
     }
+    if model.find_replace.is_some() {
+        return Some(vec![
+            (Action::FindNextMatch, "Next"),
+            (Action::FindPrevMatch, "Prev"),
+            (Action::Dismiss, "Close"),
+        ]);
+    }
     // A running benchmark cannot be closed yet; cancelling and quitting stay available.
     if model
         .query_bench
@@ -429,6 +436,10 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::ToggleHistoryRecording,
         Action::PinResultSnapshot,
         Action::CompareResultSnapshot,
+        Action::FindInBuffer,
+        Action::ReplaceInBuffer,
+        Action::FindNextMatch,
+        Action::FindPrevMatch,
         Action::Quit,
     ]
     .into_iter()
@@ -538,7 +549,22 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         | Action::ToggleEditorSplit
         | Action::TogglePinEditorBuffer
         | Action::RenameEditorBuffer
-        | Action::SnippetLibrary => true,
+        | Action::SnippetLibrary
+        | Action::FindInBuffer
+        | Action::ReplaceInBuffer => true,
+        Action::FindNextMatch | Action::FindPrevMatch => {
+            model
+                .find_replace
+                .as_ref()
+                .is_some_and(|fr| !fr.query.is_empty())
+                || model
+                    .last_find
+                    .as_ref()
+                    .is_some_and(|last| !last.query.is_empty())
+        }
+        Action::FindToggleCase | Action::FindReplaceCurrent | Action::FindReplaceAll => {
+            model.find_replace.is_some()
+        }
         Action::RestoreSession | Action::DiscardRecovery => model.recovery_banner.is_some(),
         Action::LintBuffer => !model.editor.text().trim().is_empty(),
         Action::BeginPrefix => false,
@@ -788,7 +814,15 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::ToggleEditorSplit
         | Action::TogglePinEditorBuffer
         | Action::RenameEditorBuffer
-        | Action::SnippetLibrary => "this surface to close first".to_owned(),
+        | Action::SnippetLibrary
+        | Action::FindInBuffer
+        | Action::ReplaceInBuffer => "this surface to close first".to_owned(),
+        Action::FindNextMatch | Action::FindPrevMatch => {
+            "open Find in buffer and enter a query first".to_owned()
+        }
+        Action::FindToggleCase | Action::FindReplaceCurrent | Action::FindReplaceAll => {
+            "open Find or Replace in the editor first".to_owned()
+        }
         Action::RestoreSession | Action::DiscardRecovery => {
             "an unrecovered crash session journal".to_owned()
         }
@@ -873,6 +907,13 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ToggleEditorSplit
         | Action::TogglePinEditorBuffer
         | Action::RenameEditorBuffer
+        | Action::FindInBuffer
+        | Action::ReplaceInBuffer
+        | Action::FindNextMatch
+        | Action::FindPrevMatch
+        | Action::FindToggleCase
+        | Action::FindReplaceCurrent
+        | Action::FindReplaceAll
         | Action::SqlRunbook => "Editor",
         Action::OpenResultControls
         | Action::NarrowColumn

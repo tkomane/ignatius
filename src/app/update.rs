@@ -679,6 +679,7 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             match *result {
                 // Loading is an edit like any other, so it can be undone.
                 Ok(text) => {
+                    clear_find_replace(model);
                     edit_editor(model, |editor| editor.set_text(text));
                     model.focus = Focus::Editor;
                 }
@@ -1618,7 +1619,14 @@ fn sync_editor_after_buffer_change(model: &mut Model, previous_buffer_id: u64) {
             model,
             "The editor tab changed. This error location belongs to the previous submission.",
         );
+        clear_find_replace(model);
     }
+}
+
+fn clear_find_replace(model: &mut Model) {
+    model.find_replace = None;
+    model.last_find = None;
+    model.find_notice = None;
 }
 
 /// Applies an editor text mutation and invalidates an old server marker if it
@@ -1803,6 +1811,7 @@ fn pane_input_owned(model: &Model) -> bool {
         || model.schema_snapshot.is_some()
         || model.sql_runbook.is_some()
         || model.completion.menu.is_some()
+        || model.find_replace.is_some()
         || model.tree.filtering
         || model.result_filtering
 }
@@ -1821,6 +1830,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     model.layout_notice = None;
     model.buffer_notice = None;
+    model.find_notice = None;
     // Reshaping a pane must not dismiss an input owner and act underneath it.
     if (model.help_open || pane_input_owned(model))
         && matches!(
@@ -1886,6 +1896,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
     }
     if model.completion.menu.is_some() {
         return completion_action(model, action);
+    }
+    if model.find_replace.is_some() {
+        return find_replace_action(model, action);
     }
     if model.tree.filtering {
         return filter_action(model, action);
@@ -2148,7 +2161,10 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             ));
             Vec::new()
         }
-        Action::OpenQuery => vec![Effect::ListQueries],
+        Action::OpenQuery => {
+            clear_find_replace(model);
+            vec![Effect::ListQueries]
+        }
         Action::ShowDefinition => show_definition(model),
         Action::ShowDependencies => show_dependencies(model),
         Action::SchemaDiagram => schema_diagram_open(model),
@@ -2166,6 +2182,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::DataSync => data_sync_open(model),
         Action::SyntheticSeed => synthetic_seed_open(model),
         Action::NewEditorBuffer => {
+            clear_find_replace(model);
             let previous_count = model.buffers.count();
             let previous_focus = model.focus;
             let previous_buffer_id = model.buffers.active_buffer().id;
@@ -2184,6 +2201,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::CloseEditorBuffer => {
+            clear_find_replace(model);
             let previous_count = model.buffers.count();
             let previous_buffer_id = model.buffers.active_buffer().id;
             if model.buffers.close_active() {
@@ -2197,6 +2215,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::NextEditorBuffer => {
+            clear_find_replace(model);
             let previous_idx = model.buffers.active_idx;
             let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
@@ -2208,6 +2227,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::PrevEditorBuffer => {
+            clear_find_replace(model);
             let previous_idx = model.buffers.active_idx;
             let previous_buffer_id = model.buffers.active_buffer().id;
             model.sync_active_buffer_from_editor();
@@ -2387,6 +2407,23 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             page(model, direction);
             Vec::new()
         }
+        Action::FindInBuffer => {
+            open_find_replace(model, false);
+            Vec::new()
+        }
+        Action::ReplaceInBuffer => {
+            open_find_replace(model, true);
+            Vec::new()
+        }
+        Action::FindNextMatch => {
+            find_next_match(model);
+            Vec::new()
+        }
+        Action::FindPrevMatch => {
+            find_prev_match(model);
+            Vec::new()
+        }
+        Action::FindToggleCase | Action::FindReplaceCurrent | Action::FindReplaceAll => Vec::new(),
         Action::DeleteForward
         | Action::DeleteWordLeft
         | Action::MoveWord(_)
@@ -2395,6 +2432,319 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         | Action::Undo
         | Action::Redo => Vec::new(),
     }
+}
+
+fn open_find_replace(model: &mut Model, show_replace: bool) {
+    model.tree.filtering = false;
+    model.result_filtering = false;
+    model.completion.menu = None;
+    model.focus = Focus::Editor;
+    model.find_notice = None;
+    if let Some(fr) = model.find_replace.as_mut() {
+        fr.show_replace = show_replace;
+        fr.active_field = if show_replace && !fr.query.is_empty() {
+            crate::app::model::FindReplaceField::Replace
+        } else {
+            crate::app::model::FindReplaceField::Find
+        };
+        recalc_find_active_match(model);
+    } else {
+        model.find_replace = Some(crate::app::model::FindReplaceState {
+            show_replace,
+            active_field: crate::app::model::FindReplaceField::Find,
+            ..crate::app::model::FindReplaceState::default()
+        });
+    }
+}
+
+fn save_last_find(model: &mut Model) {
+    if let Some(fr) = model.find_replace.as_ref()
+        && !fr.query.is_empty()
+    {
+        model.last_find = Some(crate::app::model::LastFindQuery {
+            query: fr.query.clone(),
+            case_sensitive: fr.case_sensitive,
+        });
+    }
+}
+
+fn recalc_find_active_match(model: &mut Model) {
+    let Some(fr) = model.find_replace.as_mut() else {
+        return;
+    };
+    if fr.query.is_empty() {
+        fr.active_match = 0;
+        return;
+    }
+    let (matches, _) = model.editor.find_matches(&fr.query, fr.case_sensitive);
+    if matches.is_empty() {
+        fr.active_match = 0;
+    } else {
+        let cursor = model.editor.cursor();
+        fr.active_match = matches
+            .iter()
+            .position(|range| range.start >= cursor)
+            .unwrap_or(0);
+    }
+}
+
+fn find_next_match(model: &mut Model) {
+    let (query, case_sensitive) = if let Some(fr) = model.find_replace.as_ref() {
+        (fr.query.clone(), fr.case_sensitive)
+    } else if let Some(last) = model.last_find.as_ref() {
+        (last.query.clone(), last.case_sensitive)
+    } else {
+        return;
+    };
+    if query.is_empty() {
+        if let Some(fr) = model.find_replace.as_mut() {
+            fr.active_match = 0;
+        }
+        return;
+    }
+    let (matches, _) = model.editor.find_matches(&query, case_sensitive);
+    if matches.is_empty() {
+        if let Some(fr) = model.find_replace.as_mut() {
+            fr.active_match = 0;
+        }
+        return;
+    }
+    let cursor = model.editor.cursor();
+    let next_idx = if let Some(fr) = model.find_replace.as_ref()
+        && matches
+            .get(fr.active_match)
+            .is_some_and(|range| range.start == cursor)
+    {
+        (fr.active_match + 1) % matches.len()
+    } else {
+        let after_cursor = if matches.iter().any(|range| range.start == cursor) {
+            matches.iter().position(|range| range.start > cursor)
+        } else {
+            matches.iter().position(|range| range.start >= cursor)
+        };
+        after_cursor.unwrap_or(0)
+    };
+    if let Some(fr) = model.find_replace.as_mut() {
+        fr.active_match = next_idx;
+    }
+    model.last_find = Some(crate::app::model::LastFindQuery {
+        query,
+        case_sensitive,
+    });
+    model.editor.set_cursor(matches[next_idx].start);
+    model.sync_active_buffer_from_editor();
+}
+
+fn find_prev_match(model: &mut Model) {
+    let (query, case_sensitive) = if let Some(fr) = model.find_replace.as_ref() {
+        (fr.query.clone(), fr.case_sensitive)
+    } else if let Some(last) = model.last_find.as_ref() {
+        (last.query.clone(), last.case_sensitive)
+    } else {
+        return;
+    };
+    if query.is_empty() {
+        if let Some(fr) = model.find_replace.as_mut() {
+            fr.active_match = 0;
+        }
+        return;
+    }
+    let (matches, _) = model.editor.find_matches(&query, case_sensitive);
+    if matches.is_empty() {
+        if let Some(fr) = model.find_replace.as_mut() {
+            fr.active_match = 0;
+        }
+        return;
+    }
+    let cursor = model.editor.cursor();
+    let prev_idx = if let Some(fr) = model.find_replace.as_ref()
+        && matches
+            .get(fr.active_match)
+            .is_some_and(|range| range.start == cursor)
+    {
+        if fr.active_match == 0 {
+            matches.len() - 1
+        } else {
+            fr.active_match - 1
+        }
+    } else {
+        matches
+            .iter()
+            .rposition(|range| range.start < cursor)
+            .unwrap_or(matches.len() - 1)
+    };
+    if let Some(fr) = model.find_replace.as_mut() {
+        fr.active_match = prev_idx;
+    }
+    model.last_find = Some(crate::app::model::LastFindQuery {
+        query,
+        case_sensitive,
+    });
+    model.editor.set_cursor(matches[prev_idx].start);
+    model.sync_active_buffer_from_editor();
+}
+
+fn find_replace_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    use crate::app::model::FindReplaceField;
+
+    match action {
+        Action::Dismiss => {
+            save_last_find(model);
+            model.find_replace = None;
+            model.find_notice = None;
+        }
+        Action::Quit => {
+            model.find_replace = None;
+            model.find_notice = None;
+            return quit(model);
+        }
+        Action::Insert(ch) => {
+            if let Some(fr) = model.find_replace.as_mut() {
+                match fr.active_field {
+                    FindReplaceField::Find => {
+                        fr.query.push(ch);
+                        recalc_find_active_match(model);
+                    }
+                    FindReplaceField::Replace => {
+                        fr.replacement.push(ch);
+                    }
+                }
+            }
+        }
+        Action::Backspace => {
+            if let Some(fr) = model.find_replace.as_mut() {
+                match fr.active_field {
+                    FindReplaceField::Find => {
+                        fr.query.pop();
+                        recalc_find_active_match(model);
+                    }
+                    FindReplaceField::Replace => {
+                        fr.replacement.pop();
+                    }
+                }
+            }
+        }
+        Action::FocusNext => {
+            if let Some(fr) = model.find_replace.as_mut() {
+                if !fr.show_replace {
+                    fr.show_replace = true;
+                    fr.active_field = FindReplaceField::Replace;
+                } else {
+                    fr.active_field = match fr.active_field {
+                        FindReplaceField::Find => FindReplaceField::Replace,
+                        FindReplaceField::Replace => FindReplaceField::Find,
+                    };
+                }
+            }
+        }
+        Action::FindToggleCase => {
+            if let Some(fr) = model.find_replace.as_mut() {
+                fr.case_sensitive = !fr.case_sensitive;
+                recalc_find_active_match(model);
+            }
+        }
+        Action::Activate | Action::FindNextMatch | Action::Move(Direction::Down) => {
+            find_next_match(model);
+        }
+        Action::Move(Direction::Up) | Action::FindPrevMatch => {
+            find_prev_match(model);
+        }
+        Action::FindReplaceCurrent => {
+            let Some((query, replacement, case_sensitive, active_match)) =
+                model.find_replace.as_ref().map(|fr| {
+                    (
+                        fr.query.clone(),
+                        fr.replacement.clone(),
+                        fr.case_sensitive,
+                        fr.active_match,
+                    )
+                })
+            else {
+                return Vec::new();
+            };
+            if query.is_empty() {
+                return Vec::new();
+            }
+            let (matches, _) = model.editor.find_matches(&query, case_sensitive);
+            if matches.is_empty() {
+                if let Some(fr) = model.find_replace.as_mut() {
+                    fr.active_match = 0;
+                }
+                return Vec::new();
+            }
+            let idx = active_match.min(matches.len() - 1);
+            let range = matches[idx].clone();
+            edit_editor(model, |editor| {
+                editor.replace_match(range, &replacement);
+            });
+            let (after_matches, _) = model.editor.find_matches(&query, case_sensitive);
+            if after_matches.is_empty() {
+                if let Some(fr) = model.find_replace.as_mut() {
+                    fr.active_match = 0;
+                }
+            } else {
+                let cursor = model.editor.cursor();
+                let next_idx = after_matches
+                    .iter()
+                    .position(|r| r.start >= cursor)
+                    .unwrap_or(0);
+                if let Some(fr) = model.find_replace.as_mut() {
+                    fr.active_match = next_idx;
+                }
+                model.editor.set_cursor(after_matches[next_idx].start);
+                model.sync_active_buffer_from_editor();
+            }
+        }
+        Action::FindReplaceAll => {
+            let Some((query, replacement, case_sensitive)) = model
+                .find_replace
+                .as_ref()
+                .map(|fr| (fr.query.clone(), fr.replacement.clone(), fr.case_sensitive))
+            else {
+                return Vec::new();
+            };
+            if query.is_empty() {
+                return Vec::new();
+            }
+            let mut count = 0usize;
+            edit_editor(model, |editor| {
+                count = editor.replace_all(&query, &replacement, case_sensitive);
+            });
+            if let Some(fr) = model.find_replace.as_mut() {
+                fr.active_match = 0;
+            }
+            model.find_notice = Some(format!("Replaced {count} occurrence(s)."));
+        }
+        Action::FindInBuffer => {
+            open_find_replace(model, false);
+        }
+        Action::ReplaceInBuffer => {
+            open_find_replace(model, true);
+        }
+        Action::Undo => {
+            edit_editor(model, |editor| editor.undo());
+            recalc_find_active_match(model);
+        }
+        Action::Redo => {
+            edit_editor(model, |editor| editor.redo());
+            recalc_find_active_match(model);
+        }
+        other @ (Action::NewEditorBuffer
+        | Action::CloseEditorBuffer
+        | Action::NextEditorBuffer
+        | Action::PrevEditorBuffer
+        | Action::OpenQuery) => {
+            clear_find_replace(model);
+            return apply_action(model, other);
+        }
+        other @ (Action::OpenPalette | Action::ToggleHelp) => {
+            save_last_find(model);
+            model.find_replace = None;
+            return apply_action(model, other);
+        }
+        _ => {}
+    }
+    Vec::new()
 }
 
 /// Starts the tree and completion reads as one visible refresh operation.
@@ -8497,6 +8847,20 @@ fn paste_action(model: &mut Model, text: String) -> Vec<Effect> {
     if model.help_open || model.notice_details.is_some() {
         model.paste_notice = Some(PasteNotice::Ignored);
         model.format_notice = None;
+        return Vec::new();
+    }
+    if let Some(fr) = model.find_replace.as_mut() {
+        match fr.active_field {
+            crate::app::model::FindReplaceField::Find => {
+                fr.query.push_str(&text);
+                recalc_find_active_match(model);
+            }
+            crate::app::model::FindReplaceField::Replace => {
+                fr.replacement.push_str(&text);
+            }
+        }
+        model.paste_notice = None;
+        model.find_notice = None;
         return Vec::new();
     }
     if model.tree.filtering {
