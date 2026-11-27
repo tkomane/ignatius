@@ -3982,6 +3982,42 @@ pub struct MouseState {
     pub clock: Duration,
 }
 
+/// Active input field inside the in-memory Find & Replace bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FindReplaceField {
+    /// Searching literal query text.
+    #[default]
+    Find,
+    /// Replacement text.
+    Replace,
+}
+
+/// Strictly in-memory literal Find & Replace bar state for the SQL editor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FindReplaceState {
+    /// Literal query string to search for.
+    pub query: String,
+    /// Literal replacement string.
+    pub replacement: String,
+    /// Which field currently receives typed input and paste.
+    pub active_field: FindReplaceField,
+    /// Whether the replacement row is expanded.
+    pub show_replace: bool,
+    /// Whether literal matching is case-sensitive.
+    pub case_sensitive: bool,
+    /// Zero-based index of the active match.
+    pub active_match: usize,
+}
+
+/// Last non-empty literal find query kept in memory for Find Next / Find Previous.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LastFindQuery {
+    /// Non-empty literal query string.
+    pub query: String,
+    /// Whether matching is case-sensitive.
+    pub case_sensitive: bool,
+}
+
 /// The complete application state.
 #[derive(Debug, Clone, Default)]
 pub struct Model {
@@ -4308,6 +4344,12 @@ pub struct Model {
     pub schema_snapshot_request: u64,
     /// Interactive SQL Markdown runbook overlay state.
     pub sql_runbook: Option<SqlRunbookState>,
+    /// Strictly in-memory literal Find & Replace bar state for the editor.
+    pub find_replace: Option<FindReplaceState>,
+    /// Last non-empty literal find query for Find Next / Find Previous after closing.
+    pub last_find: Option<LastFindQuery>,
+    /// Transient notice produced by in-buffer Find & Replace operations.
+    pub find_notice: Option<String>,
 }
 
 impl Model {

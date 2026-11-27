@@ -24,15 +24,16 @@ use crate::ui::widgets::{
     render_banner, render_chords, render_cluster_config, render_compact_header, render_completion,
     render_confirmation, render_connection_details, render_connection_pool,
     render_copy_confirmation, render_data_browser, render_data_masking, render_data_sync,
-    render_definition, render_editor, render_error, render_footer, render_header, render_help,
-    render_import_wizard, render_index_advisor, render_inspector, render_lint_findings,
-    render_logical_replication, render_maintenance_ops, render_name_prompt, render_objects,
-    render_palette, render_parameter_prompt, render_password_prompt, render_plan_confirmation,
-    render_plan_diff, render_query_bench_with_motion, render_query_performance,
-    render_result_analytics, render_result_diff, render_results, render_routine_runner,
-    render_schema_diagram, render_schema_diff, render_schema_snapshot, render_security_audit,
-    render_server_activity, render_snippet_library, render_sql_runbook, render_synthetic_seed,
-    render_update_review, render_update_value_prompt, render_wal_observability,
+    render_definition, render_editor, render_error, render_find_replace, render_footer,
+    render_header, render_help, render_import_wizard, render_index_advisor, render_inspector,
+    render_lint_findings, render_logical_replication, render_maintenance_ops, render_name_prompt,
+    render_objects, render_palette, render_parameter_prompt, render_password_prompt,
+    render_plan_confirmation, render_plan_diff, render_query_bench_with_motion,
+    render_query_performance, render_result_analytics, render_result_diff, render_results,
+    render_routine_runner, render_schema_diagram, render_schema_diff, render_schema_snapshot,
+    render_security_audit, render_server_activity, render_snippet_library, render_sql_runbook,
+    render_synthetic_seed, render_update_review, render_update_value_prompt,
+    render_wal_observability,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -201,7 +202,23 @@ fn render_with(
 /// beneath another overlay in practice; if it were, the workbench would
 /// simply stay at full strength, which is the safe way to be wrong.
 pub(crate) fn workbench_recedes(model: &Model) -> bool {
-    crate::ui::widgets::overlay_blocks_panes(model) && model.completion.menu.is_none()
+    crate::ui::widgets::overlay_blocks_panes(model)
+        && model.completion.menu.is_none()
+        && (model.find_replace.is_none()
+            || model.password_prompt.is_some()
+            || model.name_prompt.is_some()
+            || model.parameter_prompt.is_some()
+            || model.update_prompt.is_some()
+            || model.pending_update.is_some()
+            || model.pending_copy.is_some()
+            || model.pending_plan.is_some()
+            || model.pending_run.is_some()
+            || model.pending_import.is_some()
+            || model.prefix_pending
+            || model.connection_details
+            || model.palette.is_some()
+            || model.notice_details.is_some()
+            || model.help_open)
 }
 
 /// Recedes the pane bodies behind a blocking overlay. A still frame: nothing
@@ -258,6 +275,9 @@ fn render_workbench(
     // workbench and is the first layer Esc peels.
     if model.completion.menu.is_some() {
         render_completion(model, presentation, area, buf);
+    }
+    if model.find_replace.is_some() {
+        render_find_replace(model, presentation, area, buf);
     }
 }
 

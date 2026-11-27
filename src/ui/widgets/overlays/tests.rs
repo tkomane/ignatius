@@ -2904,6 +2904,62 @@ fn result_diff_overlay_renders_kpi_strip_badges_and_ascii_fallback() {
 }
 
 #[test]
+fn find_replace_overlay_renders_counts_case_pill_replace_field_and_capped_count() {
+    let mut model = Model::new(100);
+    model.focus = Focus::Editor;
+    model.editor.set_text("a a a a a a a");
+    model.find_replace = Some(crate::app::model::FindReplaceState {
+        query: "a".to_owned(),
+        replacement: "b".to_owned(),
+        active_field: crate::app::model::FindReplaceField::Replace,
+        show_replace: true,
+        case_sensitive: true,
+        active_match: 1,
+    });
+    model.find_notice = Some("Replaced 7 occurrence(s).".to_owned());
+
+    let area = Rect::new(0, 0, 100, 24);
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    render_find_replace(&model, &pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("Find & Replace"), "{text}");
+    assert!(text.contains("Find: a"), "{text}");
+    assert!(text.contains("Replace: b"), "{text}");
+    assert!(text.contains("[Aa]"), "{text}");
+    assert!(text.contains("Match 2 of 7"), "{text}");
+    assert!(text.contains("Replaced 7 occurrence(s)."), "{text}");
+    assert!(text.contains("Enter"), "{text}");
+    assert!(text.contains("Alt+A"), "{text}");
+
+    // Zero matches + case-insensitive pill
+    model.find_replace = Some(crate::app::model::FindReplaceState {
+        query: "zzz".to_owned(),
+        replacement: String::new(),
+        active_field: crate::app::model::FindReplaceField::Find,
+        show_replace: false,
+        case_sensitive: false,
+        active_match: 0,
+    });
+    model.find_notice = None;
+    let mut zero_buf = Buffer::empty(area);
+    render_find_replace(&model, &pres, area, &mut zero_buf);
+    let zero_text = buffer_to_string(&zero_buf);
+    assert!(zero_text.contains("[aa]"), "{zero_text}");
+    assert!(zero_text.contains("0 matches"), "{zero_text}");
+
+    // Capped at 10,000+ matches
+    model
+        .editor
+        .set_text("x".repeat(crate::app::editor::MAX_FIND_MATCHES + 3));
+    model.find_replace.as_mut().unwrap().query = "x".to_owned();
+    let mut cap_buf = Buffer::empty(area);
+    render_find_replace(&model, &pres, area, &mut cap_buf);
+    let cap_text = buffer_to_string(&cap_buf);
+    assert!(cap_text.contains("10,000+ matches"), "{cap_text}");
+}
+
+#[test]
 fn jump_to_line_prompt_renders_line_label_and_title() {
     let prompt = NamePrompt::for_jump_to_line(2, 12);
     let pres = presentation(ColorDepth::TrueColor);

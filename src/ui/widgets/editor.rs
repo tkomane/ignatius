@@ -927,6 +927,19 @@ fn render_editor_buffer_pane(
     } else {
         None
     };
+    let find_matches = if is_active {
+        model
+            .find_replace
+            .as_ref()
+            .filter(|fr| !fr.query.is_empty())
+            .map(|fr| {
+                let (matches, _) = editor.find_matches(&fr.query, fr.case_sensitive);
+                let active = (!matches.is_empty()).then(|| fr.active_match.min(matches.len() - 1));
+                (matches, active)
+            })
+    } else {
+        None
+    };
     let marker = if presentation.glyphs.is_ascii() {
         "|"
     } else {
@@ -1003,18 +1016,31 @@ fn render_editor_buffer_pane(
             (number == cursor_line && is_active).then_some(cursor),
         );
         for unit in &line.units {
+            let abs_start = start + unit.source.start;
+            let abs_end = start + unit.source.end;
             let is_cursor = focused && number == cursor_line && unit.source.contains(&cursor);
+            let match_state = find_matches.as_ref().and_then(|(matches, active)| {
+                let idx = matches.partition_point(|r| r.end <= abs_start);
+                matches
+                    .get(idx)
+                    .filter(|r| r.start < abs_end)
+                    .map(|_| *active == Some(idx))
+            });
             let in_error_token = error_location
                 .and_then(|location| location.token.as_ref())
-                .is_some_and(|token| {
-                    start + unit.source.start < token.end && token.start < start + unit.source.end
-                });
-            let is_matching_delimiter = delimiter_pair.is_some_and(|(a, b)| {
-                let abs = start + unit.source.start;
-                abs == a || abs == b
-            });
+                .is_some_and(|token| abs_start < token.end && token.start < abs_end);
+            let is_matching_delimiter =
+                delimiter_pair.is_some_and(|(a, b)| abs_start == a || abs_start == b);
             let style = if is_cursor {
                 theme.style(Token::Selection)
+            } else if let Some(is_active_match) = match_state {
+                if is_active_match {
+                    theme.style(Token::Selection).add_modifier(Modifier::BOLD)
+                } else {
+                    theme
+                        .style(Token::Focus)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                }
             } else if in_error_token {
                 theme.style(Token::Danger)
             } else if is_matching_delimiter {
@@ -1023,8 +1049,7 @@ fn render_editor_buffer_pane(
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 theme.style(syntax_token(crate::query::highlight::kind_at(
-                    &syntax,
-                    start + unit.source.start,
+                    &syntax, abs_start,
                 )))
             };
             if let Some((cell, visible)) = unit.clipped(viewport.offset, capacity) {

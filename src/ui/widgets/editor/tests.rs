@@ -1368,3 +1368,63 @@ fn pinned_tab_marker_renders_and_hit_testing_matches_rendered_columns() {
         );
     }
 }
+
+#[test]
+fn editor_highlights_active_and_inactive_find_matches_with_theme_tokens() {
+    let mut model = Model::new(100);
+    model.focus = crate::app::model::Focus::Editor;
+    model.editor.set_text("SELECT foo, foo FROM t;");
+    model.editor.set_cursor(0);
+    model.find_replace = Some(crate::app::model::FindReplaceState {
+        query: "foo".to_owned(),
+        replacement: String::new(),
+        active_field: crate::app::model::FindReplaceField::Find,
+        show_replace: false,
+        case_sensitive: true,
+        active_match: 1,
+    });
+
+    let keymap = Keymap::new();
+    let area = Rect::new(0, 0, 80, 10);
+    let pres = presentation(ColorDepth::TrueColor);
+    let mut buf = Buffer::empty(area);
+    render_editor(&model, &keymap, &pres, area, &mut buf);
+
+    let line_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("SELECT foo, foo")
+        })
+        .expect("sql row");
+    let row_str: String = (0..area.width).map(|x| buf[(x, line_y)].symbol()).collect();
+    let first_byte = row_str.find("foo").expect("first foo");
+    let first_foo_x = row_str[..first_byte].chars().count() as u16;
+    let second_byte = first_byte + 3 + row_str[first_byte + 3..].find("foo").expect("second foo");
+    let second_foo_x = row_str[..second_byte].chars().count() as u16;
+
+    // Inactive match uses Token::Focus + BOLD + UNDERLINED.
+    let focus_fg = pres.theme.color(Token::Focus).unwrap();
+    assert_eq!(buf[(first_foo_x, line_y)].fg, focus_fg);
+    assert!(
+        buf[(first_foo_x, line_y)]
+            .modifier
+            .contains(Modifier::UNDERLINED)
+    );
+
+    // Active match uses Token::Selection background.
+    let sel_bg = pres.theme.style(Token::Selection).bg.unwrap();
+    assert_eq!(buf[(second_foo_x, line_y)].bg, sel_bg);
+
+    // Basic16 falls back to REVERSED for active match without painted bg.
+    let basic_pres = presentation(ColorDepth::Basic16);
+    let mut basic_buf = Buffer::empty(area);
+    render_editor(&model, &keymap, &basic_pres, area, &mut basic_buf);
+    assert_eq!(basic_buf[(second_foo_x, line_y)].bg, Color::Reset);
+    assert!(
+        basic_buf[(second_foo_x, line_y)]
+            .modifier
+            .contains(Modifier::REVERSED)
+    );
+}

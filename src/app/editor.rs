@@ -26,6 +26,9 @@ const HISTORY_LIMIT: usize = 200;
 /// than frozen into the buffer and its history. The bound is one mebibyte.
 pub const PASTE_LIMIT_BYTES: usize = 1_048_576;
 
+/// Maximum number of literal find matches retained per search.
+pub const MAX_FIND_MATCHES: usize = 10_000;
+
 /// What kind of change was last made, so a run of typing folds into one undo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EditKind {
@@ -287,6 +290,127 @@ impl Editor {
         self.cursor = range.start + replacement.len();
         self.last_insert_was_space = replacement.chars().last().is_some_and(char::is_whitespace);
         self.after_edit();
+    }
+
+    /// Finds non-overlapping UTF-8-safe literal matches of `needle` in the
+    /// buffer, capped at [`MAX_FIND_MATCHES`]. Returns `(matches, capped)`.
+    #[must_use]
+    pub fn find_matches(
+        &self,
+        needle: &str,
+        case_sensitive: bool,
+    ) -> (Vec<std::ops::Range<usize>>, bool) {
+        if needle.is_empty() {
+            return (Vec::new(), false);
+        }
+        let mut matches = Vec::new();
+        let mut capped = false;
+        if case_sensitive {
+            for (start, _) in self.text.match_indices(needle) {
+                if matches.len() >= MAX_FIND_MATCHES {
+                    capped = true;
+                    break;
+                }
+                matches.push(start..start + needle.len());
+            }
+            return (matches, capped);
+        }
+        if self.text.is_ascii() && needle.is_ascii() {
+            let hay = self.text.as_bytes();
+            let pat = needle.as_bytes();
+            let mut idx = 0usize;
+            while idx + pat.len() <= hay.len() {
+                if hay[idx..idx + pat.len()].eq_ignore_ascii_case(pat) {
+                    if matches.len() >= MAX_FIND_MATCHES {
+                        capped = true;
+                        break;
+                    }
+                    matches.push(idx..idx + pat.len());
+                    idx += pat.len();
+                } else {
+                    idx += 1;
+                }
+            }
+            return (matches, capped);
+        }
+        let needle_lower: Vec<char> = needle.chars().flat_map(char::to_lowercase).collect();
+        let mut byte_idx = 0usize;
+        while byte_idx < self.text.len() {
+            if let Some(end_byte) = match_case_insensitive_at(&self.text[byte_idx..], &needle_lower)
+            {
+                if matches.len() >= MAX_FIND_MATCHES {
+                    capped = true;
+                    break;
+                }
+                matches.push(byte_idx..byte_idx + end_byte);
+                byte_idx += end_byte;
+            } else if let Some(ch) = self.text[byte_idx..].chars().next() {
+                byte_idx += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        (matches, capped)
+    }
+
+    /// Replaces one validated char-boundary range as a single undo step.
+    pub fn replace_match(&mut self, range: std::ops::Range<usize>, replacement: &str) -> bool {
+        if range.start > range.end
+            || range.end > self.text.len()
+            || !self.text.is_char_boundary(range.start)
+            || !self.text.is_char_boundary(range.end)
+            || &self.text[range.clone()] == replacement
+        {
+            return false;
+        }
+        self.record(EditKind::Replace, false);
+        let replaced =
+            crate::query::completion::replace_range(&mut self.text, range.clone(), replacement);
+        debug_assert!(replaced);
+        self.cursor = self.clamp_to_boundary(range.start + replacement.len());
+        self.last_insert_was_space = replacement.chars().last().is_some_and(char::is_whitespace);
+        self.end_undo_run();
+        self.after_edit();
+        true
+    }
+
+    /// Replaces all literal matches of `needle` (up to [`MAX_FIND_MATCHES`]) in
+    /// one pass as a single atomic undo step, returning the replacement count.
+    pub fn replace_all(&mut self, needle: &str, replacement: &str, case_sensitive: bool) -> usize {
+        if needle.is_empty() {
+            return 0;
+        }
+        let (matches, _) = self.find_matches(needle, case_sensitive);
+        if matches.is_empty() {
+            return 0;
+        }
+        let mut out = String::with_capacity(self.text.len());
+        let mut last = 0usize;
+        let old_cursor = self.cursor;
+        let mut new_cursor = None;
+        for range in &matches {
+            if new_cursor.is_none() && old_cursor <= range.start {
+                new_cursor = Some(out.len() + (old_cursor - last));
+            }
+            out.push_str(&self.text[last..range.start]);
+            out.push_str(replacement);
+            if new_cursor.is_none() && old_cursor < range.end {
+                new_cursor = Some(out.len());
+            }
+            last = range.end;
+        }
+        let mapped_cursor = new_cursor.unwrap_or_else(|| out.len() + (old_cursor - last));
+        out.push_str(&self.text[last..]);
+        if out == self.text {
+            return 0;
+        }
+        self.record(EditKind::Replace, false);
+        self.text = out;
+        self.cursor = self.clamp_to_boundary(mapped_cursor);
+        self.last_insert_was_space = replacement.chars().last().is_some_and(char::is_whitespace);
+        self.end_undo_run();
+        self.after_edit();
+        matches.len()
     }
 
     /// Inserts pasted text at the cursor as one non-coalesced undo step.
@@ -775,6 +899,25 @@ impl Editor {
 /// Whether a character is part of an identifier-like word.
 fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_' || ch == '$'
+}
+
+fn match_case_insensitive_at(haystack: &str, needle_lower: &[char]) -> Option<usize> {
+    if needle_lower.is_empty() {
+        return None;
+    }
+    let mut matched = 0usize;
+    for (offset, ch) in haystack.char_indices() {
+        for lower_ch in ch.to_lowercase() {
+            if matched >= needle_lower.len() || lower_ch != needle_lower[matched] {
+                return None;
+            }
+            matched += 1;
+        }
+        if matched == needle_lower.len() {
+            return Some(offset + ch.len_utf8());
+        }
+    }
+    None
 }
 
 /// Turns CRLF and lone CR into LF without touching any other character.

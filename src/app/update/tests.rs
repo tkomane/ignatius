@@ -15080,6 +15080,101 @@ fn pin_and_compare_result_snapshot_lifecycle_and_connection_clear() {
 }
 
 #[test]
+fn find_and_replace_navigation_case_toggle_atomic_undo_and_cleanup() {
+    let mut model = Model::new(100);
+    model.focus = Focus::Editor;
+    model.editor.set_text("SELECT café, CAFÉ, café FROM t;");
+    model.editor.set_cursor(0);
+    model.sync_active_buffer_from_editor();
+
+    // Open Find bar, type "café" (case-insensitive by default -> 3 matches).
+    update(&mut model, Message::Action(Action::FindInBuffer));
+    assert!(model.find_replace.is_some());
+    for ch in "café".chars() {
+        update(&mut model, Message::Action(Action::Insert(ch)));
+    }
+    assert_eq!(model.find_replace.as_ref().unwrap().query, "café");
+    assert_eq!(model.find_replace.as_ref().unwrap().active_match, 0);
+
+    // Enter advances through matches and moves the editor caret to each match start.
+    update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(model.editor.cursor(), "SELECT ".len());
+    update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(model.editor.cursor(), "SELECT café, ".len());
+    assert_eq!(model.find_replace.as_ref().unwrap().active_match, 1);
+
+    // Up jumps to previous match.
+    update(&mut model, Message::Action(Action::Move(Direction::Up)));
+    assert_eq!(model.editor.cursor(), "SELECT ".len());
+    assert_eq!(model.find_replace.as_ref().unwrap().active_match, 0);
+
+    // Alt+C toggles case sensitivity -> 2 matches ("café" only).
+    update(&mut model, Message::Action(Action::FindToggleCase));
+    assert!(model.find_replace.as_ref().unwrap().case_sensitive);
+    assert_eq!(model.editor.find_matches("café", true).0.len(), 2);
+
+    // Tab expands Replace field and focuses it; paste into Replace field.
+    update(&mut model, Message::Action(Action::FocusNext));
+    let fr = model.find_replace.as_ref().unwrap();
+    assert!(fr.show_replace);
+    assert_eq!(
+        fr.active_field,
+        crate::app::model::FindReplaceField::Replace
+    );
+    update(&mut model, Message::Pasted("thé".to_owned()));
+    assert_eq!(model.find_replace.as_ref().unwrap().replacement, "thé");
+
+    // Alt+R replaces active match (index 0) and advances to next match.
+    update(&mut model, Message::Action(Action::FindReplaceCurrent));
+    assert_eq!(model.editor.text(), "SELECT thé, CAFÉ, café FROM t;");
+    assert_eq!(model.editor.cursor(), "SELECT thé, CAFÉ, ".len());
+
+    // Undo single replace.
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), "SELECT café, CAFÉ, café FROM t;");
+
+    // Toggle back to case-insensitive, then Alt+A runs atomic replace_all.
+    update(&mut model, Message::Action(Action::FindToggleCase));
+    assert!(!model.find_replace.as_ref().unwrap().case_sensitive);
+    update(&mut model, Message::Action(Action::FindReplaceAll));
+    assert_eq!(model.editor.text(), "SELECT thé, thé, thé FROM t;");
+    assert_eq!(
+        model.find_notice.as_deref(),
+        Some("Replaced 3 occurrence(s).")
+    );
+
+    // Single Undo restores all 3 occurrences atomically.
+    update(&mut model, Message::Action(Action::Undo));
+    assert_eq!(model.editor.text(), "SELECT café, CAFÉ, café FROM t;");
+
+    // Esc closes without changing buffer SQL, while FindNextMatch still works via last_find.
+    update(&mut model, Message::Action(Action::Dismiss));
+    assert!(model.find_replace.is_none());
+    assert_eq!(model.editor.text(), "SELECT café, CAFÉ, café FROM t;");
+    model.editor.set_cursor(0);
+    update(&mut model, Message::Action(Action::FindNextMatch));
+    assert_eq!(model.editor.cursor(), "SELECT ".len());
+    update(&mut model, Message::Action(Action::FindPrevMatch));
+    assert_eq!(model.editor.cursor(), "SELECT café, CAFÉ, ".len());
+
+    // Buffer switches clear find_replace and last_find cleanly.
+    for switch_action in [
+        Action::NewEditorBuffer,
+        Action::PrevEditorBuffer,
+        Action::NextEditorBuffer,
+        Action::CloseEditorBuffer,
+        Action::OpenQuery,
+    ] {
+        update(&mut model, Message::Action(Action::ReplaceInBuffer));
+        update(&mut model, Message::Action(Action::Insert('x')));
+        assert!(model.find_replace.is_some());
+        update(&mut model, Message::Action(switch_action));
+        assert!(model.find_replace.is_none());
+        assert!(model.last_find.is_none());
+    }
+}
+
+#[test]
 fn editor_line_ops_sync_active_buffer_and_respect_focus_and_help() {
     let mut model = connected();
     model

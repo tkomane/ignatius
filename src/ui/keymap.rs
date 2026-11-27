@@ -147,6 +147,10 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("sql-runbook", Action::SqlRunbook),
     ("pin-result", Action::PinResultSnapshot),
     ("compare-result", Action::CompareResultSnapshot),
+    ("find-in-buffer", Action::FindInBuffer),
+    ("replace-in-buffer", Action::ReplaceInBuffer),
+    ("find-next", Action::FindNextMatch),
+    ("find-prev", Action::FindPrevMatch),
     ("toggle-comment", Action::ToggleLineComment),
     ("duplicate-line", Action::DuplicateLine),
     ("move-line-up", Action::MoveLineUp),
@@ -509,6 +513,55 @@ impl Keymap {
             binding(K::Char('z'), ctrl, Action::Undo, "Undo", false),
             binding(K::Char('y'), ctrl, Action::Redo, "Redo", false),
             binding(
+                K::Char('f'),
+                ctrl,
+                Action::FindInBuffer,
+                "Find in the SQL buffer",
+                false,
+            ),
+            binding(
+                K::Char('h'),
+                ctrl,
+                Action::ReplaceInBuffer,
+                "Find and replace in the SQL buffer",
+                false,
+            ),
+            binding(
+                K::F(3),
+                none,
+                Action::FindNextMatch,
+                "Jump to next find match",
+                false,
+            ),
+            binding(
+                K::F(3),
+                KeyModifiers::SHIFT,
+                Action::FindPrevMatch,
+                "Jump to previous find match",
+                false,
+            ),
+            binding(
+                K::Char('c'),
+                alt,
+                Action::FindToggleCase,
+                "Toggle case sensitivity in Find/Replace",
+                false,
+            ),
+            binding(
+                K::Char('r'),
+                alt,
+                Action::FindReplaceCurrent,
+                "Replace current match in Find/Replace",
+                false,
+            ),
+            binding(
+                K::Char('a'),
+                alt,
+                Action::FindReplaceAll,
+                "Replace all matches in Find/Replace",
+                false,
+            ),
+            binding(
                 K::Char('/'),
                 ctrl,
                 Action::ToggleLineComment,
@@ -721,6 +774,16 @@ impl Keymap {
         for binding in &self.bindings {
             if binding.code == event.code && binding.modifiers == event.modifiers {
                 return Some(binding.action.clone());
+            }
+        }
+        if event.modifiers == (KeyModifiers::ALT | KeyModifiers::SHIFT)
+            && let KeyCode::Char(ch) = event.code
+        {
+            let lower = KeyCode::Char(ch.to_ascii_lowercase());
+            for binding in &self.bindings {
+                if binding.code == lower && binding.modifiers == KeyModifiers::ALT {
+                    return Some(binding.action.clone());
+                }
             }
         }
         match event.code {
@@ -1146,6 +1209,13 @@ const fn short_label(action: &Action) -> &'static str {
         Action::SqlRunbook => "Runbook",
         Action::PinResultSnapshot => "Pin result",
         Action::CompareResultSnapshot => "Compare result",
+        Action::FindInBuffer => "Find",
+        Action::ReplaceInBuffer => "Replace",
+        Action::FindNextMatch => "Find next",
+        Action::FindPrevMatch => "Find prev",
+        Action::FindToggleCase => "Match case",
+        Action::FindReplaceCurrent => "Replace one",
+        Action::FindReplaceAll => "Replace all",
         Action::ToggleLineComment => "Comment",
         Action::DuplicateLine => "Duplicate line",
         Action::MoveLineUp => "Move line up",

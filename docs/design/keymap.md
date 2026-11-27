@@ -54,6 +54,10 @@ Opening help or resizing starts at the top. Space bindings are written as
 | `Ctrl+W` `Alt+Backspace` | Delete the word before the cursor | No |
 | `Ctrl+Z` | Undo | No |
 | `Ctrl+Y` | Redo | No |
+| `Ctrl+F` | Find in the SQL buffer | No |
+| `Ctrl+H` | Find and replace in the SQL buffer | No |
+| `F3` | Jump to next find match | No |
+| `Shift+F3` | Jump to previous find match | No |
 | `Ctrl+/` | Toggle `--` line comment | No |
 | `Ctrl+Shift+D` | Duplicate the current line | No |
 | `Alt+Up` `Alt+Down` | Move the current line up or down | No |
@@ -695,8 +699,10 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
 `index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `pin-buffer`, `rename-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
-`move-buffer-end`, `toggle-comment`, `duplicate-line`, `move-line-up`,
-`move-line-down`, `jump-to-line`.
+`move-buffer-end`, `find-in-buffer`, `replace-in-buffer`, `find-next`, `find-prev`,
+`toggle-comment`, `duplicate-line`, `move-line-up`, `move-line-down`, `jump-to-line`.
+
+Inside the in-memory Find & Replace bar (`Ctrl+F` / `Ctrl+H`), typing and paste edit the active field, `Enter` or `F3` jumps to the next match, `Up` or `Shift+F3` jumps to the previous match, `Tab` switches between Find and Replace, `Alt+C` toggles case sensitivity (`[Aa]` vs `[aa]`), `Alt+R` replaces the active match, `Alt+A` replaces all matches as one atomic undo step, and `Esc` closes without modifying buffer SQL.
 
 Movement keys are not bindable. They mean different things in each pane, and
 rebinding them one at a time would produce an interface nobody could describe.

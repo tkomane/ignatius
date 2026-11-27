@@ -189,6 +189,20 @@ pub enum Action {
     PinResultSnapshot,
     /// Compare the pinned baseline snapshot against the currently retained result set.
     CompareResultSnapshot,
+    /// Open the in-buffer literal Find bar.
+    FindInBuffer,
+    /// Open the in-buffer literal Find & Replace bar.
+    ReplaceInBuffer,
+    /// Jump to the next literal match in the active editor buffer.
+    FindNextMatch,
+    /// Jump to the previous literal match in the active editor buffer.
+    FindPrevMatch,
+    /// Toggle case sensitivity inside the Find & Replace bar.
+    FindToggleCase,
+    /// Replace the active match inside the Find & Replace bar.
+    FindReplaceCurrent,
+    /// Replace all matches inside the Find & Replace bar as one undo step.
+    FindReplaceAll,
     /// Toggle a `-- ` SQL comment on the current editor line.
     ToggleLineComment,
     /// Duplicate the current editor line immediately below.
@@ -350,6 +364,13 @@ impl Action {
             Self::SqlRunbook,
             Self::PinResultSnapshot,
             Self::CompareResultSnapshot,
+            Self::FindInBuffer,
+            Self::ReplaceInBuffer,
+            Self::FindNextMatch,
+            Self::FindPrevMatch,
+            Self::FindToggleCase,
+            Self::FindReplaceCurrent,
+            Self::FindReplaceAll,
             Self::ToggleLineComment,
             Self::DuplicateLine,
             Self::MoveLineUp,

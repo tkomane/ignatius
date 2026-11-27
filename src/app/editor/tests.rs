@@ -497,6 +497,90 @@ fn an_empty_paste_changes_nothing() {
 }
 
 #[test]
+fn find_matches_handles_empty_ascii_unicode_and_case_sensitivity() {
+    let editor = Editor::with_text("SELECT café, CAFÉ, İstanbul, aaa FROM orders;");
+    assert_eq!(editor.find_matches("", false), (Vec::new(), false));
+    assert_eq!(editor.find_matches("", true), (Vec::new(), false));
+
+    let (sensitive, capped) = editor.find_matches("café", true);
+    assert!(!capped);
+    assert_eq!(sensitive.len(), 1);
+    assert_eq!(&editor.text()[sensitive[0].clone()], "café");
+
+    let (insensitive, capped) = editor.find_matches("CAFÉ", false);
+    assert!(!capped);
+    assert_eq!(insensitive.len(), 2);
+    assert_eq!(&editor.text()[insensitive[0].clone()], "café");
+    assert_eq!(&editor.text()[insensitive[1].clone()], "CAFÉ");
+
+    // Non-overlapping literal match on "aaa" -> 1 match of "aa".
+    let (non_overlap, _) = editor.find_matches("aa", true);
+    assert_eq!(non_overlap.len(), 1);
+    assert_eq!(&editor.text()[non_overlap[0].clone()], "aa");
+
+    // Multi-byte UTF-8 case folding where lowercase expands byte count ('İ' -> "i\u{307}").
+    let (folded, _) = editor.find_matches("i\u{307}stanbul", false);
+    assert_eq!(folded.len(), 1);
+    assert_eq!(&editor.text()[folded[0].clone()], "İstanbul");
+    // Partial prefix of folded character must never match or slice mid-codepoint.
+    let (partial, _) = editor.find_matches("i", false);
+    assert!(partial.is_empty());
+}
+
+#[test]
+fn find_matches_caps_at_max_find_matches() {
+    let source = "x".repeat(MAX_FIND_MATCHES + 5);
+    let editor = Editor::with_text(source);
+    let (matches, capped) = editor.find_matches("x", true);
+    assert_eq!(matches.len(), MAX_FIND_MATCHES);
+    assert!(capped);
+
+    let exact = Editor::with_text("x".repeat(MAX_FIND_MATCHES));
+    let (exact_matches, exact_capped) = exact.find_matches("x", true);
+    assert_eq!(exact_matches.len(), MAX_FIND_MATCHES);
+    assert!(!exact_capped);
+}
+
+#[test]
+fn replace_match_validates_boundaries_and_records_one_undo_step() {
+    let mut editor = Editor::with_text("SELECT café, café;");
+    // Invalid byte boundary inside 'é'
+    let bad_idx = "SELECT caf".len() + 1;
+    assert!(!editor.replace_match(bad_idx..bad_idx + 1, "x"));
+    assert!(!editor.can_undo());
+
+    let (matches, _) = editor.find_matches("café", true);
+    assert_eq!(matches.len(), 2);
+    assert!(editor.replace_match(matches[0].clone(), "thé"));
+    assert_eq!(editor.text(), "SELECT thé, café;");
+    assert!(editor.text().is_char_boundary(editor.cursor()));
+    assert!(editor.can_undo());
+
+    editor.undo();
+    assert_eq!(editor.text(), "SELECT café, café;");
+    assert!(!editor.can_undo());
+}
+
+#[test]
+fn replace_all_is_one_atomic_undo_step_and_keeps_valid_char_boundary() {
+    let source = "SELECT café, CAFÉ FROM café_orders;";
+    let mut editor = Editor::with_text(source);
+    let caret_inside = source.find("CAFÉ").expect("CAFÉ") + "CAF".len();
+    editor.set_cursor(caret_inside);
+
+    let replaced = editor.replace_all("café", "tea", false);
+    assert_eq!(replaced, 3);
+    assert_eq!(editor.text(), "SELECT tea, tea FROM tea_orders;");
+    assert!(editor.text().is_char_boundary(editor.cursor()));
+    assert!(editor.cursor() <= editor.text().len());
+
+    editor.undo();
+    assert_eq!(editor.text(), source);
+    assert_eq!(editor.cursor(), caret_inside);
+    assert!(!editor.can_undo());
+}
+
+#[test]
 fn toggle_line_comment_preserves_indentation_utf8_cursor_and_undo_boundary() {
     let mut editor = Editor::with_text("  SELECT café");
     editor.set_cursor("  SE".len());

@@ -12,6 +12,6 @@
 
 ## Phase 2: PR 2B - In-Buffer Find & Replace (`feat/m24-editor-find-replace`)
 
-- [ ] T005 Implement in-buffer find match indexing, next/previous navigation, and single/all replace primitives on `Editor` and `Model`.
-- [ ] T006 Wire Find & Replace actions, keybindings, Command Palette entries, and TUI prompt/bar rendering using `Theme`/`Token` styles.
-- [ ] T007 Add unit, reducer, UI, and documentation contract tests for Find & Replace and verify with `cargo --locked xtask verify`.
+- [x] T005 Implement in-buffer find match indexing, next/previous navigation, and single/all replace primitives on `Editor` and `Model`.
+- [x] T006 Wire Find & Replace actions, keybindings, Command Palette entries, and TUI prompt/bar rendering using `Theme`/`Token` styles.
+- [x] T007 Add unit, reducer, UI, and documentation contract tests for Find & Replace and verify with `cargo --locked xtask verify`.
