@@ -381,6 +381,8 @@ fn runtime_geometry_changed_input_cannot_accept_before_the_new_frame_is_painted(
                 read_only: false,
                 tls: crate::postgres::TlsState::Disabled,
                 environment: crate::connection::Environment::Local,
+                statement_timeout: None,
+                lock_timeout: None,
             }));
         model.pending_plan = Some(crate::app::model::PendingPlan {
             sql: "SELECT 1;".into(),
@@ -2522,6 +2524,42 @@ async fn doctor_probe_target_displays_target_session_attrs_when_not_any() {
         );
     }
     let _ = target;
+}
+
+#[tokio::test]
+async fn doctor_probe_target_displays_configured_session_timeouts() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let missing_socket = dir.path().join("missing-pg-socket");
+    let config = Config::default();
+
+    let target = if crate::platform::supports_unix_sockets() {
+        crate::connection::resolve(
+            Some(&format!(
+                "host={} statement_timeout=30s lock_timeout=500ms",
+                missing_socket.display()
+            )),
+            &crate::connection::ConnectionArgs::default(),
+            &EnvSnapshot::default(),
+            &config.connection,
+        )
+        .expect("resolve")
+    } else {
+        return;
+    };
+
+    let checks = probe_target(target, &config).await.expect("probe");
+    let stmt = checks
+        .iter()
+        .find(|c| c.name == "statement_timeout")
+        .expect("statement_timeout check");
+    assert_eq!(stmt.status, CheckStatus::Ok);
+    assert_eq!(stmt.detail, "30s");
+    let lock = checks
+        .iter()
+        .find(|c| c.name == "lock_timeout")
+        .expect("lock_timeout check");
+    assert_eq!(lock.status, CheckStatus::Ok);
+    assert_eq!(lock.detail, "500ms");
 }
 
 #[tokio::test]

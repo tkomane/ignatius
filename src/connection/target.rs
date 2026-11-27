@@ -343,6 +343,10 @@ pub struct ConnectionArgs {
     pub read_only: bool,
     /// `--auth`: the cloud identity provider that supplies the credential.
     pub auth: Option<String>,
+    /// `--statement-timeout`
+    pub statement_timeout: Option<Duration>,
+    /// `--lock-timeout`
+    pub lock_timeout: Option<Duration>,
 }
 
 /// Copying a password on purpose.
@@ -418,6 +422,10 @@ pub struct ConnectionTarget {
     pub application_name: String,
     /// How long to wait for the connection.
     pub connect_timeout: Duration,
+    /// Session `statement_timeout`, when explicitly configured. `Some(Duration::ZERO)` disables it.
+    pub statement_timeout: Option<Duration>,
+    /// Session `lock_timeout`, when explicitly configured. `Some(Duration::ZERO)` disables it.
+    pub lock_timeout: Option<Duration>,
     /// User-declared classification of this database.
     pub environment: Environment,
     /// Whether the session should be made read-only at the server.
@@ -438,6 +446,79 @@ pub struct ConnectionTarget {
     pub(crate) passfile: Option<PathBuf>,
     /// Whether the password came from an explicit source rather than `.pgpass`.
     pub(crate) explicit_password: bool,
+}
+
+/// Safe bounded `statement_timeout` applied to internal object-tree connections.
+pub const DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Safe bounded `lock_timeout` applied to internal object-tree connections.
+pub const DEFAULT_OBJECT_TREE_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum allowed session timeout duration (24 hours).
+pub const MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(86_400);
+
+/// Parses a human-entered timeout duration (`0`/`0ms`/`0s`, integer seconds, or `ms`/`s`/`m`/`h`).
+pub fn parse_timeout_duration(input: &str) -> Result<Duration, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(
+            "timeout cannot be empty; use 0 to disable, integer seconds, or a suffix like 500ms, 30s, 5m, 1h"
+                .to_owned(),
+        );
+    }
+    if trimmed.starts_with('-') {
+        return Err("timeout cannot be negative".to_owned());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let (digits, multiplier_ms) = if let Some(rest) = lower.strip_suffix("ms") {
+        (rest, 1u64)
+    } else if let Some(rest) = lower.strip_suffix('s') {
+        (rest, 1_000u64)
+    } else if let Some(rest) = lower.strip_suffix('m') {
+        (rest, 60_000u64)
+    } else if let Some(rest) = lower.strip_suffix('h') {
+        (rest, 3_600_000u64)
+    } else {
+        (lower.as_str(), 1_000u64)
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!(
+            "invalid timeout {input:?}; expected 0, integer seconds, or a value ending in ms, s, m, or h (for example 500ms, 30s, 5m, 1h)"
+        ));
+    }
+    let value = digits
+        .parse::<u64>()
+        .map_err(|_| format!("timeout {input:?} is out of range; maximum is 24h (86400s)"))?;
+    if value == 0 {
+        return Ok(Duration::ZERO);
+    }
+    let max_ms = u64::try_from(MAX_TIMEOUT_DURATION.as_millis()).unwrap_or(u64::MAX);
+    let total_ms = value
+        .checked_mul(multiplier_ms)
+        .filter(|&ms| ms <= max_ms)
+        .ok_or_else(|| format!("timeout {input:?} exceeds maximum of 24h (86400s)"))?;
+    Ok(Duration::from_millis(total_ms))
+}
+
+/// Formats a timeout duration concisely for diagnostics and UI surfaces.
+#[must_use]
+pub fn format_timeout_duration(d: Duration) -> String {
+    if d.is_zero() {
+        return "disabled".to_owned();
+    }
+    let millis = d.as_millis();
+    if !millis.is_multiple_of(1_000) {
+        format!("{millis}ms")
+    } else {
+        let secs = d.as_secs();
+        if secs.is_multiple_of(3_600) {
+            format!("{}h", secs / 3_600)
+        } else if secs.is_multiple_of(60) {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{secs}s")
+        }
+    }
 }
 
 impl ConnectionTarget {
@@ -488,6 +569,8 @@ impl ConnectionTarget {
         copy.application_name = format!("{prefix}{OBJECT_SUFFIX}");
         copy.read_only = true;
         copy.target_session_attrs = TargetSessionAttrs::Any;
+        copy.statement_timeout = Some(DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT);
+        copy.lock_timeout = Some(DEFAULT_OBJECT_TREE_LOCK_TIMEOUT);
         copy.endpoints = vec![Endpoint {
             host: self.host.clone(),
             port: self.port,
@@ -563,6 +646,8 @@ impl ConnectionTarget {
             client_key: self.client_key.clone(),
             application_name: self.application_name.clone(),
             connect_timeout: self.connect_timeout,
+            statement_timeout: self.statement_timeout,
+            lock_timeout: self.lock_timeout,
             environment: self.environment.clone(),
             read_only: self.read_only,
             notes: self.notes.clone(),
@@ -614,6 +699,8 @@ const SUPPORTED_KEYS: &[&str] = &[
     "sslkey",
     "application_name",
     "connect_timeout",
+    "statement_timeout",
+    "lock_timeout",
 ];
 
 /// Parameters whose silent omission could weaken confidentiality or identity
@@ -811,6 +898,42 @@ pub fn resolve(
             Duration::from_secs,
         );
 
+    let parse_layered_timeout = |key: &str| -> Result<Option<Duration>, Diagnostic> {
+        let text = parsed
+            .get(key)
+            .cloned()
+            .or_else(|| service_values.get(key).cloned());
+        match text {
+            Some(value) => parse_timeout_duration(&value).map(Some).map_err(|message| {
+                Diagnostic::new(
+                    DiagnosticKind::Config,
+                    format!("invalid {key} {value:?}: {message}"),
+                    "resolving the connection target",
+                )
+                .next_action("use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)")
+            }),
+            None => Ok(None),
+        }
+    };
+
+    let statement_timeout = match args.statement_timeout {
+        Some(duration) => Some(duration),
+        None => match parse_layered_timeout("statement_timeout")? {
+            Some(duration) => Some(duration),
+            None => (config.statement_timeout_seconds > 0)
+                .then(|| Duration::from_secs(config.statement_timeout_seconds)),
+        },
+    };
+
+    let lock_timeout = match args.lock_timeout {
+        Some(duration) => Some(duration),
+        None => match parse_layered_timeout("lock_timeout")? {
+            Some(duration) => Some(duration),
+            None => (config.lock_timeout_seconds > 0)
+                .then(|| Duration::from_secs(config.lock_timeout_seconds)),
+        },
+    };
+
     // A password file is the last resort and the safest of the routes: it keeps
     // the password off the command line, out of the environment, and out of
     // shell history. It is only read when nothing else supplied one.
@@ -866,6 +989,8 @@ pub fn resolve(
         client_key,
         application_name,
         connect_timeout,
+        statement_timeout,
+        lock_timeout,
         environment: args.environment.clone().unwrap_or_default(),
         read_only: args.read_only,
         notes,

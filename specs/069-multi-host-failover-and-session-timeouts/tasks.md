@@ -14,6 +14,6 @@
 
 ## Phase 2: PR 1B - Session Lock and Idle-in-Transaction Timeouts (`feat/m23-session-timeouts`)
 
-- [ ] T007 Add `lock_timeout` and `idle_in_transaction_session_timeout` configuration, profile, CLI, and connection parameters in `src/config/schema.rs`, `src/connection/target.rs`, and `src/cli/mod.rs`.
-- [ ] T008 Apply and report `lock_timeout` and `idle_in_transaction_session_timeout` during `Session` bootstrap in `src/postgres/session.rs` and `doctor` surfaces.
-- [ ] T009 Add unit tests and live PostgreSQL 18.7 integration tests for session/lock timeouts and verify with `cargo --locked xtask verify`.
+- [x] T007 Add `lock_timeout` and `idle_in_transaction_session_timeout` configuration, profile, CLI, and connection parameters in `src/config/schema.rs`, `src/connection/target.rs`, and `src/cli/mod.rs`.
+- [x] T008 Apply and report `lock_timeout` and `idle_in_transaction_session_timeout` during `Session` bootstrap in `src/postgres/session.rs` and `doctor` surfaces.
+- [x] T009 Add unit tests and live PostgreSQL 18.7 integration tests for session/lock timeouts and verify with `cargo --locked xtask verify`.

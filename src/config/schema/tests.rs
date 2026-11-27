@@ -78,6 +78,8 @@ fn validation_reports_every_problem_at_once() {
         connection: ConnectionConfig {
             connect_timeout_seconds: 0,
             application_name: "  ".into(),
+            statement_timeout_seconds: 0,
+            lock_timeout_seconds: 0,
         },
         ..Config::default()
     };
@@ -434,4 +436,61 @@ fn profile_target_session_attrs_round_trips_and_validates() {
         .expect_err("invalid target-session-attrs must fail validation");
     assert_eq!(err.kind, crate::diagnostics::DiagnosticKind::Config);
     assert!(err.headline.contains("target-session-attrs"));
+}
+
+#[test]
+fn profile_and_connection_timeouts_round_trip_and_validate() {
+    assert!(PROFILE_FIELDS.contains(&"statement-timeout"));
+    assert!(PROFILE_FIELDS.contains(&"lock-timeout"));
+
+    let config: Config = toml::from_str(
+        "[connection]\nstatement-timeout-seconds = 30\nlock-timeout-seconds = 5\n\n\
+         [profiles.p]\nhost = \"localhost\"\nstatement-timeout = \"15s\"\nlock-timeout = \"500ms\"\n",
+    )
+    .expect("parse timeouts");
+    assert_eq!(config.connection.statement_timeout_seconds, 30);
+    assert_eq!(config.connection.lock_timeout_seconds, 5);
+    assert!(config.validate().is_empty());
+    let profile = &config.profiles["p"];
+    assert_eq!(profile.statement_timeout.as_deref(), Some("15s"));
+    assert_eq!(profile.lock_timeout.as_deref(), Some("500ms"));
+    assert!(profile.validate("p").is_ok());
+
+    let serialized = toml::to_string(&config).expect("serialize");
+    assert!(serialized.contains("statement-timeout = \"15s\""));
+    assert!(serialized.contains("lock-timeout = \"500ms\""));
+
+    let bad_profile: Config =
+        toml::from_str("[profiles.bad]\nhost = \"localhost\"\nstatement-timeout = \"-10s\"\n")
+            .expect("parse");
+    let err = bad_profile.profiles["bad"]
+        .validate("bad")
+        .expect_err("invalid statement-timeout must fail");
+    assert_eq!(err.kind, crate::diagnostics::DiagnosticKind::Config);
+    assert!(err.headline.contains("statement-timeout"));
+
+    let bad_lock: Config =
+        toml::from_str("[profiles.bad]\nhost = \"localhost\"\nlock-timeout = \"25h\"\n")
+            .expect("parse");
+    let err = bad_lock.profiles["bad"]
+        .validate("bad")
+        .expect_err("over-limit lock-timeout must fail");
+    assert_eq!(err.kind, crate::diagnostics::DiagnosticKind::Config);
+    assert!(err.headline.contains("lock-timeout"));
+
+    let over_global: Config = toml::from_str(
+        "[connection]\nstatement-timeout-seconds = 90000\nlock-timeout-seconds = 90000\n",
+    )
+    .expect("parse");
+    let issues = over_global.validate();
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.path == "connection.statement-timeout-seconds")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.path == "connection.lock-timeout-seconds")
+    );
 }

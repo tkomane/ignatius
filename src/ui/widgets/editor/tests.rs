@@ -28,6 +28,8 @@ fn session() -> Box<SessionInfo> {
         read_only: false,
         tls: TlsState::Disabled,
         environment: Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     })
 }
 

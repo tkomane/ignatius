@@ -4232,6 +4232,21 @@ pub async fn probe_target(
             ),
         ));
     }
+    if let Some(timeout) = target.statement_timeout.or_else(|| {
+        (config.query.statement_timeout_ms > 0)
+            .then(|| Duration::from_millis(config.query.statement_timeout_ms))
+    }) {
+        checks.push(Check::ok(
+            "statement_timeout",
+            crate::connection::format_timeout_duration(timeout),
+        ));
+    }
+    if let Some(timeout) = target.lock_timeout {
+        checks.push(Check::ok(
+            "lock_timeout",
+            crate::connection::format_timeout_duration(timeout),
+        ));
+    }
 
     if target.endpoints.len() <= 1 {
         match &target.host {

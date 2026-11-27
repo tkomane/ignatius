@@ -41,6 +41,8 @@ fn session() -> Box<SessionInfo> {
         read_only: false,
         tls: TlsState::Disabled,
         environment: Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     })
 }
 
@@ -65,6 +67,8 @@ fn profile() -> ConnectionProfileSummary {
         user: "app".into(),
         transport: "disable".into(),
         target_session_attrs: None,
+        statement_timeout: None,
+        lock_timeout: None,
         environment: "local".into(),
         read_only: false,
         auth: None,

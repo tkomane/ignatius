@@ -58,6 +58,8 @@ fn posture_is_stated_in_words() {
         read_only: false,
         tls: TlsState::Disabled,
         environment: crate::connection::Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     };
     assert_eq!(info.posture(), "read-write");
     info.read_only = true;
@@ -171,7 +173,9 @@ async fn live_session(startup_setting: Option<&str>) -> Option<Session> {
             }
         }
         .expect("synthetic fixture connection");
-    let (info, _) = bootstrap(&client, &target).await.expect("session facts");
+    let (info, _) = bootstrap(&client, &target, None)
+        .await
+        .expect("session facts");
     Some(Session {
         client,
         user_sql_gate: tokio::sync::Mutex::new(()),

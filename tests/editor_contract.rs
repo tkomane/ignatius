@@ -33,6 +33,8 @@ fn connected_model() -> Model {
             read_only: false,
             tls: TlsState::Disabled,
             environment: Environment::Local,
+            statement_timeout: None,
+            lock_timeout: None,
         })),
     );
     model

@@ -644,6 +644,8 @@ fn session(environment: Environment, tls: TlsState) -> Box<SessionInfo> {
         read_only: false,
         tls,
         environment,
+        statement_timeout: None,
+        lock_timeout: None,
     })
 }
 
@@ -3014,6 +3016,22 @@ fn connection_details_sanitise_custom_provider_display_text() {
         "sanitised provider name is visible"
     );
     assert!(!text.contains("--secret"), "provider arguments leaked");
+}
+
+#[test]
+fn connection_details_surface_configured_session_timeouts() {
+    let mut model = connected_model(Environment::Production);
+    if let ConnectionState::Connected(info) = &mut model.connection {
+        info.statement_timeout = Some(Duration::from_secs(30));
+        info.lock_timeout = Some(Duration::from_millis(500));
+    }
+    model.connection_details = true;
+
+    let text = render_to_string(&model, &Keymap::new(), &rich(), 140, 36);
+    assert!(text.contains("Statement timeout"), "{text}");
+    assert!(text.contains("30s"), "{text}");
+    assert!(text.contains("Lock timeout"), "{text}");
+    assert!(text.contains("500ms"), "{text}");
 }
 
 // ------------------------------------------------------------ chords

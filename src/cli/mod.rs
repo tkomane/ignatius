@@ -670,6 +670,20 @@ pub struct ConnectionOptions {
     /// would be worse than asking.
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
+
+    /// Maximum duration a statement may run before PostgreSQL cancels it.
+    ///
+    /// Accepts `0` / `0ms` / `0s` to disable, integer seconds (e.g. `30`), or a
+    /// duration with `ms`, `s`, `m`, or `h` (up to `24h`).
+    #[arg(long, value_name = "DUR")]
+    pub statement_timeout: Option<String>,
+
+    /// Maximum duration a statement may wait for a lock before PostgreSQL aborts it.
+    ///
+    /// Accepts `0` / `0ms` / `0s` to disable, integer seconds (e.g. `5`), or a
+    /// duration with `ms`, `s`, `m`, or `h` (up to `24h`).
+    #[arg(long, value_name = "DUR")]
+    pub lock_timeout: Option<String>,
 }
 
 impl ConnectionOptions {
@@ -687,6 +701,8 @@ impl ConnectionOptions {
             || self.read_only
             || self.auth.is_some()
             || self.profile.is_some()
+            || self.statement_timeout.is_some()
+            || self.lock_timeout.is_some()
     }
 
     /// Converts to resolved connection arguments.
@@ -718,6 +734,28 @@ impl ConnectionOptions {
             })?),
             None => None,
         };
+        let statement_timeout = match &self.statement_timeout {
+            Some(text) => Some(
+                crate::connection::parse_timeout_duration(text).map_err(|message| {
+                    Diagnostic::new(DiagnosticKind::Usage, message, "reading --statement-timeout")
+                        .next_action(
+                            "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
+                        )
+                })?,
+            ),
+            None => None,
+        };
+        let lock_timeout = match &self.lock_timeout {
+            Some(text) => Some(
+                crate::connection::parse_timeout_duration(text).map_err(|message| {
+                    Diagnostic::new(DiagnosticKind::Usage, message, "reading --lock-timeout")
+                        .next_action(
+                            "use 0 to disable, integer seconds, or a duration like 500ms, 5s, 1m (max 24h)",
+                        )
+                })?,
+            ),
+            None => None,
+        };
         Ok(ConnectionArgs {
             read_only: self.read_only,
             host: self.host.clone(),
@@ -728,6 +766,8 @@ impl ConnectionOptions {
             target_session_attrs,
             environment,
             auth: self.auth.clone(),
+            statement_timeout,
+            lock_timeout,
         })
     }
 
@@ -801,6 +841,40 @@ impl ConnectionOptions {
         }
         if args.auth.is_none() {
             args.auth.clone_from(&profile.auth);
+        }
+        if args.statement_timeout.is_none()
+            && let Some(text) = &profile.statement_timeout
+        {
+            args.statement_timeout = Some(
+                crate::connection::parse_timeout_duration(text).map_err(|message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        format!("profile {name:?} has an invalid statement-timeout"),
+                        "reading connection profiles",
+                    )
+                    .likely_cause(message)
+                    .next_action(
+                        "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
+                    )
+                })?,
+            );
+        }
+        if args.lock_timeout.is_none()
+            && let Some(text) = &profile.lock_timeout
+        {
+            args.lock_timeout = Some(
+                crate::connection::parse_timeout_duration(text).map_err(|message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        format!("profile {name:?} has an invalid lock-timeout"),
+                        "reading connection profiles",
+                    )
+                    .likely_cause(message)
+                    .next_action(
+                        "use 0 to disable, integer seconds, or a duration like 500ms, 5s, 1m (max 24h)",
+                    )
+                })?,
+            );
         }
         // A profile can only add read-only, never take it away: a flag that
         // makes a session safer must not be undone by a file.

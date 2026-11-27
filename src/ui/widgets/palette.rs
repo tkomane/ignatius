@@ -1106,7 +1106,7 @@ pub(crate) fn render_connection_details(
     ratatui::widgets::Clear.render(area, buf);
     Block::new().style(theme.stripe()).render(area, buf);
 
-    let box_area = overlay_box(area, presentation, (96, 30), 8, OverlayAnchor::Center);
+    let box_area = overlay_box(area, presentation, (96, 32), 8, OverlayAnchor::Center);
     let width = box_area.width;
     let height = box_area.height;
     if width < 28 || height < 8 {
@@ -1178,6 +1178,24 @@ pub(crate) fn render_connection_details(
         },
     );
     push_detail(&mut lines, "Posture", posture, theme.style(Token::Info));
+    if let Some(info) = model.connection.info() {
+        if let Some(timeout) = info.statement_timeout {
+            push_detail(
+                &mut lines,
+                "Statement timeout",
+                crate::connection::format_timeout_duration(timeout),
+                theme.style(Token::Text),
+            );
+        }
+        if let Some(timeout) = info.lock_timeout {
+            push_detail(
+                &mut lines,
+                "Lock timeout",
+                crate::connection::format_timeout_duration(timeout),
+                theme.style(Token::Text),
+            );
+        }
+    }
 
     push_details_section(&mut lines, "Transport", theme);
     if let Some(info) = model.connection.info() {

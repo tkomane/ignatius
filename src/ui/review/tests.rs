@@ -21,6 +21,8 @@ fn minimum_model(kind: Kind, density: Density) -> Model {
             } else {
                 crate::connection::Environment::Local
             },
+            statement_timeout: None,
+            lock_timeout: None,
         }));
     model.editor.set_text(if kind == Kind::Parameter {
         "SELECT :note;"

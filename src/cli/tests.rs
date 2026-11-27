@@ -390,6 +390,14 @@ fn implicit_interactive_start_is_kept_only_when_no_route_option_was_typed() {
             profile: Some("orders-prod".into()),
             ..ConnectionOptions::default()
         },
+        ConnectionOptions {
+            statement_timeout: Some("30s".into()),
+            ..ConnectionOptions::default()
+        },
+        ConnectionOptions {
+            lock_timeout: Some("5s".into()),
+            ..ConnectionOptions::default()
+        },
     ] {
         assert!(
             options.has_explicit_route(),
@@ -2420,4 +2428,72 @@ fn queries_cli_lists_filters_and_shows_saved_queries_offline() {
     assert!(!bad_err.is_empty());
 
     let _ = std::fs::remove_dir_all(&cfg_dir);
+}
+
+#[test]
+fn session_timeout_cli_flags_validate_and_override_profile() {
+    use std::time::Duration;
+
+    Cli::command().debug_assert();
+
+    let cli = Cli::try_parse_from([
+        "ignatius",
+        "query",
+        "-c",
+        "SELECT 1",
+        "--statement-timeout",
+        "500ms",
+        "--lock-timeout",
+        "2s",
+    ])
+    .expect("parse timeout flags");
+    let Some(Command::Query { connection, .. }) = cli.command else {
+        panic!("expected query command");
+    };
+    assert_eq!(connection.statement_timeout.as_deref(), Some("500ms"));
+    assert_eq!(connection.lock_timeout.as_deref(), Some("2s"));
+    let args = connection.to_args().expect("to_args");
+    assert_eq!(args.statement_timeout, Some(Duration::from_millis(500)));
+    assert_eq!(args.lock_timeout, Some(Duration::from_secs(2)));
+
+    let bad = ConnectionOptions {
+        statement_timeout: Some("-5s".into()),
+        ..ConnectionOptions::default()
+    };
+    let err = bad.to_args().expect_err("negative flag must fail");
+    assert_eq!(err.kind, DiagnosticKind::Usage);
+    assert_eq!(err.exit_code(), ExitCode::Usage);
+
+    let config = with_profiles(
+        "[profiles.timed]\n\
+         host = \"db.example.net\"\n\
+         statement-timeout = \"30s\"\n\
+         lock-timeout = \"5s\"\n",
+    );
+    let (_, profile_args) =
+        resolve_target_and_profile(Some("@timed"), &options(None), &config).expect("profile");
+    assert_eq!(
+        profile_args.statement_timeout,
+        Some(Duration::from_secs(30))
+    );
+    assert_eq!(profile_args.lock_timeout, Some(Duration::from_secs(5)));
+
+    let cli_override = ConnectionOptions {
+        statement_timeout: Some("0".into()),
+        lock_timeout: Some("250ms".into()),
+        ..options(Some("timed"))
+    };
+    let (_, override_args) =
+        resolve_target_and_profile(None, &cli_override, &config).expect("cli overrides profile");
+    assert_eq!(override_args.statement_timeout, Some(Duration::ZERO));
+    assert_eq!(override_args.lock_timeout, Some(Duration::from_millis(250)));
+
+    let bad_profile = with_profiles(
+        "[profiles.broken]\n\
+         host = \"db.example.net\"\n\
+         lock-timeout = \"not-a-duration\"\n",
+    );
+    let err = resolve_target_and_profile(Some("@broken"), &options(None), &bad_profile)
+        .expect_err("invalid profile lock-timeout must fail");
+    assert_eq!(err.kind, DiagnosticKind::Config);
 }

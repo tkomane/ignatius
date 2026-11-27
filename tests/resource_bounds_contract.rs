@@ -313,6 +313,8 @@ fn w10_local_input_palette_and_completion_p95_within_100ms_and_state_invariant()
             read_only: false,
             tls: TlsState::Disabled,
             environment: Environment::Local,
+            statement_timeout: None,
+            lock_timeout: None,
         })),
     );
 

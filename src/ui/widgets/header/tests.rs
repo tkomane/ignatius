@@ -272,6 +272,8 @@ fn connected_model(env: crate::connection::Environment) -> Model {
         read_only: false,
         search_path: "public".into(),
         environment: env,
+        statement_timeout: None,
+        lock_timeout: None,
     }));
     model
 }
