@@ -151,6 +151,11 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("replace-in-buffer", Action::ReplaceInBuffer),
     ("find-next", Action::FindNextMatch),
     ("find-prev", Action::FindPrevMatch),
+    ("toggle-comment", Action::ToggleLineComment),
+    ("duplicate-line", Action::DuplicateLine),
+    ("move-line-up", Action::MoveLineUp),
+    ("move-line-down", Action::MoveLineDown),
+    ("jump-to-line", Action::JumpToLine),
 ];
 
 /// The action a configuration name means.
@@ -554,6 +559,41 @@ impl Keymap {
                 alt,
                 Action::FindReplaceAll,
                 "Replace all matches in Find/Replace",
+                false,
+            ),
+            binding(
+                K::Char('/'),
+                ctrl,
+                Action::ToggleLineComment,
+                "Toggle line comment",
+                false,
+            ),
+            binding(
+                K::Char('d'),
+                ctrl | KeyModifiers::SHIFT,
+                Action::DuplicateLine,
+                "Duplicate the current line",
+                false,
+            ),
+            binding(
+                K::Up,
+                alt,
+                Action::MoveLineUp,
+                "Move the current line up",
+                false,
+            ),
+            binding(
+                K::Down,
+                alt,
+                Action::MoveLineDown,
+                "Move the current line down",
+                false,
+            ),
+            binding(
+                K::Char('l'),
+                ctrl,
+                Action::JumpToLine,
+                "Jump to a line number",
                 false,
             ),
         ];
@@ -1176,6 +1216,11 @@ const fn short_label(action: &Action) -> &'static str {
         Action::FindToggleCase => "Match case",
         Action::FindReplaceCurrent => "Replace one",
         Action::FindReplaceAll => "Replace all",
+        Action::ToggleLineComment => "Comment",
+        Action::DuplicateLine => "Duplicate line",
+        Action::MoveLineUp => "Move line up",
+        Action::MoveLineDown => "Move line down",
+        Action::JumpToLine => "Jump to line",
     }
 }
 

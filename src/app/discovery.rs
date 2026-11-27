@@ -409,6 +409,11 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::GenerateCellUpdate,
         Action::RefreshResult,
         Action::FormatBuffer,
+        Action::ToggleLineComment,
+        Action::DuplicateLine,
+        Action::MoveLineUp,
+        Action::MoveLineDown,
+        Action::JumpToLine,
         Action::SwitchTheme,
         Action::OpenConnectionPicker,
         Action::Cancel,
@@ -567,6 +572,11 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         }
         Action::RestoreSession | Action::DiscardRecovery => model.recovery_banner.is_some(),
         Action::LintBuffer => !model.editor.text().trim().is_empty(),
+        Action::ToggleLineComment
+        | Action::DuplicateLine
+        | Action::MoveLineUp
+        | Action::MoveLineDown
+        | Action::JumpToLine => ctx.focus == Focus::Editor,
         Action::BeginPrefix => false,
         Action::ToggleErrorDetail => model.error.is_some(),
         Action::Dismiss => {
@@ -827,6 +837,11 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
             "an unrecovered crash session journal".to_owned()
         }
         Action::LintBuffer => "text in the editor".to_owned(),
+        Action::ToggleLineComment
+        | Action::DuplicateLine
+        | Action::MoveLineUp
+        | Action::MoveLineDown
+        | Action::JumpToLine => "focus the editor".to_owned(),
         Action::Move(_) => "focus a pane with something to move through".to_owned(),
         Action::Activate => {
             if ctx.focus == Focus::Results {
@@ -914,6 +929,11 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::FindToggleCase
         | Action::FindReplaceCurrent
         | Action::FindReplaceAll
+        | Action::ToggleLineComment
+        | Action::DuplicateLine
+        | Action::MoveLineUp
+        | Action::MoveLineDown
+        | Action::JumpToLine
         | Action::SqlRunbook => "Editor",
         Action::OpenResultControls
         | Action::NarrowColumn

@@ -729,3 +729,54 @@ fn discovery_snapshot_and_hints_use_configured_keys() {
         Some(("F4 g".to_owned(), "Grid controls"))
     );
 }
+
+#[test]
+fn editor_power_tool_bindings_are_configurable_and_preserve_typing() {
+    let keymap = Keymap::new();
+    for (code, modifiers, expected, name) in [
+        (
+            KeyCode::Char('/'),
+            KeyModifiers::CONTROL,
+            Action::ToggleLineComment,
+            "toggle-comment",
+        ),
+        (
+            KeyCode::Char('d'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            Action::DuplicateLine,
+            "duplicate-line",
+        ),
+        (
+            KeyCode::Up,
+            KeyModifiers::ALT,
+            Action::MoveLineUp,
+            "move-line-up",
+        ),
+        (
+            KeyCode::Down,
+            KeyModifiers::ALT,
+            Action::MoveLineDown,
+            "move-line-down",
+        ),
+        (
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+            Action::JumpToLine,
+            "jump-to-line",
+        ),
+    ] {
+        assert_eq!(
+            keymap.resolve(&press(code, modifiers)),
+            Some(expected.clone())
+        );
+        assert_eq!(action_named(name), Some(expected));
+    }
+
+    for ch in ['/', 'd', 'l'] {
+        assert_eq!(
+            keymap.resolve(&press(KeyCode::Char(ch), KeyModifiers::NONE)),
+            Some(Action::Insert(ch)),
+            "plain {ch} remains editor input"
+        );
+    }
+}

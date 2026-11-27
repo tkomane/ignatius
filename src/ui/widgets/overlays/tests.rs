@@ -2958,3 +2958,16 @@ fn find_replace_overlay_renders_counts_case_pill_replace_field_and_capped_count(
     let cap_text = buffer_to_string(&cap_buf);
     assert!(cap_text.contains("10,000+ matches"), "{cap_text}");
 }
+
+#[test]
+fn jump_to_line_prompt_renders_line_label_and_title() {
+    let prompt = NamePrompt::for_jump_to_line(2, 12);
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 10);
+    let mut buf = Buffer::empty(area);
+    render_name_prompt(&prompt, &pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("Jump to line"), "{text}");
+    assert!(text.contains("Line:"), "{text}");
+    assert!(text.contains("1-12, currently 2"), "{text}");
+}

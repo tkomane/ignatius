@@ -58,6 +58,10 @@ Opening help or resizing starts at the top. Space bindings are written as
 | `Ctrl+H` | Find and replace in the SQL buffer | No |
 | `F3` | Jump to next find match | No |
 | `Shift+F3` | Jump to previous find match | No |
+| `Ctrl+/` | Toggle `--` line comment | No |
+| `Ctrl+Shift+D` | Duplicate the current line | No |
+| `Alt+Up` `Alt+Down` | Move the current line up or down | No |
+| `Ctrl+L` | Jump to a line number | No |
 | `Backspace` | Delete the character before the cursor | No |
 | `Enter` | Use what is selected: a line break, an object's name, or a confirmation | No |
 | `/` | Filter what is in front of you: the rows when the results have focus, the object tree otherwise | No |
@@ -531,6 +535,15 @@ reports whether it changed, did nothing, or refused safely, and `Ctrl+Z` undoes
 the complete formatting edit. `Ctrl+K q` reaches the same action when a
 terminal or personal preference makes the direct shortcut inconvenient.
 
+With the editor focused, `Ctrl+/` (`toggle-comment`) toggles a `-- ` line
+comment while preserving leading indentation, `Ctrl+Shift+D` (`duplicate-line`)
+duplicates the current line below at the same column, and `Alt+Up` /
+`Alt+Down` (`move-line-up` / `move-line-down`) swap the current line with the
+adjacent line; each edit is one undo step (`Ctrl+Z`). `Ctrl+L` (`jump-to-line`)
+opens a single-line prompt (`Jump to line`) that moves the caret to the first
+non-whitespace character of the target line (clamping `1..=line_count`) without
+modifying buffer text, undo history, disk state, or database state.
+
 When Results has focus, `Ctrl+K g` opens the same searchable palette over the
 current retained result. It lists local sorting, visible-column selection,
 bounded width controls, type-label visibility, frozen-first-column layout, and
@@ -686,7 +699,8 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
 `index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `pin-buffer`, `rename-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
-`move-buffer-end`, `find-in-buffer`, `replace-in-buffer`, `find-next`, `find-prev`.
+`move-buffer-end`, `find-in-buffer`, `replace-in-buffer`, `find-next`, `find-prev`,
+`toggle-comment`, `duplicate-line`, `move-line-up`, `move-line-down`, `jump-to-line`.
 
 Inside the in-memory Find & Replace bar (`Ctrl+F` / `Ctrl+H`), typing and paste edit the active field, `Enter` or `F3` jumps to the next match, `Up` or `Shift+F3` jumps to the previous match, `Tab` switches between Find and Replace, `Alt+C` toggles case sensitivity (`[Aa]` vs `[aa]`), `Alt+R` replaces the active match, `Alt+A` replaces all matches as one atomic undo step, and `Esc` closes without modifying buffer SQL.
 

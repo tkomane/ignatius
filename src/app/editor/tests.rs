@@ -579,3 +579,169 @@ fn replace_all_is_one_atomic_undo_step_and_keeps_valid_char_boundary() {
     assert_eq!(editor.cursor(), caret_inside);
     assert!(!editor.can_undo());
 }
+
+#[test]
+fn toggle_line_comment_preserves_indentation_utf8_cursor_and_undo_boundary() {
+    let mut editor = Editor::with_text("  SELECT café");
+    editor.set_cursor("  SE".len());
+    let rev0 = editor.revision();
+
+    assert!(editor.toggle_line_comment());
+    assert_eq!(editor.text(), "  -- SELECT café");
+    assert_eq!(editor.cursor(), "  -- SE".len());
+    assert_eq!(editor.revision(), rev0 + 1);
+    assert!(editor.is_modified());
+    assert!(editor.text().is_char_boundary(editor.cursor()));
+
+    // Toggling again removes "-- ".
+    assert!(editor.toggle_line_comment());
+    assert_eq!(editor.text(), "  SELECT café");
+    assert_eq!(editor.cursor(), "  SE".len());
+    assert_eq!(editor.revision(), rev0 + 2);
+
+    // Also uncomments tight "--" comments without trailing space.
+    let mut tight = Editor::with_text("  --SELECT 1");
+    tight.set_cursor("  --SEL".len());
+    assert!(tight.toggle_line_comment());
+    assert_eq!(tight.text(), "  SELECT 1");
+    assert_eq!(tight.cursor(), "  SEL".len());
+
+    // Empty and whitespace-only lines toggle cleanly.
+    let mut empty = Editor::default();
+    assert!(empty.toggle_line_comment());
+    assert_eq!(empty.text(), "-- ");
+    assert_eq!(empty.cursor(), 3);
+    assert!(empty.toggle_line_comment());
+    assert_eq!(empty.text(), "");
+    assert_eq!(empty.cursor(), 0);
+
+    // Ends any prior coalesced typing run and records one undo step.
+    let mut run = typed("SELECT");
+    assert!(run.toggle_line_comment());
+    assert_eq!(run.text(), "-- SELECT");
+    run.insert('x');
+    run.undo();
+    assert_eq!(
+        run.text(),
+        "-- SELECT",
+        "typing after toggle is its own step"
+    );
+    run.undo();
+    assert_eq!(run.text(), "SELECT", "toggle itself is one undo step");
+    run.redo();
+    assert_eq!(run.text(), "-- SELECT");
+}
+
+#[test]
+fn duplicate_line_duplicates_below_with_matching_column_as_one_undo_step() {
+    let mut editor = typed("SELECT café\nWHERE id = 1");
+    editor.set_position(1, 10); // right after 'f' in "café"
+    let rev = editor.revision();
+
+    assert!(editor.duplicate_line());
+    assert_eq!(editor.text(), "SELECT café\nSELECT café\nWHERE id = 1");
+    assert_eq!(editor.position(), (2, 10));
+    assert_eq!(editor.revision(), rev + 1);
+    assert!(editor.text().is_char_boundary(editor.cursor()));
+
+    // Single undo takes back only the duplication, restoring line 1 caret.
+    editor.undo();
+    assert_eq!(editor.text(), "SELECT café\nWHERE id = 1");
+    assert_eq!(editor.position(), (1, 10));
+
+    // Empty buffer duplicates to a second empty line.
+    let mut empty = Editor::default();
+    assert!(empty.duplicate_line());
+    assert_eq!(empty.text(), "\n");
+    assert_eq!(empty.position(), (2, 1));
+}
+
+#[test]
+fn move_line_up_and_down_swap_lines_preserve_column_and_noop_at_bounds() {
+    let mut editor = Editor::with_text("one\ntwo café\nthree");
+    editor.set_position(2, 7); // on 'f' in "café"
+    let rev0 = editor.revision();
+
+    assert!(editor.move_line_up());
+    assert_eq!(editor.text(), "two café\none\nthree");
+    assert_eq!(editor.position(), (1, 7));
+    assert_eq!(editor.revision(), rev0 + 1);
+    assert!(editor.text().is_char_boundary(editor.cursor()));
+
+    // Already on first line: clean no-op without touching revision or undo stack.
+    let first_rev = editor.revision();
+    let first_cursor = editor.cursor();
+    assert!(!editor.move_line_up());
+    assert_eq!(editor.revision(), first_rev);
+    assert_eq!(editor.cursor(), first_cursor);
+
+    // Move back down twice to reach the last line.
+    assert!(editor.move_line_down());
+    assert_eq!(editor.text(), "one\ntwo café\nthree");
+    assert_eq!(editor.position(), (2, 7));
+    assert!(editor.move_line_down());
+    assert_eq!(editor.text(), "one\nthree\ntwo café");
+    assert_eq!(editor.position(), (3, 7));
+
+    // Already on last line: clean no-op.
+    let last_rev = editor.revision();
+    let last_cursor = editor.cursor();
+    assert!(!editor.move_line_down());
+    assert_eq!(editor.revision(), last_rev);
+    assert_eq!(editor.cursor(), last_cursor);
+
+    // Each move is one undoable edit.
+    editor.undo();
+    assert_eq!(editor.text(), "one\ntwo café\nthree");
+    assert_eq!(editor.position(), (2, 7));
+    editor.undo();
+    assert_eq!(editor.text(), "two café\none\nthree");
+    editor.undo();
+    assert_eq!(editor.text(), "one\ntwo café\nthree");
+    assert!(!editor.can_undo());
+}
+
+#[test]
+fn jump_to_line_clamps_targets_first_non_ws_and_leaves_history_untouched() {
+    let mut editor = Editor::with_text("SELECT 1\n   FROM café\n    \nWHERE id = 2");
+    editor.move_buffer_start();
+    editor.move_right();
+    let rev = editor.revision();
+
+    // Line 0 is a clean no-op.
+    assert!(!editor.jump_to_line(0));
+    assert_eq!(editor.cursor(), 1);
+    assert_eq!(editor.revision(), rev);
+    assert!(!editor.is_modified());
+    assert!(!editor.can_undo());
+
+    // Line 2 lands on 'F' after leading spaces.
+    assert!(editor.jump_to_line(2));
+    assert_eq!(editor.position(), (2, 4));
+    assert_eq!(editor.revision(), rev);
+    assert!(!editor.is_modified());
+    assert!(!editor.can_undo());
+
+    // Whitespace-only line 3 lands on line end.
+    assert!(editor.jump_to_line(3));
+    assert_eq!(editor.position(), (3, 5));
+
+    // Out-of-bounds line clamps to the last line.
+    assert!(editor.jump_to_line(999));
+    assert_eq!(editor.position(), (4, 1));
+
+    // Jumping clears goal_column and ends any active undo run.
+    let mut run = typed("abc\ndef");
+    run.move_up(); // sets goal_column = Some(3)
+    assert!(run.jump_to_line(1));
+    assert_eq!(run.position(), (1, 1));
+    run.move_down();
+    assert_eq!(
+        run.position(),
+        (2, 1),
+        "goal_column was cleared by jump_to_line"
+    );
+    run.insert('x');
+    run.undo();
+    assert_eq!(run.text(), "abc\ndef", "jump ended prior undo run");
+}
