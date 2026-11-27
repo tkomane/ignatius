@@ -2123,6 +2123,8 @@ fn session() -> Box<SessionInfo> {
         read_only: false,
         tls: TlsState::Disabled,
         environment: Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     })
 }
 
@@ -14820,6 +14822,8 @@ fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished
         user: "app".to_owned(),
         transport: "prefer".to_owned(),
         target_session_attrs: None,
+        statement_timeout: None,
+        lock_timeout: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,
@@ -14950,6 +14954,8 @@ fn pin_and_compare_result_snapshot_lifecycle_and_connection_clear() {
         user: "app".to_owned(),
         transport: "prefer".to_owned(),
         target_session_attrs: None,
+        statement_timeout: None,
+        lock_timeout: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,

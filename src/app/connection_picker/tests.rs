@@ -187,3 +187,40 @@ fn target_session_attrs_is_shown_in_picker_only_when_not_any() {
             .contains("configuration needs attention")
     );
 }
+
+#[test]
+fn session_timeouts_are_shown_in_picker_detail_when_configured() {
+    let timed = profile(
+        "host = \"db.example.net\"\nstatement-timeout = \"30s\"\nlock-timeout = \"500ms\"\n",
+    );
+    let summary = ConnectionProfileSummary::from_profile("timed", &timed, &BTreeMap::new());
+    assert_eq!(summary.statement_timeout.as_deref(), Some("30s"));
+    assert_eq!(summary.lock_timeout.as_deref(), Some("500ms"));
+    assert!(summary.detail().contains("statement-timeout 30s"));
+    assert!(summary.detail().contains("lock-timeout 500ms"));
+
+    let disabled = profile("host = \"db.example.net\"\nstatement-timeout = \"0\"\n");
+    let disabled_summary =
+        ConnectionProfileSummary::from_profile("disabled", &disabled, &BTreeMap::new());
+    assert_eq!(
+        disabled_summary.statement_timeout.as_deref(),
+        Some("disabled")
+    );
+    assert!(disabled_summary.lock_timeout.is_none());
+    assert!(
+        disabled_summary
+            .detail()
+            .contains("statement-timeout disabled")
+    );
+    assert!(!disabled_summary.detail().contains("lock-timeout"));
+
+    let invalid = profile("host = \"bad.example.net\"\nstatement-timeout = \"bogus\"\n");
+    let bad_summary = ConnectionProfileSummary::from_profile("bad", &invalid, &BTreeMap::new());
+    assert!(bad_summary.statement_timeout.is_none());
+    assert!(
+        bad_summary
+            .validation
+            .as_deref()
+            .is_some_and(|v| v.contains("statement-timeout"))
+    );
+}

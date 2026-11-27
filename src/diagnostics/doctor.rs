@@ -304,6 +304,38 @@ pub fn environment_report(
     checks.push(directory_check("config directory", &paths.config_dir));
     checks.push(directory_check("data directory", &paths.data_dir));
 
+    if let Ok(loaded) = config {
+        let statement = if loaded.config.connection.statement_timeout_seconds > 0 {
+            Some(std::time::Duration::from_secs(
+                loaded.config.connection.statement_timeout_seconds,
+            ))
+        } else if loaded.config.query.statement_timeout_ms > 0 {
+            Some(std::time::Duration::from_millis(
+                loaded.config.query.statement_timeout_ms,
+            ))
+        } else {
+            None
+        };
+        let lock = (loaded.config.connection.lock_timeout_seconds > 0)
+            .then(|| std::time::Duration::from_secs(loaded.config.connection.lock_timeout_seconds));
+        let mut timeout_parts = Vec::new();
+        if let Some(duration) = statement {
+            timeout_parts.push(format!(
+                "statement_timeout={}",
+                crate::connection::format_timeout_duration(duration)
+            ));
+        }
+        if let Some(duration) = lock {
+            timeout_parts.push(format!(
+                "lock_timeout={}",
+                crate::connection::format_timeout_duration(duration)
+            ));
+        }
+        if !timeout_parts.is_empty() {
+            checks.push(Check::ok("session timeouts", timeout_parts.join(", ")));
+        }
+    }
+
     checks.push(terminal_check(terminal));
     checks.push(colour_check(terminal));
     checks.push(colour_depth_check(terminal));

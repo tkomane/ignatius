@@ -62,6 +62,10 @@ pub struct SessionInfo {
     pub tls: TlsState,
     /// The user's classification of this database.
     pub environment: crate::connection::Environment,
+    /// Session `statement_timeout` applied by Ignatius, when configured.
+    pub statement_timeout: Option<Duration>,
+    /// Session `lock_timeout` applied by Ignatius, when configured.
+    pub lock_timeout: Option<Duration>,
 }
 
 impl SessionInfo {
@@ -2721,15 +2725,35 @@ pub async fn connect_reported(
                 .map_err(|err| from_query_error(&err, 0))?;
         }
 
-        if statement_timeout > Duration::ZERO {
-            let millis = statement_timeout.as_millis();
+        let effective_statement_timeout = match target.statement_timeout {
+            Some(duration) => {
+                let millis = duration.as_millis();
+                client
+                    .batch_execute(&format!("SET statement_timeout = {millis}"))
+                    .await
+                    .map_err(|err| from_connect_error(&err, target))?;
+                Some(duration)
+            }
+            None if statement_timeout > Duration::ZERO => {
+                let millis = statement_timeout.as_millis();
+                client
+                    .batch_execute(&format!("SET statement_timeout = {millis}"))
+                    .await
+                    .map_err(|err| from_connect_error(&err, target))?;
+                Some(statement_timeout)
+            }
+            None => None,
+        };
+
+        if let Some(duration) = target.lock_timeout {
+            let millis = duration.as_millis();
             client
-                .batch_execute(&format!("SET statement_timeout = {millis}"))
+                .batch_execute(&format!("SET lock_timeout = {millis}"))
                 .await
-                .map_err(|err| from_query_error(&err, 0))?;
+                .map_err(|err| from_connect_error(&err, target))?;
         }
 
-        let (info, in_recovery) = bootstrap(&client, target).await?;
+        let (info, in_recovery) = bootstrap(&client, target, effective_statement_timeout).await?;
         if let Err(diagnostic) = verify_target_session_attrs(target, info.read_only, in_recovery) {
             drop(client);
             return Err(diagnostic);
@@ -2898,6 +2922,7 @@ fn build_config(target: &ConnectionTarget) -> tokio_postgres::Config {
 async fn bootstrap(
     client: &Client,
     target: &ConnectionTarget,
+    effective_statement_timeout: Option<Duration>,
 ) -> Result<(SessionInfo, bool), Diagnostic> {
     const FULL: &str = "SELECT current_setting('server_version') AS server_version, \
          pg_backend_pid()::text AS backend_pid, \
@@ -2963,6 +2988,8 @@ async fn bootstrap(
         read_only: matches!(get("read_only").as_str(), "on" | "t" | "true"),
         tls,
         environment: target.environment.clone(),
+        statement_timeout: effective_statement_timeout,
+        lock_timeout: target.lock_timeout,
     };
     let in_recovery = matches!(get("in_recovery").as_str(), "t" | "true");
 

@@ -5416,3 +5416,167 @@ fn target_session_attrs_read_only_succeeds_with_read_only_session_and_object_tre
         .expect("object tree connection succeeds");
     assert!(tree_session.info().read_only);
 }
+
+// === M23: session timeouts ===
+
+#[test]
+fn statement_timeout_aborts_long_query_with_57014_and_zero_overrides_default() {
+    use ignatius::diagnostics::DiagnosticKind;
+
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    let timed_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            statement_timeout: Some(Duration::from_millis(100)),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+    assert_eq!(
+        timed_target.statement_timeout,
+        Some(Duration::from_millis(100))
+    );
+
+    let session = runtime
+        .block_on(session::connect(&timed_target, Duration::ZERO))
+        .expect("connects with 100ms statement_timeout");
+    assert_eq!(
+        session.info().statement_timeout,
+        Some(Duration::from_millis(100))
+    );
+
+    let execution = runtime.block_on(session.execute("SELECT pg_sleep(5);", 10, JobId(1)));
+    let error = execution
+        .error
+        .as_ref()
+        .expect("pg_sleep(5) must abort under 100ms statement_timeout");
+    assert_eq!(error.kind, DiagnosticKind::Cancelled);
+    assert_eq!(sqlstate(error), "57014");
+
+    // Explicit `Some(Duration::ZERO)` overrides a non-zero fallback passed to connect().
+    let disabled_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            statement_timeout: Some(Duration::ZERO),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+    let disabled_session = runtime
+        .block_on(session::connect(
+            &disabled_target,
+            Duration::from_millis(50),
+        ))
+        .expect("connects with statement_timeout = 0 override");
+    assert_eq!(
+        disabled_session.info().statement_timeout,
+        Some(Duration::ZERO)
+    );
+    let show = runtime.block_on(disabled_session.execute("SHOW statement_timeout;", 10, JobId(2)));
+    assert!(show.error.is_none(), "{:?}", show.error);
+    assert_eq!(
+        show.statements[0]
+            .result_set
+            .as_ref()
+            .expect("SHOW statement_timeout result set")
+            .rows[0][0],
+        Cell::Text("0".to_owned()),
+        "SHOW statement_timeout must report 0"
+    );
+}
+
+#[test]
+fn lock_timeout_aborts_contended_lock_with_55p03_and_object_tree_stays_bounded() {
+    use ignatius::diagnostics::DiagnosticKind;
+
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    let table_name = format!(
+        "m23_lock_timeout_probe_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+
+    let holder_target = resolve(
+        Some(&uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("holder target resolves");
+    let holder = runtime
+        .block_on(session::connect(&holder_target, Duration::ZERO))
+        .expect("holder connects");
+
+    let setup = runtime.block_on(holder.execute(
+        &format!("CREATE TABLE {table_name} (id integer); BEGIN; LOCK TABLE {table_name} IN ACCESS EXCLUSIVE MODE;"),
+        10,
+        JobId(1),
+    ));
+    assert!(setup.error.is_none(), "setup failed: {:?}", setup.error);
+
+    let waiter_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            lock_timeout: Some(Duration::from_millis(100)),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("waiter target resolves");
+    assert_eq!(waiter_target.lock_timeout, Some(Duration::from_millis(100)));
+
+    let waiter = runtime
+        .block_on(session::connect(&waiter_target, Duration::ZERO))
+        .expect("waiter connects");
+    assert_eq!(waiter.info().lock_timeout, Some(Duration::from_millis(100)));
+
+    let contended = runtime.block_on(waiter.execute(
+        &format!("BEGIN; LOCK TABLE {table_name} IN ACCESS EXCLUSIVE MODE;"),
+        10,
+        JobId(2),
+    ));
+    let error = contended
+        .error
+        .as_ref()
+        .expect("contended LOCK TABLE must abort under 100ms lock_timeout");
+    assert_eq!(error.kind, DiagnosticKind::Query);
+    assert_eq!(sqlstate(error), "55P03");
+
+    let cleanup = runtime.block_on(holder.execute(
+        &format!("ROLLBACK; DROP TABLE IF EXISTS {table_name};"),
+        10,
+        JobId(3),
+    ));
+    assert!(
+        cleanup.error.is_none(),
+        "cleanup failed: {:?}",
+        cleanup.error
+    );
+
+    let tree_target = waiter_target.for_object_tree();
+    let tree_session = runtime
+        .block_on(session::connect(&tree_target, Duration::ZERO))
+        .expect("object tree connects with bounded metadata timeouts");
+    assert_eq!(
+        tree_session.info().statement_timeout,
+        Some(ignatius::connection::target::DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT)
+    );
+    assert_eq!(
+        tree_session.info().lock_timeout,
+        Some(ignatius::connection::target::DEFAULT_OBJECT_TREE_LOCK_TIMEOUT)
+    );
+}

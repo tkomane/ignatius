@@ -35,6 +35,10 @@ pub struct ConnectionProfileSummary {
     pub transport: String,
     /// Requested session routing policy when set and not `any`.
     pub target_session_attrs: Option<String>,
+    /// Configured `statement_timeout` display string when set.
+    pub statement_timeout: Option<String>,
+    /// Configured `lock_timeout` display string when set.
+    pub lock_timeout: Option<String>,
     /// Configured classification, or the default unclassified state.
     pub environment: String,
     /// Whether the profile asks PostgreSQL to make the session read-only.
@@ -86,6 +90,16 @@ impl ConnectionProfileSummary {
                 .and_then(|value| crate::connection::TargetSessionAttrs::parse(value).ok())
                 .filter(|attrs| *attrs != crate::connection::TargetSessionAttrs::Any)
                 .map(|attrs| attrs.as_str().to_owned()),
+            statement_timeout: profile
+                .statement_timeout
+                .as_deref()
+                .and_then(|value| crate::connection::parse_timeout_duration(value).ok())
+                .map(crate::connection::format_timeout_duration),
+            lock_timeout: profile
+                .lock_timeout
+                .as_deref()
+                .and_then(|value| crate::connection::parse_timeout_duration(value).ok())
+                .map(crate::connection::format_timeout_duration),
             environment: bounded(&profile.environment.as_deref().map_or_else(
                 || "environment unclassified".to_owned(),
                 |value| format!("environment {value}"),
@@ -109,6 +123,12 @@ impl ConnectionProfileSummary {
         ];
         if let Some(attrs) = &self.target_session_attrs {
             parts.push(format!("target-session-attrs {attrs}"));
+        }
+        if let Some(timeout) = &self.statement_timeout {
+            parts.push(format!("statement-timeout {timeout}"));
+        }
+        if let Some(timeout) = &self.lock_timeout {
+            parts.push(format!("lock-timeout {timeout}"));
         }
         if self.read_only {
             parts.push("read-only".to_owned());

@@ -1274,6 +1274,8 @@ fn connected_empty(sql: &str) -> Model {
             read_only: false,
             tls: crate::postgres::TlsState::Disabled,
             environment: crate::connection::Environment::Local,
+            statement_timeout: None,
+            lock_timeout: None,
         }));
     model.editor.set_text(sql);
     model

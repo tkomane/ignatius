@@ -50,6 +50,8 @@ fn connected(model: &mut Model) {
         read_only: false,
         tls: TlsState::Disabled,
         environment: Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     }));
 }
 
@@ -195,6 +197,8 @@ fn unusable_connection_postures_never_offer_run() {
                 read_only: false,
                 tls: TlsState::Disabled,
                 environment: Environment::Local,
+                statement_timeout: None,
+                lock_timeout: None,
             }),
         },
         ConnectionState::Failed(Box::new(crate::diagnostics::Diagnostic::new(

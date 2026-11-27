@@ -168,7 +168,8 @@ is shown as unknown when that view is not readable.
 ## Connection parameters
 
 **Applied**: `service`, `passfile`, `host`, `port`, `dbname`, `user`, `password`,
-`sslmode`, `target_session_attrs`, `application_name`, `connect_timeout`.
+`sslmode`, `target_session_attrs`, `application_name`, `connect_timeout`,
+`statement_timeout`, `lock_timeout`.
 
 `target_session_attrs` follows the libpq vocabulary (`any`, `read-write`,
 `read-only`, `primary`, `standby`) across CLI (`--target-session-attrs`),
@@ -179,6 +180,19 @@ After session bootstrap, Ignatius verifies `transaction_read_only` and
 connection error and are never silently downgraded or retried. Internal
 object-tree connections clear `target_session_attrs` back to `any` and enforce
 their own read-only transaction posture.
+
+`statement_timeout` and `lock_timeout` accept `0` / `0ms` / `0s` (explicitly
+disabled via `SET ... = 0`), integer seconds (for example `30`), or a positive
+duration ending in `ms`, `s`, `m`, or `h` up to 24 hours (`86400s`). Precedence
+from highest to lowest is `--statement-timeout` / `--lock-timeout`, URI or
+keyword/service `statement_timeout` / `lock_timeout`, profile
+`statement-timeout` / `lock-timeout`, and global `[connection]` defaults
+(`statement-timeout-seconds` / `lock-timeout-seconds`, with `statement_timeout`
+also falling back to `[query] statement-timeout-ms` when unset). On PostgreSQL
+session startup Ignatius enforces configured values with integer-millisecond
+`SET statement_timeout = <ms>` and `SET lock_timeout = <ms>`. Internal
+object-tree connections apply their own bounded metadata timeouts (`30s`
+statement timeout and `5s` lock timeout).
 
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 `PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
@@ -209,7 +223,8 @@ then the password file, then the prompt.
 **Profiles**: a `[profiles]` table in `config.toml` names a connection, reached
 as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
 `user`, `sslmode`, `target-session-attrs`, `environment`, `read-only`,
-`description` and `auth`, and nothing else. It never carries a password.
+`description`, `auth`, `statement-timeout` and `lock-timeout`, and nothing
+else. It never carries a password.
 
 ## Interactive connection picker
 
@@ -219,8 +234,9 @@ picker. The first row is `Use default connection settings`; it uses the ordinary
 CLI, service-file, environment and built-in precedence. The remaining rows are
 the profiles in deterministic configuration order. Their detail is a bounded,
 display-only summary of known fields: location, database, role, TLS mode,
-environment, read-only posture, provider name, description and configuration
-validation. Unknown profile fields are not copied into the model or rendered.
+environment, session timeouts when configured, read-only posture, provider
+name, description and configuration validation. Unknown profile fields are not
+copied into the model or rendered.
 
 Reading or searching the picker performs no network call, provider command,
 metadata load, history write or configuration change. Enter sends only the

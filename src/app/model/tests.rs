@@ -58,6 +58,8 @@ fn a_lost_connection_still_names_its_target() {
         read_only: false,
         tls: crate::postgres::TlsState::Disabled,
         environment: Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     });
     let lost = ConnectionState::Lost { info };
     assert!(lost.label().contains("connection lost"));

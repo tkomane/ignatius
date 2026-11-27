@@ -489,6 +489,8 @@ fn footer_uses_tonal_key_pills_and_ascii_or_unicode_hint_separators() {
         read_only: false,
         search_path: "public".into(),
         environment: crate::connection::Environment::Local,
+        statement_timeout: None,
+        lock_timeout: None,
     }));
     model.focus = Focus::Editor;
     model.editor.set_text("SELECT 1;");
@@ -595,6 +597,8 @@ fn connected_editor_model() -> Model {
             read_only: false,
             tls: crate::postgres::TlsState::Disabled,
             environment: crate::connection::Environment::Local,
+            statement_timeout: None,
+            lock_timeout: None,
         }));
     model.focus = crate::app::model::Focus::Editor;
     model.editor.set_text("SELECT 1;");

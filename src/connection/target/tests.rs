@@ -657,3 +657,167 @@ fn invalid_target_session_attrs_in_uri_service_or_env_fails_with_config_diagnost
     .expect_err("invalid service target_session_attrs");
     assert_eq!(err.kind, DiagnosticKind::Config);
 }
+
+#[test]
+fn parse_and_format_timeout_duration_handle_valid_bounds_and_errors() {
+    for (input, expected) in [
+        ("0", Duration::ZERO),
+        ("0ms", Duration::ZERO),
+        ("0s", Duration::ZERO),
+        ("0M", Duration::ZERO),
+        ("0h", Duration::ZERO),
+        (" 30 ", Duration::from_secs(30)),
+        ("500ms", Duration::from_millis(500)),
+        ("500MS", Duration::from_millis(500)),
+        ("15s", Duration::from_secs(15)),
+        ("2M", Duration::from_secs(120)),
+        ("1H", Duration::from_secs(3_600)),
+        ("24h", Duration::from_secs(86_400)),
+        ("86400", Duration::from_secs(86_400)),
+        ("86400000ms", Duration::from_secs(86_400)),
+    ] {
+        assert_eq!(
+            parse_timeout_duration(input).expect("valid timeout"),
+            expected,
+            "{input:?}"
+        );
+    }
+
+    for invalid in [
+        "",
+        "   ",
+        "-1",
+        "-500ms",
+        "+10s",
+        "ms",
+        "s",
+        "abc",
+        "1.5s",
+        "10 s",
+        "10us",
+        "1d",
+        "25h",
+        "1441m",
+        "86401",
+        "86400001ms",
+        "99999999999999999999999s",
+    ] {
+        assert!(
+            parse_timeout_duration(invalid).is_err(),
+            "{invalid:?} must be rejected"
+        );
+    }
+
+    assert_eq!(format_timeout_duration(Duration::ZERO), "disabled");
+    assert_eq!(format_timeout_duration(Duration::from_millis(100)), "100ms");
+    assert_eq!(
+        format_timeout_duration(Duration::from_millis(1_500)),
+        "1500ms"
+    );
+    assert_eq!(format_timeout_duration(Duration::from_secs(30)), "30s");
+    assert_eq!(format_timeout_duration(Duration::from_secs(120)), "2m");
+    assert_eq!(format_timeout_duration(Duration::from_secs(3_600)), "1h");
+}
+
+#[test]
+fn session_timeouts_follow_precedence_and_object_tree_bounds() {
+    let (_dir, service_path) =
+        service_file("[s]\nhost=db.example.net\nstatement_timeout=20s\nlock_timeout=3s\n");
+    let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &service_path)]);
+
+    // Default config leaves both unset.
+    let default_target = resolve(
+        None,
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config(),
+    )
+    .expect("default");
+    assert!(default_target.statement_timeout.is_none());
+    assert!(default_target.lock_timeout.is_none());
+
+    // Global config defaults apply when > 0.
+    let global_cfg = ConnectionConfig {
+        statement_timeout_seconds: 45,
+        lock_timeout_seconds: 7,
+        ..ConnectionConfig::default()
+    };
+    let from_global = resolve(
+        None,
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &global_cfg,
+    )
+    .expect("global config");
+    assert_eq!(from_global.statement_timeout, Some(Duration::from_secs(45)));
+    assert_eq!(from_global.lock_timeout, Some(Duration::from_secs(7)));
+
+    // Service beats global config.
+    let from_service = resolve(
+        Some("service=s"),
+        &ConnectionArgs::default(),
+        &env,
+        &global_cfg,
+    )
+    .expect("service");
+    assert_eq!(
+        from_service.statement_timeout,
+        Some(Duration::from_secs(20))
+    );
+    assert_eq!(from_service.lock_timeout, Some(Duration::from_secs(3)));
+
+    // URI/kv beats service and global config, including explicit 0 (disabled).
+    let from_uri = resolve(
+        Some("postgres://app@db.example.net/orders?statement_timeout=0&lock_timeout=500ms"),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &global_cfg,
+    )
+    .expect("uri");
+    assert_eq!(from_uri.statement_timeout, Some(Duration::ZERO));
+    assert_eq!(from_uri.lock_timeout, Some(Duration::from_millis(500)));
+    assert!(
+        !from_uri
+            .notes
+            .iter()
+            .any(|n| n.subject == "statement_timeout" || n.subject == "lock_timeout"),
+        "supported timeout keys must not emit unsupported notes: {:?}",
+        from_uri.notes
+    );
+
+    // Explicit CLI args beat URI, service, and global config.
+    let from_cli = resolve(
+        Some("service=s statement_timeout=2m lock_timeout=10s"),
+        &ConnectionArgs {
+            statement_timeout: Some(Duration::from_millis(250)),
+            lock_timeout: Some(Duration::ZERO),
+            ..ConnectionArgs::default()
+        },
+        &env,
+        &global_cfg,
+    )
+    .expect("cli");
+    assert_eq!(from_cli.statement_timeout, Some(Duration::from_millis(250)));
+    assert_eq!(from_cli.lock_timeout, Some(Duration::ZERO));
+
+    // Invalid timeout in URI or service fails with Config diagnostic.
+    let err = resolve(
+        Some("postgres://app@db.example.net/orders?statement_timeout=-5s"),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config(),
+    )
+    .expect_err("invalid uri statement_timeout");
+    assert_eq!(err.kind, DiagnosticKind::Config);
+
+    // Object tree enforces bounded metadata timeouts regardless of user target timeouts.
+    let tree_target = from_cli.for_object_tree();
+    assert_eq!(
+        tree_target.statement_timeout,
+        Some(DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT)
+    );
+    assert_eq!(
+        tree_target.lock_timeout,
+        Some(DEFAULT_OBJECT_TREE_LOCK_TIMEOUT)
+    );
+}

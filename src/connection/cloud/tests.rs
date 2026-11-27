@@ -15,6 +15,8 @@ fn target(sslmode: SslMode) -> ConnectionTarget {
         client_key: None,
         application_name: "ignatius".into(),
         connect_timeout: Duration::from_secs(5),
+        statement_timeout: None,
+        lock_timeout: None,
         environment: crate::connection::Environment::Local,
         read_only: false,
         notes: Vec::new(),

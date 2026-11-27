@@ -278,6 +278,12 @@ pub struct Profile {
     /// and is never written anywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<String>,
+    /// Session `statement_timeout` duration (for example `"30s"`, `"500ms"`, or `"0"` to disable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement_timeout: Option<String>,
+    /// Session `lock_timeout` duration (for example `"5s"`, `"500ms"`, or `"0"` to disable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_timeout: Option<String>,
     /// Anything else the file said, kept so it can be refused by name.
     #[serde(flatten)]
     pub other: std::collections::BTreeMap<String, toml::Value>,
@@ -295,6 +301,8 @@ pub const PROFILE_FIELDS: &[&str] = &[
     "read-only",
     "description",
     "auth",
+    "statement-timeout",
+    "lock-timeout",
 ];
 
 impl Profile {
@@ -364,6 +372,34 @@ impl Profile {
             )
             .likely_cause(message)
             .next_action("use any, read-write, read-only, primary, or standby"));
+        }
+
+        if let Some(value) = &self.statement_timeout
+            && let Err(message) = crate::connection::target::parse_timeout_duration(value)
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} has an invalid statement-timeout"),
+                "reading connection profiles",
+            )
+            .likely_cause(message)
+            .next_action(
+                "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
+            ));
+        }
+
+        if let Some(value) = &self.lock_timeout
+            && let Err(message) = crate::connection::target::parse_timeout_duration(value)
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} has an invalid lock-timeout"),
+                "reading connection profiles",
+            )
+            .likely_cause(message)
+            .next_action(
+                "use 0 to disable, integer seconds, or a duration like 500ms, 5s, 1m (max 24h)",
+            ));
         }
 
         Ok(())
@@ -670,6 +706,12 @@ pub struct ConnectionConfig {
     /// `application_name` reported to the server.
     #[serde(default = "default_application_name")]
     pub application_name: String,
+    /// Default session `statement_timeout`, in seconds. Zero leaves the server default in place.
+    #[serde(default)]
+    pub statement_timeout_seconds: u64,
+    /// Default session `lock_timeout`, in seconds. Zero leaves the server default in place.
+    #[serde(default)]
+    pub lock_timeout_seconds: u64,
 }
 
 impl Default for ConnectionConfig {
@@ -677,6 +719,8 @@ impl Default for ConnectionConfig {
         Self {
             connect_timeout_seconds: default_connect_timeout(),
             application_name: default_application_name(),
+            statement_timeout_seconds: 0,
+            lock_timeout_seconds: 0,
         }
     }
 }
@@ -758,6 +802,22 @@ impl<S, D> ConfigSchema<S, D> {
                     "use a non-empty name, for example {}",
                     default_application_name()
                 ),
+            });
+        }
+
+        let max_seconds = crate::connection::target::MAX_TIMEOUT_DURATION.as_secs();
+        if self.connection.statement_timeout_seconds > max_seconds {
+            issues.push(ValidationIssue {
+                path: "connection.statement-timeout-seconds".into(),
+                message: format!("exceeds maximum of {max_seconds} seconds (24h)"),
+                suggestion: "use 0 to leave the server default, or at most 86400 seconds".into(),
+            });
+        }
+        if self.connection.lock_timeout_seconds > max_seconds {
+            issues.push(ValidationIssue {
+                path: "connection.lock-timeout-seconds".into(),
+                message: format!("exceeds maximum of {max_seconds} seconds (24h)"),
+                suggestion: "use 0 to leave the server default, or at most 86400 seconds".into(),
             });
         }
 
