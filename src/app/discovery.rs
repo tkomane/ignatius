@@ -406,6 +406,9 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::ExplainPlan,
         Action::AnalyzePlan,
         Action::CopyValue,
+        Action::CopyRowAsJson,
+        Action::InsertCellWhereClause,
+        Action::InsertColumnInList,
         Action::GenerateCellUpdate,
         Action::RefreshResult,
         Action::FormatBuffer,
@@ -427,6 +430,7 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::ReloadObjects,
         Action::Complete,
         Action::OpenResultControls,
+        Action::ToggleColumnStats,
         Action::ToggleExpandedRow,
         Action::ToggleInspector,
         Action::ShowDefinition,
@@ -518,7 +522,32 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         }
         Action::ExplainPlan => plan_action_is_available(model, false),
         Action::AnalyzePlan => plan_action_is_available(model, true),
-        Action::CopyValue => copy_action_is_available(model),
+        Action::CopyValue | Action::InsertCellWhereClause => copy_action_is_available(model),
+        Action::InsertColumnInList => {
+            model.focus == Focus::Results
+                && !model.phase.is_busy()
+                && !model.plan.is_visible()
+                && !model.displayed_rows().is_empty()
+                && model
+                    .visible_result()
+                    .filter(|set| set.is_available())
+                    .is_some_and(|set| {
+                        model
+                            .result_grid
+                            .visible_columns(set.columns.len())
+                            .contains(&model.selected_column)
+                    })
+        }
+        Action::CopyRowAsJson => {
+            model.focus == Focus::Results
+                && !model.phase.is_busy()
+                && !model.plan.is_visible()
+                && model.selected_source_row().is_some()
+                && model
+                    .visible_result()
+                    .filter(|set| set.is_available())
+                    .is_some_and(|set| !set.columns.is_empty())
+        }
         Action::GenerateCellUpdate => cell_update_action_is_available(model),
         Action::RefreshResult => retained_result_refresh_source(model).is_ok(),
         Action::FormatBuffer => ctx.editor_has_text,
@@ -620,12 +649,15 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
                 && ctx.result == ResultPosture::Rows
                 && !model.plan.is_visible()
         }
-        Action::OpenResultControls | Action::NarrowColumn | Action::WidenColumn => {
+        Action::OpenResultControls
+        | Action::NarrowColumn
+        | Action::WidenColumn
+        | Action::ToggleColumnStats => {
             ctx.focus == Focus::Results
                 && !model.plan.is_visible()
                 && model
                     .visible_result()
-                    .is_some_and(|set| !set.columns.is_empty())
+                    .is_some_and(|set| set.is_available() && !set.columns.is_empty())
         }
         Action::SaveQuery => ctx.editor_has_text,
         Action::ExportRows => {
@@ -747,7 +779,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         Action::Complete => connection
             .map(str::to_owned)
             .unwrap_or_else(|| "focus the editor".to_owned()),
-        Action::OpenResultControls => {
+        Action::OpenResultControls | Action::ToggleColumnStats => {
             if ctx.focus != Focus::Results {
                 "focus the Results pane".to_owned()
             } else {
@@ -761,15 +793,37 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
                 "a retained result column to resize".to_owned()
             }
         }
-        Action::CopyValue => {
+        Action::CopyValue | Action::InsertCellWhereClause => {
             if ctx.focus != Focus::Results {
-                "focus Results on a retained text cell".to_owned()
+                "focus Results on a retained cell".to_owned()
             } else if model.phase.is_busy() {
                 "wait for the current query".to_owned()
             } else if model.plan.is_visible() {
                 "close the query plan first".to_owned()
             } else {
                 "a selected retained result cell".to_owned()
+            }
+        }
+        Action::InsertColumnInList => {
+            if ctx.focus != Focus::Results {
+                "focus Results on a retained column".to_owned()
+            } else if model.phase.is_busy() {
+                "wait for the current query".to_owned()
+            } else if model.plan.is_visible() {
+                "close the query plan first".to_owned()
+            } else {
+                "a retained result column with visible rows".to_owned()
+            }
+        }
+        Action::CopyRowAsJson => {
+            if ctx.focus != Focus::Results {
+                "focus Results on a retained row".to_owned()
+            } else if model.phase.is_busy() {
+                "wait for the current query".to_owned()
+            } else if model.plan.is_visible() {
+                "close the query plan first".to_owned()
+            } else {
+                "a selected retained result row".to_owned()
             }
         }
         Action::GenerateCellUpdate => {
@@ -936,9 +990,13 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::JumpToLine
         | Action::SqlRunbook => "Editor",
         Action::OpenResultControls
+        | Action::ToggleColumnStats
         | Action::NarrowColumn
         | Action::WidenColumn
         | Action::CopyValue
+        | Action::CopyRowAsJson
+        | Action::InsertCellWhereClause
+        | Action::InsertColumnInList
         | Action::GenerateCellUpdate
         | Action::RefreshResult
         | Action::ToggleExpandedRow

@@ -17,6 +17,7 @@ fn set(rows: &[&[Option<&str>]]) -> ResultSet {
 fn result_state_defaults_to_truthful_reading_preferences() {
     let state = ResultGridState::new();
     assert!(state.show_types);
+    assert!(state.show_quick_stats);
     assert!(!state.freeze_first);
     assert!(state.sort.is_none());
     assert!(state.visible_columns(0).is_empty());
@@ -26,6 +27,7 @@ fn result_state_defaults_to_truthful_reading_preferences() {
 fn reset_for_result_clears_view_but_keeps_session_preferences() {
     let mut state = ResultGridState::new();
     state.show_types = false;
+    state.show_quick_stats = false;
     state.freeze_first = true;
     state.sort = Some(SortSpec {
         column: 1,
@@ -40,6 +42,7 @@ fn reset_for_result_clears_view_but_keeps_session_preferences() {
 
     assert_eq!(state.columns_signature, vec!["new"]);
     assert!(!state.show_types);
+    assert!(!state.show_quick_stats);
     assert!(state.freeze_first);
     assert!(state.sort.is_none());
     assert!(state.hidden_columns.is_empty());
@@ -309,4 +312,88 @@ fn decimal_parser_handles_signs_fractions_and_exponents() {
     assert_eq!(rendered.len(), values.len());
     assert!(DecimalKey::parse("NaN").is_none());
     assert!(DecimalKey::parse("1e999999999999999999999").is_none());
+}
+
+#[test]
+fn column_quick_stats_computes_numeric_aggregates_only_when_every_non_null_is_finite_f64() {
+    let result = set(&[
+        &[Some("1"), Some(" 10 ")],
+        &[Some("2"), None],
+        &[Some("3"), Some("20.5")],
+        &[Some("4"), Some("10")],
+    ]);
+    let stats = ColumnQuickStats::compute(&result, &[0, 1, 2, 3], 1);
+    assert_eq!(stats.total_rows, 4);
+    assert_eq!(stats.non_null, 3);
+    assert_eq!(stats.null_count, 1);
+    assert_eq!(stats.distinct, 3);
+    assert!(!stats.distinct_capped);
+    let num = stats.numeric.expect("all non-null values are finite f64");
+    assert!((num.min - 10.0).abs() < 1e-9);
+    assert!((num.max - 20.5).abs() < 1e-9);
+    assert!((num.sum - 40.5).abs() < 1e-9);
+    assert!((num.avg - 13.5).abs() < 1e-9);
+
+    // Filtering to only a subset of visible rows recomputes strictly over those rows.
+    let filtered = ColumnQuickStats::compute(&result, &[1, 2], 1);
+    assert_eq!(filtered.total_rows, 2);
+    assert_eq!(filtered.non_null, 1);
+    assert_eq!(filtered.null_count, 1);
+    assert_eq!(filtered.distinct, 1);
+    let filtered_num = filtered.numeric.expect("single finite row");
+    assert!((filtered_num.min - 20.5).abs() < 1e-9);
+    assert!((filtered_num.avg - 20.5).abs() < 1e-9);
+}
+
+#[test]
+fn column_quick_stats_refuses_partial_or_non_finite_numeric_values() {
+    // Mixed numeric + text never silently skips non-numeric cells.
+    let mixed = set(&[
+        &[Some("1"), Some("10")],
+        &[Some("2"), Some("n/a")],
+        &[Some("3"), Some("20")],
+    ]);
+    let mixed_stats = ColumnQuickStats::compute(&mixed, &[0, 1, 2], 1);
+    assert_eq!(mixed_stats.non_null, 3);
+    assert_eq!(mixed_stats.distinct, 3);
+    assert!(mixed_stats.numeric.is_none());
+
+    // Empty string is non-NULL text, not NULL and not numeric.
+    let with_empty = set(&[&[Some("1"), Some("10")], &[Some("2"), Some("")]]);
+    let empty_stats = ColumnQuickStats::compute(&with_empty, &[0, 1], 1);
+    assert_eq!(empty_stats.non_null, 2);
+    assert_eq!(empty_stats.null_count, 0);
+    assert!(empty_stats.numeric.is_none());
+
+    // NaN / Infinity are rejected as non-finite.
+    let non_finite = set(&[&[Some("1"), Some("NaN")], &[Some("2"), Some("10")]]);
+    assert!(
+        ColumnQuickStats::compute(&non_finite, &[0, 1], 1)
+            .numeric
+            .is_none()
+    );
+    let inf = set(&[&[Some("1"), Some("inf")]]);
+    assert!(ColumnQuickStats::compute(&inf, &[0], 1).numeric.is_none());
+
+    // All-NULL column has no numeric aggregates.
+    let all_null = set(&[&[Some("1"), None], &[Some("2"), None]]);
+    let null_stats = ColumnQuickStats::compute(&all_null, &[0, 1], 1);
+    assert_eq!(null_stats.non_null, 0);
+    assert_eq!(null_stats.null_count, 2);
+    assert_eq!(null_stats.distinct, 0);
+    assert!(null_stats.numeric.is_none());
+}
+
+#[test]
+fn column_quick_stats_caps_distinct_at_max_and_marks_capped() {
+    let mut result = ResultSet::new(vec!["v".into()], MAX_QUICK_STATS_DISTINCT + 100);
+    for i in 0..=MAX_QUICK_STATS_DISTINCT {
+        result.push(vec![Cell::Text(format!("val-{i}"))]);
+    }
+    let visible: Vec<usize> = (0..result.rows.len()).collect();
+    let stats = ColumnQuickStats::compute(&result, &visible, 0);
+    assert_eq!(stats.total_rows, MAX_QUICK_STATS_DISTINCT + 1);
+    assert_eq!(stats.non_null, MAX_QUICK_STATS_DISTINCT + 1);
+    assert_eq!(stats.distinct, MAX_QUICK_STATS_DISTINCT);
+    assert!(stats.distinct_capped);
 }

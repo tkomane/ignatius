@@ -140,8 +140,29 @@ pub(crate) fn grid_capacity(
         .visible_result()
         .filter(|set| set.is_available())
         .map_or(0, |set| {
-            usize::from(inner.height).saturating_sub(grid_header_rows(model, set, spacing, inner))
+            let header = grid_header_rows(model, set, spacing, inner);
+            let footer = grid_footer_rows(model, set, spacing, inner);
+            usize::from(inner.height).saturating_sub(header + footer)
         })
+}
+
+/// Optional 1-line column quick-stats footer rows reserved inside `inner`.
+pub(crate) fn grid_footer_rows(
+    model: &Model,
+    set: &crate::query::result::ResultSet,
+    spacing: crate::app::model::Spacing,
+    area: Rect,
+) -> usize {
+    if !model.result_grid.show_quick_stats
+        || !set.is_available()
+        || set.columns.is_empty()
+        || model.displayed_rows().is_empty()
+        || area.width == 0
+    {
+        return 0;
+    }
+    let header_rows = grid_header_rows(model, set, spacing, area);
+    usize::from(usize::from(area.height) >= header_rows + 2)
 }
 
 pub(crate) fn render_results(
@@ -1245,7 +1266,9 @@ fn render_grid(
     let rows = model.displayed_rows();
     let has_type_row = model.result_grid.show_types && set.column_types.iter().any(Option::is_some);
     let header_rows = grid_header_rows(model, set, presentation.spacing(), area);
-    let visible_rows = (area.height as usize).saturating_sub(header_rows).max(1);
+    let footer_rows = grid_footer_rows(model, set, presentation.spacing(), area);
+    let drawable_rows = (area.height as usize).saturating_sub(header_rows + footer_rows);
+    let visible_rows = drawable_rows.max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (area.width as usize).saturating_sub(usize::from(needs_scrollbar));
 
@@ -1290,7 +1313,6 @@ fn render_grid(
     // range extends that line rather than adding a sixth prelude row and
     // shifting every hit region. A pane with no room for a data row states no
     // range rather than claiming rows that were never drawn.
-    let drawable_rows = (area.height as usize).saturating_sub(header_rows);
     let rendered_rows = rows.len().saturating_sub(offset).min(drawable_rows);
     let range_label = grid::viewport_position_label(
         offset + 1,
@@ -1695,7 +1717,25 @@ fn render_grid(
         lines.push(Line::from(Span::styled(message, theme.style(Token::Muted))));
     }
 
-    Paragraph::new(lines).render(area, buf);
+    let grid_area = Rect {
+        height: area
+            .height
+            .saturating_sub(u16::try_from(footer_rows).unwrap_or(u16::MAX)),
+        ..area
+    };
+    Paragraph::new(lines).render(grid_area, buf);
+
+    if footer_rows > 0
+        && let Some(col_idx) = selected_column
+    {
+        let stats_area = Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(1),
+            width: area.width,
+            height: 1,
+        };
+        render_quick_stats_bar(set, &rows, col_idx, presentation, stats_area, buf);
+    }
 
     if needs_scrollbar {
         render_scrollbar(
@@ -1710,11 +1750,102 @@ fn render_grid(
                 width: 1,
                 height: area
                     .height
-                    .saturating_sub(u16::try_from(header_rows).unwrap_or(u16::MAX)),
+                    .saturating_sub(u16::try_from(header_rows + footer_rows).unwrap_or(u16::MAX)),
             },
             buf,
         );
     }
+}
+
+fn format_quick_stat_number(value: f64) -> String {
+    let value = if value == 0.0 { 0.0 } else { value };
+    if value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_992.0 {
+        format!("{value:.0}")
+    } else if value.abs() >= 1e12 || (value.abs() > 0.0 && value.abs() < 1e-4) {
+        format!("{value:.4e}")
+    } else {
+        let formatted = format!("{value:.4}");
+        let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+        trimmed.to_owned()
+    }
+}
+
+fn format_grouped_count(value: usize) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+fn render_quick_stats_bar(
+    set: &crate::query::result::ResultSet,
+    visible_rows: &[usize],
+    column: usize,
+    presentation: &Presentation,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let theme = &presentation.theme;
+    let unicode = !presentation.glyphs.is_ascii();
+    let stats = grid::ColumnQuickStats::compute(set, visible_rows, column);
+    let col_name = set
+        .columns
+        .get(column)
+        .map_or_else(|| "col".to_owned(), |name| sanitize_for_display(name));
+
+    let distinct_text = if stats.distinct_capped {
+        format!("{}+ distinct", format_grouped_count(stats.distinct))
+    } else {
+        format!("{} distinct", format_grouped_count(stats.distinct))
+    };
+    let mut summary = format!(
+        "{col_name}: {} rows | {} non-null | {} null | {distinct_text}",
+        format_grouped_count(stats.total_rows),
+        format_grouped_count(stats.non_null),
+        format_grouped_count(stats.null_count),
+    );
+    if let Some(num) = stats.numeric {
+        summary.push_str(&format!(
+            " | min {} .. {} | sum {} | avg {}",
+            format_quick_stat_number(num.min),
+            format_quick_stat_number(num.max),
+            format_quick_stat_number(num.sum),
+            format_quick_stat_number(num.avg),
+        ));
+    }
+
+    let fitted = truncate_to_width(&summary, usize::from(area.width), unicode);
+    let mut spans = Vec::new();
+    if let Some((prefix, rest)) = fitted.split_once(": ") {
+        spans.push(Span::styled(
+            format!("{prefix}: "),
+            theme.on_stripe(Token::Info),
+        ));
+        for (idx, part) in rest.split(" | ").enumerate() {
+            if idx > 0 {
+                spans.push(Span::styled(" | ", theme.on_stripe(Token::Border)));
+            }
+            spans.push(Span::styled(part.to_owned(), theme.on_stripe(Token::Text)));
+        }
+    } else {
+        spans.push(Span::styled(fitted.clone(), theme.on_stripe(Token::Info)));
+    }
+    let used_width: usize = spans.iter().map(|s| display_width(&s.content)).sum();
+    let pad = usize::from(area.width).saturating_sub(used_width);
+    if pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), theme.stripe()));
+    }
+    Paragraph::new(Line::from(spans))
+        .style(theme.stripe())
+        .render(area, buf);
 }
 
 fn cell_style(theme: &Theme, token: Token, selected: bool, striped: bool) -> Style {

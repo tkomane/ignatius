@@ -418,3 +418,28 @@ fn editor_line_ops_and_jump_are_discoverable_when_editor_is_focused() {
         );
     }
 }
+
+#[test]
+fn quick_stats_and_sql_copy_actions_are_discoverable_only_with_retained_results_focus() {
+    let mut model = Model::new(100);
+    connected(&mut model);
+    let actions = [
+        Action::ToggleColumnStats,
+        Action::InsertCellWhereClause,
+        Action::InsertColumnInList,
+        Action::CopyRowAsJson,
+    ];
+    for action in &actions {
+        assert!(!action_is_available(&model, action));
+        assert_eq!(palette_group(action), "Results");
+        assert!(action_prerequisite(&model, action).is_some());
+    }
+
+    model.focus = Focus::Results;
+    model.last_execution = Some(rows_execution());
+    for action in &actions {
+        assert!(action_is_available(&model, action), "{action:?}");
+        assert!(palette_actions(&model).contains(action), "{action:?}");
+        assert_eq!(action_prerequisite(&model, action), None);
+    }
+}

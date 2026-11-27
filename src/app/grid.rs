@@ -10,7 +10,7 @@
 use crate::query::result::ResultSet;
 use crate::query::value::{Cell, display_width, sanitize_for_display};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// The narrowest width that still leaves a column distinguishable.
 pub const MIN_COLUMN_WIDTH: usize = 4;
@@ -18,6 +18,117 @@ pub const MIN_COLUMN_WIDTH: usize = 4;
 pub const MAX_COLUMN_WIDTH: usize = 80;
 /// The amount a width control changes at a time.
 pub const COLUMN_WIDTH_STEP: usize = 2;
+/// Maximum number of distinct non-NULL values tracked for column quick-stats.
+pub const MAX_QUICK_STATS_DISTINCT: usize = 10_000;
+
+/// Numeric aggregates computed only when every non-NULL cell in a column
+/// parses cleanly as a finite `f64`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NumericQuickStats {
+    /// Minimum finite value across non-NULL cells.
+    pub min: f64,
+    /// Maximum finite value across non-NULL cells.
+    pub max: f64,
+    /// Finite sum across non-NULL cells.
+    pub sum: f64,
+    /// Finite arithmetic mean across non-NULL cells.
+    pub avg: f64,
+}
+
+/// Live client-side summary metrics for one column across visible retained rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnQuickStats {
+    /// Number of visible retained rows inspected.
+    pub total_rows: usize,
+    /// Number of non-NULL cells inspected.
+    pub non_null: usize,
+    /// Number of SQL NULL (or missing) cells inspected.
+    pub null_count: usize,
+    /// Distinct non-NULL values observed, bounded by [`MAX_QUICK_STATS_DISTINCT`].
+    pub distinct: usize,
+    /// Whether distinct cardinality exceeded [`MAX_QUICK_STATS_DISTINCT`].
+    pub distinct_capped: bool,
+    /// Numeric aggregates, present only when `non_null > 0` and every non-NULL
+    /// cell parses cleanly as a finite `f64`.
+    pub numeric: Option<NumericQuickStats>,
+}
+
+impl ColumnQuickStats {
+    /// Computes quick-stats for `column` over `visible_rows` of `set`.
+    #[must_use]
+    pub fn compute(set: &ResultSet, visible_rows: &[usize], column: usize) -> Self {
+        if column >= set.columns.len() {
+            return Self {
+                total_rows: 0,
+                non_null: 0,
+                null_count: 0,
+                distinct: 0,
+                distinct_capped: false,
+                numeric: None,
+            };
+        }
+
+        let mut total_rows = 0usize;
+        let mut non_null = 0usize;
+        let mut null_count = 0usize;
+        let mut distinct_values: HashSet<&str> = HashSet::new();
+        let mut distinct_capped = false;
+        let mut all_numeric = true;
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        let mut sum = 0.0_f64;
+
+        for &row_index in visible_rows {
+            let Some(row) = set.rows.get(row_index) else {
+                continue;
+            };
+            total_rows += 1;
+            let Some(raw) = row.get(column).and_then(Cell::raw) else {
+                null_count += 1;
+                continue;
+            };
+            non_null += 1;
+            if !distinct_values.contains(raw) {
+                if distinct_values.len() < MAX_QUICK_STATS_DISTINCT {
+                    distinct_values.insert(raw);
+                } else {
+                    distinct_capped = true;
+                }
+            }
+            if all_numeric {
+                match raw.trim().parse::<f64>() {
+                    Ok(value) if value.is_finite() => {
+                        min = min.min(value);
+                        max = max.max(value);
+                        sum += value;
+                        if !sum.is_finite() {
+                            all_numeric = false;
+                        }
+                    }
+                    _ => {
+                        all_numeric = false;
+                    }
+                }
+            }
+        }
+
+        let numeric = if all_numeric && non_null > 0 {
+            let avg = sum / (non_null as f64);
+            (sum.is_finite() && avg.is_finite()).then_some(NumericQuickStats { min, max, sum, avg })
+        } else {
+            None
+        };
+
+        Self {
+            total_rows,
+            non_null,
+            null_count,
+            distinct: distinct_values.len(),
+            distinct_capped,
+            numeric,
+        }
+    }
+}
 
 /// Formats the viewport position line for the rows actually on screen.
 ///
@@ -146,6 +257,8 @@ pub enum GridCommand {
     NarrowSelected,
     /// Show or hide the available server type labels.
     ToggleTypes,
+    /// Show or hide the live column quick-stats summary bar.
+    ToggleColumnStats,
     /// Pin the first visible source column while moving across the rest.
     ToggleFreezeFirst,
     /// Restore automatic widths, visibility, order, and horizontal position.
@@ -163,6 +276,8 @@ pub struct ResultGridState {
     pub widths: BTreeMap<usize, usize>,
     /// Whether available server type labels should be drawn.
     pub show_types: bool,
+    /// Whether the live column quick-stats summary bar should be drawn.
+    pub show_quick_stats: bool,
     /// Whether the first visible source column should stay pinned.
     pub freeze_first: bool,
     /// Start position in the visible source-column sequence.
@@ -180,6 +295,7 @@ impl Default for ResultGridState {
             hidden_columns: BTreeSet::new(),
             widths: BTreeMap::new(),
             show_types: true,
+            show_quick_stats: true,
             freeze_first: false,
             horizontal_start: 0,
             columns_signature: Vec::new(),
@@ -196,12 +312,15 @@ impl ResultGridState {
     }
 
     /// Clears state tied to the previous result while retaining session reading
-    /// preferences for type labels and the frozen identity column.
+    /// preferences for type labels, quick-stats visibility, and the frozen
+    /// identity column.
     pub fn reset_for_result(&mut self, columns: &[String]) {
         let show_types = self.show_types;
+        let show_quick_stats = self.show_quick_stats;
         let freeze_first = self.freeze_first;
         *self = Self {
             show_types,
+            show_quick_stats,
             freeze_first,
             columns_signature: columns.to_vec(),
             ..Self::default()
