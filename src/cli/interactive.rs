@@ -2035,6 +2035,7 @@ fn spawn_connect(
         match reported.value {
             Ok(opened) => {
                 let info = opened.info().clone();
+                let metadata_target = Arc::new(target.for_endpoint(opened.connected_endpoint()));
                 if !connection_generation_is_current(&generation, request) {
                     return;
                 }
@@ -2065,7 +2066,14 @@ fn spawn_connect(
                     request,
                     Message::Action(crate::app::Action::ReloadObjects),
                 );
-                spawn_metadata_connect(tx, install_tx, target, timeout, generation, request);
+                spawn_metadata_connect(
+                    tx,
+                    install_tx,
+                    metadata_target,
+                    timeout,
+                    generation,
+                    request,
+                );
             }
             Err(diagnostic) => {
                 if !connection_generation_is_current(&generation, request) {
@@ -4191,6 +4199,29 @@ pub async fn probe_target(
             target.sslmode.guarantee()
         ),
     ));
+    if target.endpoints.len() > 1 {
+        let summary = target
+            .endpoints
+            .iter()
+            .enumerate()
+            .map(|(index, endpoint)| {
+                format!(
+                    "{}: {}:{}",
+                    index + 1,
+                    endpoint.host.display(),
+                    endpoint.port
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        checks.push(Check::ok(
+            "endpoints",
+            format!(
+                "{} candidates in failover order ({summary})",
+                target.endpoints.len()
+            ),
+        ));
+    }
     if target.target_session_attrs != crate::connection::TargetSessionAttrs::Any {
         checks.push(Check::ok(
             "target_session_attrs",
@@ -4202,84 +4233,86 @@ pub async fn probe_target(
         ));
     }
 
-    match &target.host {
-        crate::connection::Host::Socket(path) => {
-            checks.push(if path.exists() {
-                Check::ok("socket directory", path.display().to_string())
-            } else {
-                Check::fail(
-                    "socket directory",
-                    format!("{} does not exist", path.display()),
-                    "check that PostgreSQL is running locally and using this socket directory",
-                )
-            });
+    if target.endpoints.len() <= 1 {
+        match &target.host {
+            crate::connection::Host::Socket(path) => {
+                checks.push(if path.exists() {
+                    Check::ok("socket directory", path.display().to_string())
+                } else {
+                    Check::fail(
+                        "socket directory",
+                        format!("{} does not exist", path.display()),
+                        "check that PostgreSQL is running locally and using this socket directory",
+                    )
+                });
+            }
+            crate::connection::Host::Tcp(host) => {
+                checks.extend(
+                    probe_tcp_endpoint(host, target.port, target.connect_timeout, None).await,
+                );
+            }
         }
-        crate::connection::Host::Tcp(host) => {
-            let address = format!("{host}:{}", target.port);
-            match tokio::time::timeout(target.connect_timeout, tokio::net::lookup_host(&address))
-                .await
-            {
-                Ok(Ok(addresses)) => {
-                    let found: Vec<String> = addresses.map(|a| a.ip().to_string()).collect();
-                    if found.is_empty() {
-                        checks.push(Check::fail(
-                            "address resolution",
-                            format!("{host} resolved to no addresses"),
-                            "check the host name and this machine's DNS settings",
-                        ));
+
+        // Only attempt the full connection when the transport looks usable, so the
+        // report does not repeat the same failure twice.
+        if checks.iter().any(|c| c.status == CheckStatus::Fail) {
+            checks.push(Check::skipped(
+                "postgres",
+                "skipped because the server could not be reached",
+            ));
+            return Ok(checks);
+        }
+    } else {
+        let mut endpoint_checks = Vec::new();
+        let mut any_reachable = false;
+        for (index, endpoint) in target.endpoints.iter().enumerate() {
+            let label = format!(
+                "endpoint {} ({}:{})",
+                index + 1,
+                endpoint.host.display(),
+                endpoint.port
+            );
+            let per_endpoint = match &endpoint.host {
+                crate::connection::Host::Socket(path) => {
+                    if path.exists() {
+                        vec![Check::ok(
+                            label,
+                            format!("socket directory {} exists", path.display()),
+                        )]
                     } else {
-                        checks.push(Check::ok(
-                            "address resolution",
-                            format!("{host} resolves to {}", found.join(", ")),
-                        ));
+                        vec![Check::fail(
+                            label,
+                            format!("socket directory {} does not exist", path.display()),
+                            "check that PostgreSQL is running locally and using this socket directory",
+                        )]
                     }
                 }
-                Ok(Err(err)) => checks.push(Check::fail(
-                    "address resolution",
-                    format!("{host} could not be resolved: {err}"),
-                    "check the host name and this machine's DNS settings",
-                )),
-                Err(_) => checks.push(Check::fail(
-                    "address resolution",
-                    format!("resolving {host} timed out"),
-                    "check this machine's DNS settings",
-                )),
-            }
-
-            match tokio::time::timeout(
-                target.connect_timeout,
-                tokio::net::TcpStream::connect(&address),
-            )
-            .await
-            {
-                Ok(Ok(_)) => {
-                    checks.push(Check::ok("tcp", format!("{address} accepts connections")))
+                crate::connection::Host::Tcp(host) => {
+                    probe_tcp_endpoint(host, endpoint.port, target.connect_timeout, Some(index + 1))
+                        .await
                 }
-                Ok(Err(err)) => checks.push(Check::fail(
-                    "tcp",
-                    format!("{address} refused the connection: {err}"),
-                    "check that PostgreSQL is listening on this port and that a firewall allows it",
-                )),
-                Err(_) => checks.push(Check::fail(
-                    "tcp",
-                    format!(
-                        "{address} did not answer within {:?}",
-                        target.connect_timeout
-                    ),
-                    "check the address and any firewall between here and the server",
-                )),
+            };
+            if !per_endpoint.iter().any(|c| c.status == CheckStatus::Fail) {
+                any_reachable = true;
             }
+            endpoint_checks.extend(per_endpoint);
         }
-    }
 
-    // Only attempt the full connection when the transport looks usable, so the
-    // report does not repeat the same failure twice.
-    if checks.iter().any(|c| c.status == CheckStatus::Fail) {
-        checks.push(Check::skipped(
-            "postgres",
-            "skipped because the server could not be reached",
-        ));
-        return Ok(checks);
+        if any_reachable {
+            for mut check in endpoint_checks {
+                if check.status == CheckStatus::Fail {
+                    check.status = CheckStatus::Warn;
+                }
+                checks.push(check);
+            }
+        } else {
+            checks.extend(endpoint_checks);
+            checks.push(Check::skipped(
+                "postgres",
+                "skipped because no candidate endpoint could be reached",
+            ));
+            return Ok(checks);
+        }
     }
 
     let timeout = Duration::from_millis(config.query.statement_timeout_ms);
@@ -4288,10 +4321,15 @@ pub async fn probe_target(
     match connected.value {
         Ok(opened) => {
             let info = opened.info();
+            let via = if target.endpoints.len() > 1 {
+                format!(" via {}", info.target)
+            } else {
+                String::new()
+            };
             checks.push(Check::ok(
                 "postgres",
                 format!(
-                    "connected as {} to {} on PostgreSQL {}",
+                    "connected as {} to {}{via} on PostgreSQL {}",
                     info.user, info.database, info.server_version
                 ),
             ));
@@ -4360,6 +4398,69 @@ pub async fn probe_target(
     ));
 
     Ok(checks)
+}
+
+async fn probe_tcp_endpoint(
+    host: &str,
+    port: u16,
+    connect_timeout: Duration,
+    endpoint_index: Option<usize>,
+) -> Vec<Check> {
+    let mut checks = Vec::new();
+    let dns_name = match endpoint_index {
+        Some(idx) => format!("address resolution (endpoint {idx})"),
+        None => "address resolution".to_owned(),
+    };
+    let tcp_name = match endpoint_index {
+        Some(idx) => format!("tcp (endpoint {idx})"),
+        None => "tcp".to_owned(),
+    };
+    let address = format!("{host}:{port}");
+    match tokio::time::timeout(connect_timeout, tokio::net::lookup_host(&address)).await {
+        Ok(Ok(addresses)) => {
+            let found: Vec<String> = addresses.map(|a| a.ip().to_string()).collect();
+            if found.is_empty() {
+                checks.push(Check::fail(
+                    dns_name,
+                    format!("{host} resolved to no addresses"),
+                    "check the host name and this machine's DNS settings",
+                ));
+            } else {
+                checks.push(Check::ok(
+                    dns_name,
+                    format!("{host} resolves to {}", found.join(", ")),
+                ));
+            }
+        }
+        Ok(Err(err)) => checks.push(Check::fail(
+            dns_name,
+            format!("{host} could not be resolved: {err}"),
+            "check the host name and this machine's DNS settings",
+        )),
+        Err(_) => checks.push(Check::fail(
+            dns_name,
+            format!("resolving {host} timed out"),
+            "check this machine's DNS settings",
+        )),
+    }
+
+    match tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(&address)).await {
+        Ok(Ok(_)) => checks.push(Check::ok(
+            tcp_name,
+            format!("{address} accepts connections"),
+        )),
+        Ok(Err(err)) => checks.push(Check::fail(
+            tcp_name,
+            format!("{address} refused the connection: {err}"),
+            "check that PostgreSQL is listening on this port and that a firewall allows it",
+        )),
+        Err(_) => checks.push(Check::fail(
+            tcp_name,
+            format!("{address} did not answer within {:?}", connect_timeout),
+            "check the address and any firewall between here and the server",
+        )),
+    }
+    checks
 }
 
 fn add_notice_check(checks: &mut Vec<Check>, report: &NoticeReport) {

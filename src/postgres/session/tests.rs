@@ -176,6 +176,10 @@ async fn live_session(startup_setting: Option<&str>) -> Option<Session> {
         client,
         user_sql_gate: tokio::sync::Mutex::new(()),
         info,
+        connected_endpoint: Endpoint {
+            host: target.host.clone(),
+            port: target.port,
+        },
         tls,
         notices,
         notifications,
@@ -820,4 +824,77 @@ fn verify_target_session_attrs_enforces_each_policy_without_downgrade() {
             }
         }
     }
+}
+
+#[test]
+fn multi_host_failure_diagnostic_names_every_endpoint_and_redacts_secrets() {
+    let resolved = target("postgres://app:hunter2-secret@h1:5432,h2:5433/orders");
+    let first = Diagnostic::new(
+        DiagnosticKind::Connection,
+        "could not reach h1",
+        "connecting to h1",
+    )
+    .likely_cause("postgres://app:hunter2-secret@h1:5432/orders connection refused");
+    let second = Diagnostic::new(
+        DiagnosticKind::Connection,
+        "server is primary, refusing connection because target_session_attrs=standby was requested",
+        "verifying session attributes",
+    )
+    .likely_cause("password=hunter2-secret observed primary");
+
+    let attempts = vec![
+        ("h1:5432".to_owned(), summarize_attempt_error(&first)),
+        ("h2:5433".to_owned(), summarize_attempt_error(&second)),
+    ];
+    let combined = multi_host_failure_diagnostic(&resolved, &attempts);
+    assert_eq!(combined.kind, DiagnosticKind::Connection);
+    assert!(
+        combined.headline.contains("h1:5432"),
+        "{}",
+        combined.headline
+    );
+    assert!(
+        combined.headline.contains("h2:5433"),
+        "{}",
+        combined.headline
+    );
+    let cause = combined.likely_cause.as_deref().unwrap_or_default();
+    assert!(cause.contains("h1:5432"), "{cause}");
+    assert!(cause.contains("h2:5433"), "{cause}");
+    assert!(
+        !format!("{combined:?}").contains("hunter2-secret"),
+        "combined diagnostic must never leak password: {combined:?}"
+    );
+}
+
+#[tokio::test]
+async fn connect_reported_sequential_failover_reports_all_closed_local_candidates() {
+    // Bind two ephemeral ports on localhost and drop the listeners immediately
+    // so both endpoints deterministically refuse TCP connections.
+    let listener1 = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 1");
+    let port1 = listener1.local_addr().expect("addr 1").port();
+    let listener2 = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 2");
+    let port2 = listener2.local_addr().expect("addr 2").port();
+    drop(listener1);
+    drop(listener2);
+
+    let uri = format!(
+        "postgres://app:hunter2-secret@127.0.0.1:{port1},127.0.0.1:{port2}/orders?sslmode=verify-full"
+    );
+    let resolved = target(&uri);
+    assert_eq!(resolved.sslmode, SslMode::VerifyFull);
+    let reported = connect_reported(&resolved, Duration::ZERO).await;
+    let err = reported.value.expect_err("both closed ports must fail");
+    assert_eq!(err.kind, DiagnosticKind::Connection);
+    let rendered = format!("{err:?}");
+    assert!(
+        rendered.contains(&format!("127.0.0.1:{port1}")),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(&format!("127.0.0.1:{port2}")),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("hunter2-secret"), "{rendered}");
+    assert_eq!(resolved.sslmode, SslMode::VerifyFull);
 }

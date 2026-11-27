@@ -354,6 +354,10 @@ impl Profile {
             .next_action("correct the field name, or remove it"));
         }
 
+        if let Some(host) = &self.host {
+            crate::connection::target::parse_host_list(host)?;
+        }
+
         if let Some(value) = &self.target_session_attrs
             && let Err(message) = crate::connection::target::TargetSessionAttrs::parse(value)
         {

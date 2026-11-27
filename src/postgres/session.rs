@@ -13,7 +13,7 @@
 //! - Whether the connection is really encrypted is read back from the server
 //!   through `pg_stat_ssl` rather than assumed from the requested mode.
 
-use crate::connection::{ConnectionTarget, Host, SslMode, TargetSessionAttrs};
+use crate::connection::{ConnectionTarget, Endpoint, Host, SslMode, TargetSessionAttrs};
 use crate::diagnostics::{Diagnostic, DiagnosticKind};
 use crate::postgres::error::{
     from_connect_error, from_parameterized_query_error, from_query_error, safe_sqlstate,
@@ -83,6 +83,7 @@ pub struct Session {
     /// Serializes arbitrary user SQL without blocking cancellation or metadata.
     user_sql_gate: tokio::sync::Mutex<()>,
     info: SessionInfo,
+    connected_endpoint: Endpoint,
     tls: crate::postgres::tls::TlsOptions,
     notices: Arc<Notices>,
     notifications: Arc<tokio::sync::Mutex<Vec<crate::ops::PubSubNotification>>>,
@@ -377,6 +378,12 @@ impl Session {
     #[must_use]
     pub const fn info(&self) -> &SessionInfo {
         &self.info
+    }
+
+    /// Concrete endpoint this session actually connected to.
+    #[must_use]
+    pub const fn connected_endpoint(&self) -> &Endpoint {
+        &self.connected_endpoint
     }
 
     /// A handle for cancelling from another task.
@@ -2667,83 +2674,34 @@ pub async fn connect_reported(
         // makes the omission loud and keeps the prompt honest.
         if target.auth.is_some() && target.password.is_none() {
             return Err(Diagnostic::new(
-            crate::diagnostics::DiagnosticKind::Internal,
-            "a connection using a cloud identity provider was opened without a credential",
-            "connecting to PostgreSQL",
-        )
-        .likely_cause(
-            "this is a defect in this build: a code path opened a connection without asking the \
-             provider for a token first",
-        )
-        .next_action("report it, and connect without --auth as a way through in the meantime")
-        .technical_opt("Provider", target.auth.clone()));
+                crate::diagnostics::DiagnosticKind::Internal,
+                "a connection using a cloud identity provider was opened without a credential",
+                "connecting to PostgreSQL",
+            )
+            .likely_cause(
+                "this is a defect in this build: a code path opened a connection without asking \
+                 the provider for a token first",
+            )
+            .next_action("report it, and connect without --auth as a way through in the meantime")
+            .technical_opt("Provider", target.auth.clone()));
         }
 
-        let config = build_config(target);
-        let tls = crate::postgres::tls::TlsOptions {
-            mode: target.sslmode,
-            root_cert: target.root_cert.clone(),
-            client_cert: target.client_cert.clone(),
-            client_key: target.client_key.clone(),
-        };
-        let tls_config = client_config(&tls)?;
-        let notice_privacy = Arc::new(AtomicBool::new(false));
+        let candidates = target.candidate_targets();
+        if candidates.len() == 1 {
+            return connect_candidate(&candidates[0], statement_timeout, &mut observed).await;
+        }
 
-        let (client, notices, notifications, connection_lost) = match tls_config {
-            None => {
-                establish(
-                    &config,
-                    tokio_postgres::NoTls,
-                    target,
-                    Arc::clone(&notice_privacy),
-                )
-                .await?
+        let mut attempts = Vec::with_capacity(candidates.len());
+        for candidate in &candidates {
+            match connect_candidate(candidate, statement_timeout, &mut observed).await {
+                Ok(session) => return Ok(session),
+                Err(diagnostic) => {
+                    let endpoint = format!("{}:{}", candidate.host.display(), candidate.port);
+                    attempts.push((endpoint, summarize_attempt_error(&diagnostic)));
+                }
             }
-            Some(rustls_config) => {
-                establish(
-                    &config,
-                    tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config),
-                    target,
-                    Arc::clone(&notice_privacy),
-                )
-                .await?
-            }
-        };
-
-        observed = Some(Arc::clone(&notices));
-
-        // Asked for before anything else runs, and enforced by the server rather
-        // than by this client guessing at what a statement does.
-        if target.read_only {
-            client
-                .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
-                .await
-                .map_err(|err| from_query_error(&err, 0))?;
         }
-
-        if statement_timeout > Duration::ZERO {
-            let millis = statement_timeout.as_millis();
-            client
-                .batch_execute(&format!("SET statement_timeout = {millis}"))
-                .await
-                .map_err(|err| from_query_error(&err, 0))?;
-        }
-
-        let (info, in_recovery) = bootstrap(&client, target).await?;
-        if let Err(diagnostic) = verify_target_session_attrs(target, info.read_only, in_recovery) {
-            drop(client);
-            return Err(diagnostic);
-        }
-        Ok(Session {
-            client,
-            user_sql_gate: tokio::sync::Mutex::new(()),
-            info,
-            tls,
-            notices,
-            notifications,
-            notice_privacy,
-            connection_lost,
-        })
+        Err(multi_host_failure_diagnostic(target, &attempts))
     }
     .await;
     let notice_report = if value.is_err() {
@@ -2757,6 +2715,123 @@ pub async fn connect_reported(
         value,
         notice_report,
     }
+}
+
+async fn connect_candidate(
+    target: &ConnectionTarget,
+    statement_timeout: Duration,
+    observed: &mut Option<Arc<Notices>>,
+) -> Result<Session, Diagnostic> {
+    let config = build_config(target);
+    let tls = crate::postgres::tls::TlsOptions {
+        mode: target.sslmode,
+        root_cert: target.root_cert.clone(),
+        client_cert: target.client_cert.clone(),
+        client_key: target.client_key.clone(),
+    };
+    let tls_config = client_config(&tls)?;
+    let notice_privacy = Arc::new(AtomicBool::new(false));
+
+    let (client, notices, notifications, connection_lost) = match tls_config {
+        None => {
+            establish(
+                &config,
+                tokio_postgres::NoTls,
+                target,
+                Arc::clone(&notice_privacy),
+            )
+            .await?
+        }
+        Some(rustls_config) => {
+            establish(
+                &config,
+                tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config),
+                target,
+                Arc::clone(&notice_privacy),
+            )
+            .await?
+        }
+    };
+
+    *observed = Some(Arc::clone(&notices));
+
+    // Asked for before anything else runs, and enforced by the server rather
+    // than by this client guessing at what a statement does.
+    if target.read_only {
+        client
+            .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+            .await
+            .map_err(|err| from_query_error(&err, 0))?;
+    }
+
+    if statement_timeout > Duration::ZERO {
+        let millis = statement_timeout.as_millis();
+        client
+            .batch_execute(&format!("SET statement_timeout = {millis}"))
+            .await
+            .map_err(|err| from_query_error(&err, 0))?;
+    }
+
+    let (info, in_recovery) = bootstrap(&client, target).await?;
+    if let Err(diagnostic) = verify_target_session_attrs(target, info.read_only, in_recovery) {
+        drop(client);
+        return Err(diagnostic);
+    }
+    Ok(Session {
+        client,
+        user_sql_gate: tokio::sync::Mutex::new(()),
+        info,
+        connected_endpoint: Endpoint {
+            host: target.host.clone(),
+            port: target.port,
+        },
+        tls,
+        notices,
+        notifications,
+        notice_privacy,
+        connection_lost,
+    })
+}
+
+fn summarize_attempt_error(diagnostic: &Diagnostic) -> String {
+    let raw = match diagnostic.likely_cause.as_deref() {
+        Some(cause) if !cause.is_empty() => format!("{} ({cause})", diagnostic.headline),
+        _ => diagnostic.headline.clone(),
+    };
+    crate::diagnostics::redact_text(&raw)
+}
+
+fn multi_host_failure_diagnostic(
+    target: &ConnectionTarget,
+    attempts: &[(String, String)],
+) -> Diagnostic {
+    let endpoints: Vec<&str> = attempts.iter().map(|(ep, _)| ep.as_str()).collect();
+    let details: Vec<String> = attempts
+        .iter()
+        .enumerate()
+        .map(|(index, (endpoint, reason))| format!("{}. {endpoint}: {reason}", index + 1))
+        .collect();
+    let mut diagnostic = Diagnostic::new(
+        DiagnosticKind::Connection,
+        format!(
+            "could not connect to any of the {} candidate endpoints ({})",
+            attempts.len(),
+            endpoints.join(", ")
+        ),
+        format!("connecting to {}", target.safe_display()),
+    )
+    .likely_cause(details.join("; "))
+    .next_action(
+        "check each candidate host, port, TLS configuration, and target_session_attrs policy; \
+         nothing was downgraded or retried after connecting",
+    );
+    for (index, (endpoint, reason)) in attempts.iter().enumerate() {
+        diagnostic = diagnostic.technical(
+            format!("Attempt {}", index + 1),
+            format!("{endpoint}: {reason}"),
+        );
+    }
+    diagnostic
 }
 
 type Established = (

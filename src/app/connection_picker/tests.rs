@@ -187,3 +187,37 @@ fn target_session_attrs_is_shown_in_picker_only_when_not_any() {
             .contains("configuration needs attention")
     );
 }
+
+#[test]
+fn multi_host_profile_summary_shows_candidate_hosts_and_validates_empty_segments() {
+    let multi =
+        profile("host = \"db1.example.net,db2.example.net\"\nport = 6432\ndbname = \"orders\"\n");
+    let summary = ConnectionProfileSummary::from_profile("ha", &multi, &BTreeMap::new());
+    assert!(summary.validation.is_none(), "{:?}", summary.validation);
+    assert_eq!(
+        summary.location,
+        "db1.example.net:6432,db2.example.net:6432 (2 hosts)"
+    );
+    assert!(summary.detail().contains("2 hosts"));
+
+    let no_port = profile("host = \"db1.example.net,db2.example.net\"\n");
+    let no_port_summary =
+        ConnectionProfileSummary::from_profile("ha-default", &no_port, &BTreeMap::new());
+    assert_eq!(
+        no_port_summary.location,
+        "db1.example.net,db2.example.net (2 hosts, port from defaults)"
+    );
+
+    let invalid = profile("host = \"db1.example.net,,db2.example.net\"\n");
+    let invalid_summary =
+        ConnectionProfileSummary::from_profile("ha-bad", &invalid, &BTreeMap::new());
+    assert!(
+        invalid_summary.validation.is_some(),
+        "empty host segment must fail validation"
+    );
+    assert!(
+        invalid_summary
+            .detail()
+            .contains("configuration needs attention")
+    );
+}

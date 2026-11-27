@@ -180,6 +180,19 @@ connection error and are never silently downgraded or retried. Internal
 object-tree connections clear `target_session_attrs` back to `any` and enforce
 their own read-only transaction posture.
 
+**Multi-host failover**: `host` and `port` accept libpq-style comma-separated
+lists (`host1,host2` and `port1,port2`, or `postgres://user@h1:5432,h2:5433/db`,
+including bracketed IPv6 `[::1]:5432,[::1]:5433`) across URIs, keyword/value
+strings, `pg_service.conf`, `PGHOST`/`PGPORT`, CLI `--host`, and profiles up to
+16 endpoints (`MAX_ENDPOINTS`). One port applies to all hosts; multiple ports
+must match the host count. If any candidate host is non-local, default `sslmode`
+is `verify-full`. Candidates are tried sequentially in order alongside
+`target_session_attrs`, re-consulting `.pgpass` per endpoint when no explicit
+password was supplied, never downgrading TLS and never retrying once a session
+succeeds. The active session and any object-tree connection bind to the actual
+connected endpoint; total failure reports every attempted endpoint and its
+redacted reason.
+
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 `PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
 `PGCONNECT_TIMEOUT`, `PGSERVICE`, `PGSERVICEFILE`, `PGPASSFILE`, `PGSYSCONFDIR`.
