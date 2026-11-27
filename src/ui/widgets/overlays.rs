@@ -30,6 +30,12 @@ pub(crate) fn render_name_prompt(
     let box_area = prompt_box(area, presentation, (70, 7));
     ratatui::widgets::Clear.render(box_area, buf);
 
+    let input_label = match prompt.purpose {
+        crate::app::model::NamePurpose::JumpToLine => "Line: ",
+        crate::app::model::NamePurpose::SaveQuery
+        | crate::app::model::NamePurpose::ExportRows
+        | crate::app::model::NamePurpose::RenameBuffer => "Name: ",
+    };
     let lines = vec![
         Line::from(Span::styled(
             sanitize_for_display(&prompt.subject),
@@ -37,7 +43,7 @@ pub(crate) fn render_name_prompt(
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Name: ", theme.style(Token::Header)),
+            Span::styled(input_label, theme.style(Token::Header)),
             Span::styled(
                 sanitize_for_display(&prompt.typed),
                 theme.style(Token::Focus),
@@ -54,6 +60,10 @@ pub(crate) fn render_name_prompt(
     let title = match prompt.purpose {
         crate::app::model::NamePurpose::RenameBuffer => format!(
             " {}Rename buffer  Enter to apply, Esc to cancel ",
+            presentation.icon(Icon::Editor)
+        ),
+        crate::app::model::NamePurpose::JumpToLine => format!(
+            " {}Jump to line  Enter to jump, Esc to cancel ",
             presentation.icon(Icon::Editor)
         ),
         crate::app::model::NamePurpose::SaveQuery | crate::app::model::NamePurpose::ExportRows => {

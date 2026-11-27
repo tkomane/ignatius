@@ -54,6 +54,10 @@ Opening help or resizing starts at the top. Space bindings are written as
 | `Ctrl+W` `Alt+Backspace` | Delete the word before the cursor | No |
 | `Ctrl+Z` | Undo | No |
 | `Ctrl+Y` | Redo | No |
+| `Ctrl+/` | Toggle `--` line comment | No |
+| `Ctrl+Shift+D` | Duplicate the current line | No |
+| `Alt+Up` `Alt+Down` | Move the current line up or down | No |
+| `Ctrl+L` | Jump to a line number | No |
 | `Backspace` | Delete the character before the cursor | No |
 | `Enter` | Use what is selected: a line break, an object's name, or a confirmation | No |
 | `/` | Filter what is in front of you: the rows when the results have focus, the object tree otherwise | No |
@@ -527,6 +531,15 @@ reports whether it changed, did nothing, or refused safely, and `Ctrl+Z` undoes
 the complete formatting edit. `Ctrl+K q` reaches the same action when a
 terminal or personal preference makes the direct shortcut inconvenient.
 
+With the editor focused, `Ctrl+/` (`toggle-comment`) toggles a `-- ` line
+comment while preserving leading indentation, `Ctrl+Shift+D` (`duplicate-line`)
+duplicates the current line below at the same column, and `Alt+Up` /
+`Alt+Down` (`move-line-up` / `move-line-down`) swap the current line with the
+adjacent line; each edit is one undo step (`Ctrl+Z`). `Ctrl+L` (`jump-to-line`)
+opens a single-line prompt (`Jump to line`) that moves the caret to the first
+non-whitespace character of the target line (clamping `1..=line_count`) without
+modifying buffer text, undo history, disk state, or database state.
+
 When Results has focus, `Ctrl+K g` opens the same searchable palette over the
 current retained result. It lists local sorting, visible-column selection,
 bounded width controls, type-label visibility, frozen-first-column layout, and
@@ -682,7 +695,8 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `schema-diff`, `import-data`, `routine-runner`, `maintenance-ops`, `query-performance`,
 `index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `pin-buffer`, `rename-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
-`move-buffer-end`.
+`move-buffer-end`, `toggle-comment`, `duplicate-line`, `move-line-up`,
+`move-line-down`, `jump-to-line`.
 
 Movement keys are not bindable. They mean different things in each pane, and
 rebinding them one at a time would produce an interface nobody could describe.

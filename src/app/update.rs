@@ -1717,6 +1717,10 @@ fn help_action(model: &mut Model, action: Action) -> Vec<Effect> {
         | Action::Backspace
         | Action::DeleteForward
         | Action::DeleteWordLeft
+        | Action::ToggleLineComment
+        | Action::DuplicateLine
+        | Action::MoveLineUp
+        | Action::MoveLineDown
         | Action::Undo
         | Action::Redo
         | Action::Move(_)
@@ -2330,6 +2334,40 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             edit_editor(model, |editor| editor.delete_word_left());
             Vec::new()
         }
+        Action::ToggleLineComment if model.focus == Focus::Editor => {
+            edit_editor(model, |editor| {
+                editor.toggle_line_comment();
+            });
+            Vec::new()
+        }
+        Action::DuplicateLine if model.focus == Focus::Editor => {
+            edit_editor(model, |editor| {
+                editor.duplicate_line();
+            });
+            Vec::new()
+        }
+        Action::MoveLineUp if model.focus == Focus::Editor => {
+            edit_editor(model, |editor| {
+                editor.move_line_up();
+            });
+            Vec::new()
+        }
+        Action::MoveLineDown if model.focus == Focus::Editor => {
+            edit_editor(model, |editor| {
+                editor.move_line_down();
+            });
+            Vec::new()
+        }
+        Action::JumpToLine if model.focus == Focus::Editor => {
+            model.sync_active_buffer_from_editor();
+            let (current_line, _) = model.editor.position();
+            let total_lines = model.editor.line_count();
+            model.name_prompt = Some(crate::app::model::NamePrompt::for_jump_to_line(
+                current_line,
+                total_lines,
+            ));
+            Vec::new()
+        }
         Action::MoveWord(direction) if model.focus == Focus::Editor => {
             match direction {
                 Direction::Left => model.editor.move_word_left(),
@@ -2389,6 +2427,11 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::DeleteForward
         | Action::DeleteWordLeft
+        | Action::ToggleLineComment
+        | Action::DuplicateLine
+        | Action::MoveLineUp
+        | Action::MoveLineDown
+        | Action::JumpToLine
         | Action::MoveWord(_)
         | Action::MoveLineStart
         | Action::MoveLineEnd
@@ -6712,11 +6755,28 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Activate | Action::RunBuffer => {
+            let purpose = prompt.purpose;
+            if purpose == crate::app::model::NamePurpose::JumpToLine {
+                let raw = prompt.typed.trim().to_owned();
+                model.name_prompt = None;
+                match raw.parse::<usize>() {
+                    Ok(line) if line > 0 => {
+                        model.editor.jump_to_line(line);
+                        model.sync_active_buffer_from_editor();
+                    }
+                    _ => {
+                        model.buffer_notice = Some(
+                            "Invalid line number; enter a positive integer (1 or greater)."
+                                .to_owned(),
+                        );
+                    }
+                }
+                return Vec::new();
+            }
             if prompt.typed.trim().is_empty() {
                 return Vec::new();
             }
             let name = prompt.typed.trim().to_owned();
-            let purpose = prompt.purpose;
             if purpose == crate::app::model::NamePurpose::RenameBuffer
                 && crate::buffer::sanitize_buffer_title(&name).is_none()
             {
@@ -6747,6 +6807,7 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     }
                     Vec::new()
                 }
+                crate::app::model::NamePurpose::JumpToLine => Vec::new(),
             }
         }
         Action::Dismiss | Action::Cancel => {

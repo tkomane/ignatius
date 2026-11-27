@@ -282,10 +282,15 @@ pub(crate) fn render_footer(
     if let Some(notice) = &model.buffer_notice {
         let remaining = usize::from(area.width).saturating_sub(used + 1);
         let full = sanitize_for_display(notice);
+        let fallback = if full.contains("pinned") {
+            "Buffer pinned"
+        } else {
+            &full
+        };
         let message = if display_width(&full) <= remaining {
             full
         } else {
-            truncate_to_width("Buffer pinned", remaining, !presentation.glyphs.is_ascii())
+            truncate_to_width(fallback, remaining, !presentation.glyphs.is_ascii())
         };
         if !message.is_empty() {
             spans.push(Span::styled(
