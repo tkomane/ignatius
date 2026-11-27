@@ -1,10 +1,12 @@
 use super::*;
-use crate::connection::target::{Host, SslMode, TargetSessionAttrs};
+use crate::connection::target::{Endpoint, Host, SslMode, TargetSessionAttrs};
 
 fn target(sslmode: SslMode) -> ConnectionTarget {
+    let host = Host::Tcp("db.example.com".into());
     ConnectionTarget {
-        host: Host::Tcp("db.example.com".into()),
+        host: host.clone(),
         port: 5432,
+        endpoints: vec![Endpoint { host, port: 5432 }],
         database: "orders".into(),
         user: "someone@example.com".into(),
         password: None,
@@ -19,6 +21,8 @@ fn target(sslmode: SslMode) -> ConnectionTarget {
         read_only: false,
         notes: Vec::new(),
         auth: Some("entra".into()),
+        passfile: None,
+        explicit_password: false,
     }
 }
 

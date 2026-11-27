@@ -142,9 +142,38 @@ pub fn summaries(
         .collect()
 }
 
-/// Describes a profile's configured host and port without claiming resolution.
+/// Describes a profile's configured host(s) and port without claiming resolution.
 fn location(profile: &Profile) -> String {
     match (profile.host.as_deref(), profile.port) {
+        (Some(host), port) if host.contains(',') => {
+            let hosts: Vec<&str> = host
+                .split(',')
+                .map(str::trim)
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            if hosts.len() > 1 {
+                match port {
+                    Some(port) => {
+                        let rendered = hosts
+                            .iter()
+                            .map(|h| format!("{h}:{port}"))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("{rendered} ({} hosts)", hosts.len())
+                    }
+                    None => format!(
+                        "{} ({} hosts, port from defaults)",
+                        hosts.join(","),
+                        hosts.len()
+                    ),
+                }
+            } else {
+                match port {
+                    Some(port) => format!("{host}:{port}"),
+                    None => format!("{host}:port from defaults"),
+                }
+            }
+        }
         (Some(host), Some(port)) => format!("{host}:{port}"),
         (Some(host), None) => format!("{host}:port from defaults"),
         (None, Some(port)) => format!("host from environment/defaults:{port}"),
