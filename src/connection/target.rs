@@ -376,6 +376,18 @@ pub struct ResolutionNote {
     pub message: String,
 }
 
+/// Maximum number of candidate endpoints permitted in one resolved target.
+pub const MAX_ENDPOINTS: usize = 16;
+
+/// One candidate host and port endpoint in failover order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoint {
+    /// TCP host name, IP address, or Unix-domain socket directory.
+    pub host: Host,
+    /// TCP port, also used to name the socket file.
+    pub port: u16,
+}
+
 /// A fully resolved connection target.
 ///
 /// Deliberately not `Clone`. A value holding a password should be moved, not
@@ -384,10 +396,12 @@ pub struct ResolutionNote {
 /// name what it is doing with the secret.
 #[derive(Debug)]
 pub struct ConnectionTarget {
-    /// Where to connect.
+    /// Primary (first) endpoint host, synced with `endpoints[0]`.
     pub host: Host,
-    /// TCP port, also used to name the socket file.
+    /// Primary (first) endpoint port, synced with `endpoints[0]`.
     pub port: u16,
+    /// Ordered candidate endpoints for sequential failover.
+    pub endpoints: Vec<Endpoint>,
     /// Database name.
     pub database: String,
     /// Role name.
@@ -428,6 +442,10 @@ pub struct ConnectionTarget {
     /// `connection::cloud`. It is kept on the target rather than discarded after
     /// the fetch so that any path opening a connection can check it was done.
     pub auth: Option<String>,
+    /// Resolved password file path for per-endpoint `.pgpass` lookup.
+    pub(crate) passfile: Option<PathBuf>,
+    /// Whether the password came from an explicit source rather than `.pgpass`.
+    pub(crate) explicit_password: bool,
 }
 
 /// Safe bounded `statement_timeout` applied to internal object-tree connections.
@@ -507,7 +525,9 @@ impl ConnectionTarget {
     /// The same target with a password the user has just supplied.
     #[must_use]
     pub fn with_password(&self, password: SecretString) -> Self {
-        self.copy_with(Some(password))
+        let mut copy = self.copy_with(Some(password));
+        copy.explicit_password = true;
+        copy
     }
 
     /// The same server and credentials, pointing at another database.
@@ -519,6 +539,9 @@ impl ConnectionTarget {
     pub fn for_database(&self, database: &str) -> Self {
         let mut copy = self.copy_with(self.password.clone_secret());
         copy.database = database.to_owned();
+        if copy.password.is_some() {
+            copy.explicit_password = true;
+        }
         copy
     }
 
@@ -548,7 +571,58 @@ impl ConnectionTarget {
         copy.target_session_attrs = TargetSessionAttrs::Any;
         copy.statement_timeout = Some(DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT);
         copy.lock_timeout = Some(DEFAULT_OBJECT_TREE_LOCK_TIMEOUT);
+        copy.endpoints = vec![Endpoint {
+            host: self.host.clone(),
+            port: self.port,
+        }];
         copy
+    }
+
+    /// The same target pinned to one concrete endpoint.
+    #[must_use]
+    pub fn for_endpoint(&self, endpoint: &Endpoint) -> Self {
+        let password = self.password_for_endpoint(endpoint);
+        let mut copy = self.copy_with(password);
+        copy.host = endpoint.host.clone();
+        copy.port = endpoint.port;
+        copy.endpoints = vec![endpoint.clone()];
+        copy
+    }
+
+    /// Expands this target into one single-endpoint target per candidate in order.
+    ///
+    /// When no explicit password was supplied via connection string, `PGPASSWORD`,
+    /// password prompt, or cloud provider, `.pgpass` is re-consulted for each
+    /// candidate host and port.
+    #[must_use]
+    pub fn candidate_targets(&self) -> Vec<Self> {
+        if self.endpoints.is_empty() {
+            return vec![self.for_endpoint(&Endpoint {
+                host: self.host.clone(),
+                port: self.port,
+            })];
+        }
+        self.endpoints
+            .iter()
+            .map(|endpoint| self.for_endpoint(endpoint))
+            .collect()
+    }
+
+    fn password_for_endpoint(&self, endpoint: &Endpoint) -> Option<SecretString> {
+        if self.explicit_password {
+            return self.password.clone_secret();
+        }
+        if let Some(path) = &self.passfile {
+            let lookup = crate::connection::passfile::lookup(
+                path,
+                &endpoint.host.display(),
+                endpoint.port,
+                &self.database,
+                &self.user,
+            );
+            return lookup.password().cloned();
+        }
+        self.password.clone_secret()
     }
 
     /// Copies every field, taking the password given.
@@ -561,6 +635,7 @@ impl ConnectionTarget {
         Self {
             host: self.host.clone(),
             port: self.port,
+            endpoints: self.endpoints.clone(),
             database: self.database.clone(),
             user: self.user.clone(),
             password,
@@ -577,19 +652,31 @@ impl ConnectionTarget {
             read_only: self.read_only,
             notes: self.notes.clone(),
             auth: self.auth.clone(),
+            passfile: self.passfile.clone(),
+            explicit_password: self.explicit_password,
         }
     }
 
     /// A display string that is safe to log: it never contains a password.
     #[must_use]
     pub fn safe_display(&self) -> String {
-        format!(
-            "{}@{}:{}/{}",
-            self.user,
-            self.host.display(),
-            self.port,
-            self.database
-        )
+        if self.endpoints.len() > 1 {
+            let endpoints = self
+                .endpoints
+                .iter()
+                .map(|ep| format!("{}:{}", ep.host.display(), ep.port))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}@{}/{}", self.user, endpoints, self.database)
+        } else {
+            format!(
+                "{}@{}:{}/{}",
+                self.user,
+                self.host.display(),
+                self.port,
+                self.database
+            )
+        }
     }
 }
 
@@ -686,13 +773,14 @@ pub fn resolve(
 
     let host_value = args.host.clone().or_else(|| layered("host", "PGHOST"));
 
-    let host = match host_value {
-        Some(value) if value.starts_with('/') => Host::Socket(PathBuf::from(value)),
-        Some(value) => Host::Tcp(value),
-        None => Host::Tcp("localhost".to_owned()),
+    let hosts = match host_value {
+        Some(value) => parse_host_list(&value)?,
+        None => vec![Host::Tcp("localhost".to_owned())],
     };
 
-    if matches!(host, Host::Socket(_)) && !crate::platform::supports_unix_sockets() {
+    if hosts.iter().any(|h| matches!(h, Host::Socket(_)))
+        && !crate::platform::supports_unix_sockets()
+    {
         return Err(Diagnostic::new(
             DiagnosticKind::Config,
             "Unix-domain sockets are not available on this platform",
@@ -705,23 +793,24 @@ pub fn resolve(
         .next_action("connect over TCP instead, for example --host localhost --port 5432"));
     }
 
-    let port = match args.port {
-        Some(port) => port,
+    let ports = match args.port {
+        Some(port) => vec![port; hosts.len()],
         None => {
             let text = layered("port", "PGPORT");
             match text {
-                Some(value) => value.trim().parse::<u16>().map_err(|_| {
-                    Diagnostic::new(
-                        DiagnosticKind::Config,
-                        format!("{value:?} is not a valid port"),
-                        "resolving the connection target",
-                    )
-                    .next_action("use a number between 1 and 65535")
-                })?,
-                None => DEFAULT_PORT,
+                Some(value) => parse_port_list(&value, hosts.len())?,
+                None => vec![DEFAULT_PORT; hosts.len()],
             }
         }
     };
+
+    let endpoints: Vec<Endpoint> = hosts
+        .into_iter()
+        .zip(ports)
+        .map(|(host, port)| Endpoint { host, port })
+        .collect();
+    let host = endpoints[0].host.clone();
+    let port = endpoints[0].port;
 
     let user = args
         .username
@@ -754,6 +843,7 @@ pub fn resolve(
                 .map(str::to_owned)
         })
         .map(SecretString::from);
+    let explicit_password = password.is_some();
 
     let sslmode = match args.sslmode {
         Some(mode) => mode,
@@ -768,7 +858,7 @@ pub fn resolve(
                     )
                     .next_action("use verify-full for remote databases")
                 })?,
-                None => default_sslmode(&host, &mut notes),
+                None => default_sslmode(&endpoints, &mut notes),
             }
         }
     };
@@ -847,7 +937,8 @@ pub fn resolve(
     // A password file is the last resort and the safest of the routes: it keeps
     // the password off the command line, out of the environment, and out of
     // shell history. It is only read when nothing else supplied one.
-    if password.is_none() {
+    let mut passfile = None;
+    if !explicit_password {
         let path = parsed
             .get("passfile")
             .map(std::path::PathBuf::from)
@@ -860,19 +951,34 @@ pub fn resolve(
         if let Some(path) = path {
             let lookup =
                 crate::connection::passfile::lookup(&path, &host.display(), port, &database, &user);
-            if let Some(note) = lookup.note() {
+            let matched_later = endpoints.len() > 1
+                && matches!(lookup, crate::connection::passfile::Lookup::NoMatch { .. })
+                && endpoints[1..].iter().any(|ep| {
+                    crate::connection::passfile::lookup(
+                        &path,
+                        &ep.host.display(),
+                        ep.port,
+                        &database,
+                        &user,
+                    )
+                    .password()
+                    .is_some()
+                });
+            if !matched_later && let Some(note) = lookup.note() {
                 notes.push(ResolutionNote {
                     subject: "password file".into(),
                     message: note,
                 });
             }
             password = lookup.password().cloned();
+            passfile = Some(path);
         }
     }
 
     Ok(ConnectionTarget {
         host,
         port,
+        endpoints,
         database,
         user,
         password,
@@ -892,7 +998,88 @@ pub fn resolve(
         // credential is fetched afterwards, by a step that can be async and can
         // refuse the transport first.
         auth: args.auth.clone(),
+        passfile,
+        explicit_password,
     })
+}
+
+/// Parses a comma-separated list of TCP hosts or Unix socket directories.
+pub(crate) fn parse_host_list(raw: &str) -> Result<Vec<Host>, Diagnostic> {
+    let mut hosts = Vec::new();
+    for segment in raw.split(',') {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                "connection host list contains an empty host",
+                "resolving the connection target",
+            )
+            .likely_cause(
+                "an empty entry appeared before, between, or after a comma in the host list",
+            )
+            .next_action(
+                "provide a non-empty host name, IP address, or socket directory for each entry",
+            ));
+        }
+        let host = if trimmed.starts_with('/') {
+            Host::Socket(PathBuf::from(trimmed))
+        } else {
+            Host::Tcp(trimmed.to_owned())
+        };
+        hosts.push(host);
+    }
+    if hosts.len() > MAX_ENDPOINTS {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Config,
+            format!(
+                "too many connection hosts ({}, maximum is {MAX_ENDPOINTS})",
+                hosts.len()
+            ),
+            "resolving the connection target",
+        )
+        .next_action(format!("specify at most {MAX_ENDPOINTS} hosts")));
+    }
+    Ok(hosts)
+}
+
+fn parse_port_list(raw: &str, host_count: usize) -> Result<Vec<u16>, Diagnostic> {
+    let mut parsed = Vec::new();
+    for segment in raw.split(',') {
+        let trimmed = segment.trim();
+        let port = trimmed.parse::<u16>().map_err(|_| {
+            Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("{trimmed:?} is not a valid port"),
+                "resolving the connection target",
+            )
+            .next_action("use a number between 1 and 65535")
+        })?;
+        if port == 0 {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("{trimmed:?} is not a valid port"),
+                "resolving the connection target",
+            )
+            .next_action("use a number between 1 and 65535"));
+        }
+        parsed.push(port);
+    }
+    if parsed.len() == 1 {
+        Ok(vec![parsed[0]; host_count])
+    } else if parsed.len() == host_count {
+        Ok(parsed)
+    } else {
+        Err(Diagnostic::new(
+            DiagnosticKind::Config,
+            format!(
+                "port count ({}) does not match host count ({host_count})",
+                parsed.len()
+            ),
+            "resolving the connection target",
+        )
+        .likely_cause("when multiple ports are specified, there must be one port for every host")
+        .next_action("supply one port for all hosts or one comma-separated port per host"))
+    }
 }
 
 /// Chooses a default `sslmode` from where the server is.
@@ -900,8 +1087,9 @@ pub fn resolve(
 /// A remote database defaults to full verification. A local one defaults to
 /// `prefer`, because local sockets and loopback are not exposed to the network
 /// and requiring certificates there would only teach users to turn checks off.
-fn default_sslmode(host: &Host, notes: &mut Vec<ResolutionNote>) -> SslMode {
-    if host.is_local() {
+/// If any candidate endpoint is remote, `verify-full` is required.
+fn default_sslmode(endpoints: &[Endpoint], notes: &mut Vec<ResolutionNote>) -> SslMode {
+    if endpoints.iter().all(|ep| ep.host.is_local()) {
         SslMode::Prefer
     } else {
         notes.push(ResolutionNote {
@@ -1018,23 +1206,73 @@ fn parse_uri(uri: &str) -> Result<BTreeMap<String, String>, Diagnostic> {
     };
 
     if !host_part.is_empty() {
-        // Bracketed IPv6 literal, for example [::1]:5432.
-        if let Some(close) = host_part.strip_prefix('[').and_then(|r| r.find(']')) {
-            out.insert("host".to_owned(), host_part[1..=close].to_owned());
-            if let Some(port) = host_part[close + 2..].strip_prefix(':') {
-                out.insert("port".to_owned(), port.to_owned());
+        let segments: Vec<&str> = host_part.split(',').collect();
+        let multi = segments.len() > 1;
+        let mut hosts: Vec<String> = Vec::with_capacity(segments.len());
+        let mut ports: Vec<Option<String>> = Vec::with_capacity(segments.len());
+
+        for segment in segments {
+            if segment.is_empty() {
+                return Err(malformed_connection_string(
+                    uri,
+                    "empty host in connection URI",
+                ));
             }
-        } else if host_part.matches(':').count() == 1
-            && let Some((host, port)) = host_part.rsplit_once(':')
-        {
-            if !host.is_empty() {
-                out.insert("host".to_owned(), percent_decode(host)?);
+            if let Some(after_open) = segment.strip_prefix('[') {
+                let Some((host, rest)) = after_open.split_once(']') else {
+                    return Err(malformed_connection_string(
+                        uri,
+                        "unterminated IPv6 address",
+                    ));
+                };
+                if host.is_empty() {
+                    return Err(malformed_connection_string(
+                        uri,
+                        "empty IPv6 host in connection URI",
+                    ));
+                }
+                let port = if rest.is_empty() {
+                    None
+                } else if let Some(port) = rest.strip_prefix(':') {
+                    Some(port.to_owned())
+                } else {
+                    return Err(malformed_connection_string(
+                        uri,
+                        "unexpected characters after IPv6 address",
+                    ));
+                };
+                hosts.push(host.to_owned());
+                ports.push(port);
+            } else if segment.matches(':').count() == 1
+                && let Some((host, port)) = segment.rsplit_once(':')
+            {
+                if host.is_empty() && multi {
+                    return Err(malformed_connection_string(
+                        uri,
+                        "empty host in connection URI",
+                    ));
+                }
+                if !host.is_empty() {
+                    hosts.push(percent_decode(host)?);
+                }
+                ports.push(Some(port.to_owned()));
+            } else {
+                // Zero colons (host name / IPv4) or more than one colon without
+                // brackets (an unbracketed IPv6 literal): never split on ':'.
+                hosts.push(percent_decode(segment)?);
+                ports.push(None);
             }
-            out.insert("port".to_owned(), port.to_owned());
-        } else {
-            // More than one colon and no brackets: an unbracketed IPv6 literal.
-            // Splitting on the last colon would invent a port number.
-            out.insert("host".to_owned(), percent_decode(host_part)?);
+        }
+
+        if !hosts.is_empty() {
+            out.insert("host".to_owned(), hosts.join(","));
+        }
+        if ports.iter().any(Option::is_some) {
+            let port_list: Vec<String> = ports
+                .into_iter()
+                .map(|port| port.unwrap_or_else(|| DEFAULT_PORT.to_string()))
+                .collect();
+            out.insert("port".to_owned(), port_list.join(","));
         }
     }
 

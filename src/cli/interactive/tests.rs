@@ -2561,3 +2561,47 @@ async fn doctor_probe_target_displays_configured_session_timeouts() {
     assert_eq!(lock.status, CheckStatus::Ok);
     assert_eq!(lock.detail, "500ms");
 }
+
+#[tokio::test]
+async fn doctor_probe_target_lists_multi_host_endpoints_and_skips_when_all_unreachable() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let missing_a = dir.path().join("missing-pg-a");
+    let missing_b = dir.path().join("missing-pg-b");
+    let config = Config::default();
+
+    let uri = if crate::platform::supports_unix_sockets() {
+        format!("host={},{}", missing_a.display(), missing_b.display())
+    } else {
+        let listener1 = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 1");
+        let port1 = listener1.local_addr().expect("addr 1").port();
+        let listener2 = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 2");
+        let port2 = listener2.local_addr().expect("addr 2").port();
+        drop(listener1);
+        drop(listener2);
+        format!("postgres://app@127.0.0.1:{port1},127.0.0.1:{port2}/orders")
+    };
+
+    let target = crate::connection::resolve(
+        Some(&uri),
+        &crate::connection::ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config.connection,
+    )
+    .expect("resolve multi-host");
+    let checks = probe_target(target, &config).await.expect("probe");
+    let endpoints_check = checks
+        .iter()
+        .find(|c| c.name == "endpoints")
+        .expect("endpoints check must appear for multi-host target");
+    assert_eq!(endpoints_check.status, CheckStatus::Ok);
+    assert!(
+        endpoints_check.detail.contains("2 candidates"),
+        "{}",
+        endpoints_check.detail
+    );
+    let postgres_check = checks
+        .iter()
+        .find(|c| c.name == "postgres")
+        .expect("postgres check must be present");
+    assert_eq!(postgres_check.status, CheckStatus::Skipped);
+}

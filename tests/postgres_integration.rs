@@ -5580,3 +5580,178 @@ fn lock_timeout_aborts_contended_lock_with_55p03_and_object_tree_stays_bounded()
         Some(ignatius::connection::target::DEFAULT_OBJECT_TREE_LOCK_TIMEOUT)
     );
 }
+
+// === M23: Multi-host failover ===
+
+fn splice_failover_candidate(uri: &str, dead_candidate: &str) -> String {
+    let scheme_end = uri.find("://").expect("scheme") + 3;
+    let rest = &uri[scheme_end..];
+    let authority_end = rest
+        .find(['/', '?'])
+        .map_or(uri.len(), |idx| scheme_end + idx);
+    if let Some(at_rel) = uri[scheme_end..authority_end].rfind('@') {
+        let insert_at = scheme_end + at_rel + 1;
+        format!(
+            "{}{dead_candidate},{}",
+            &uri[..insert_at],
+            &uri[insert_at..]
+        )
+    } else {
+        format!(
+            "{}{dead_candidate},{}",
+            &uri[..scheme_end],
+            &uri[scheme_end..]
+        )
+    }
+}
+
+#[test]
+fn multi_host_failover_connects_plain_second_candidate_and_reports_connected_endpoint() {
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let base = resolve(
+        Some(&uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("base target resolves");
+    let failover_uri = splice_failover_candidate(&uri, "127.0.0.1:1");
+
+    let target = resolve(
+        Some(&failover_uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("multi-host target resolves");
+    assert_eq!(target.endpoints.len(), 2);
+    assert_eq!(target.endpoints[0].port, 1);
+    assert_eq!(target.endpoints[1].port, base.port);
+
+    let runtime = runtime();
+    let opened = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("failover connects to live second candidate");
+
+    assert_eq!(opened.connected_endpoint(), &target.endpoints[1]);
+    assert!(
+        opened.info().target.contains(&format!(":{}", base.port)),
+        "SessionInfo::target must report actual connected port {}: {}",
+        base.port,
+        opened.info().target
+    );
+    assert!(
+        !opened.info().target.contains(":1/"),
+        "SessionInfo::target must not report failed endpoint: {}",
+        opened.info().target
+    );
+
+    // Object-tree second connection pinned to the connected endpoint succeeds directly.
+    let tree_target = target
+        .for_endpoint(opened.connected_endpoint())
+        .for_object_tree();
+    assert_eq!(tree_target.endpoints.len(), 1);
+    assert_eq!(tree_target.port, base.port);
+    let tree_session = runtime
+        .block_on(session::connect(&tree_target, Duration::ZERO))
+        .expect("pinned object-tree connection succeeds");
+    assert!(tree_session.info().read_only);
+}
+
+#[test]
+fn multi_host_failover_connects_verified_tls_second_candidate_without_downgrade() {
+    let tls_uri = tls_target_or_skip!();
+    let config = Config::default();
+    let base = resolve(
+        Some(&tls_uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config.connection,
+    )
+    .expect("base TLS target resolves");
+    let failover_uri = splice_failover_candidate(&tls_uri, "127.0.0.1:1");
+    let sep = if failover_uri.contains('?') { '&' } else { '?' };
+    let full_uri = format!(
+        "{failover_uri}{sep}sslmode=verify-full&sslrootcert={}&target_session_attrs=primary",
+        certificate("ca.crt")
+    );
+
+    let target = resolve(
+        Some(&full_uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config.connection,
+    )
+    .expect("TLS multi-host target resolves");
+    assert_eq!(target.sslmode, SslMode::VerifyFull);
+    assert_eq!(target.endpoints.len(), 2);
+
+    let opened = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("verified-TLS failover connects to second candidate");
+    assert!(opened.info().tls.is_encrypted(), "{:?}", opened.info().tls);
+    assert!(
+        matches!(
+            opened.info().tls,
+            TlsState::Active {
+                mode: SslMode::VerifyFull,
+                ..
+            }
+        ),
+        "TLS must remain verify-full without downgrade: {:?}",
+        opened.info().tls
+    );
+    assert!(
+        opened
+            .info()
+            .target
+            .contains(&format!("localhost:{}", base.port)),
+        "SessionInfo::target should show localhost:{}: {}",
+        base.port,
+        opened.info().target
+    );
+}
+
+#[test]
+fn multi_host_failover_with_unmatched_target_session_attrs_fails_naming_all_candidates() {
+    use ignatius::connection::TargetSessionAttrs;
+    use ignatius::diagnostics::DiagnosticKind;
+
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let base = resolve(
+        Some(&uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("base target resolves");
+    let host_list = format!("127.0.0.1:{},localhost:{}", base.port, base.port);
+    let target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            host: Some("127.0.0.1,localhost".to_owned()),
+            port: Some(base.port),
+            target_session_attrs: Some(TargetSessionAttrs::Standby),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("multi-host standby target resolves");
+    assert_eq!(target.endpoints.len(), 2);
+
+    let err = runtime()
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect_err("all primary endpoints must be rejected for target_session_attrs=standby");
+    assert_eq!(err.kind, DiagnosticKind::Connection);
+    let rendered = format!("{err:?}");
+    let first = format!("127.0.0.1:{}", base.port);
+    let second = format!("localhost:{}", base.port);
+    assert!(
+        rendered.contains(&first) && rendered.contains(&second),
+        "failure for {host_list} must name both candidates: {rendered}"
+    );
+    assert!(err.next_action.is_some());
+}

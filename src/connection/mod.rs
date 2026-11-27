@@ -8,7 +8,7 @@ pub mod target;
 pub use passfile::Lookup as PassfileLookup;
 pub use service::ServiceFile;
 pub use target::{
-    ConnectionArgs, ConnectionTarget, DEFAULT_PORT, EnvSnapshot, Environment, Host, ResolutionNote,
-    SslMode, TargetSessionAttrs, format_timeout_duration, parse_connection_string,
-    parse_timeout_duration, resolve,
+    ConnectionArgs, ConnectionTarget, DEFAULT_PORT, Endpoint, EnvSnapshot, Environment, Host,
+    MAX_ENDPOINTS, ResolutionNote, SslMode, TargetSessionAttrs, format_timeout_duration,
+    parse_connection_string, parse_timeout_duration, resolve,
 };
