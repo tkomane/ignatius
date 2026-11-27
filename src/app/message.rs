@@ -189,6 +189,16 @@ pub enum Action {
     PinResultSnapshot,
     /// Compare the pinned baseline snapshot against the currently retained result set.
     CompareResultSnapshot,
+    /// Toggle a `-- ` SQL comment on the current editor line.
+    ToggleLineComment,
+    /// Duplicate the current editor line immediately below.
+    DuplicateLine,
+    /// Swap the current editor line with the line above.
+    MoveLineUp,
+    /// Swap the current editor line with the line below.
+    MoveLineDown,
+    /// Open a prompt to jump the editor caret to a 1-based line number.
+    JumpToLine,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -340,6 +350,11 @@ impl Action {
             Self::SqlRunbook,
             Self::PinResultSnapshot,
             Self::CompareResultSnapshot,
+            Self::ToggleLineComment,
+            Self::DuplicateLine,
+            Self::MoveLineUp,
+            Self::MoveLineDown,
+            Self::JumpToLine,
         ]
     }
 }

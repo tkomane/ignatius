@@ -147,6 +147,11 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("sql-runbook", Action::SqlRunbook),
     ("pin-result", Action::PinResultSnapshot),
     ("compare-result", Action::CompareResultSnapshot),
+    ("toggle-comment", Action::ToggleLineComment),
+    ("duplicate-line", Action::DuplicateLine),
+    ("move-line-up", Action::MoveLineUp),
+    ("move-line-down", Action::MoveLineDown),
+    ("jump-to-line", Action::JumpToLine),
 ];
 
 /// The action a configuration name means.
@@ -503,6 +508,41 @@ impl Keymap {
             ),
             binding(K::Char('z'), ctrl, Action::Undo, "Undo", false),
             binding(K::Char('y'), ctrl, Action::Redo, "Redo", false),
+            binding(
+                K::Char('/'),
+                ctrl,
+                Action::ToggleLineComment,
+                "Toggle line comment",
+                false,
+            ),
+            binding(
+                K::Char('d'),
+                ctrl | KeyModifiers::SHIFT,
+                Action::DuplicateLine,
+                "Duplicate the current line",
+                false,
+            ),
+            binding(
+                K::Up,
+                alt,
+                Action::MoveLineUp,
+                "Move the current line up",
+                false,
+            ),
+            binding(
+                K::Down,
+                alt,
+                Action::MoveLineDown,
+                "Move the current line down",
+                false,
+            ),
+            binding(
+                K::Char('l'),
+                ctrl,
+                Action::JumpToLine,
+                "Jump to a line number",
+                false,
+            ),
         ];
         Self { bindings }
     }
@@ -1106,6 +1146,11 @@ const fn short_label(action: &Action) -> &'static str {
         Action::SqlRunbook => "Runbook",
         Action::PinResultSnapshot => "Pin result",
         Action::CompareResultSnapshot => "Compare result",
+        Action::ToggleLineComment => "Comment",
+        Action::DuplicateLine => "Duplicate line",
+        Action::MoveLineUp => "Move line up",
+        Action::MoveLineDown => "Move line down",
+        Action::JumpToLine => "Jump to line",
     }
 }
 

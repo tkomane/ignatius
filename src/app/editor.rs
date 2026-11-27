@@ -318,6 +318,165 @@ impl Editor {
         true
     }
 
+    /// Toggles a `-- ` SQL line comment on the current line, preserving leading
+    /// whitespace indentation, as one non-coalesced undo step.
+    pub fn toggle_line_comment(&mut self) -> bool {
+        let start = self.line_start();
+        let end = self.line_end();
+        let line = &self.text[start..end];
+        let indent_bytes: usize = line
+            .chars()
+            .take_while(|ch| ch.is_whitespace())
+            .map(char::len_utf8)
+            .sum();
+        let anchor = start + indent_bytes;
+        let rest = &line[indent_bytes..];
+        let has_comment_space = rest.starts_with("-- ");
+        let has_comment_bare = !has_comment_space && rest.starts_with("--");
+
+        self.end_undo_run();
+        self.record(EditKind::Replace, false);
+        if has_comment_space {
+            self.text.replace_range(anchor..anchor + 3, "");
+            if self.cursor >= anchor + 3 {
+                self.cursor -= 3;
+            } else if self.cursor > anchor {
+                self.cursor = anchor;
+            }
+        } else if has_comment_bare {
+            self.text.replace_range(anchor..anchor + 2, "");
+            if self.cursor >= anchor + 2 {
+                self.cursor -= 2;
+            } else if self.cursor > anchor {
+                self.cursor = anchor;
+            }
+        } else {
+            self.text.insert_str(anchor, "-- ");
+            if self.cursor >= anchor {
+                self.cursor += 3;
+            }
+        }
+        self.cursor = self.clamp_to_boundary(self.cursor);
+        self.end_undo_run();
+        self.after_edit();
+        true
+    }
+
+    /// Duplicates the current line immediately below and places the caret at
+    /// the corresponding character column on the new line as one undo step.
+    pub fn duplicate_line(&mut self) -> bool {
+        let start = self.line_start();
+        let end = self.line_end();
+        let column = self.column();
+        let line_text = self.text[start..end].to_owned();
+
+        let mut inserted = String::with_capacity(line_text.len() + 1);
+        inserted.push('\n');
+        inserted.push_str(&line_text);
+
+        self.end_undo_run();
+        self.record(EditKind::Replace, false);
+        self.text.insert_str(end, &inserted);
+        self.cursor = self.offset_in_line(end + 1, column);
+        self.end_undo_run();
+        self.after_edit();
+        true
+    }
+
+    /// Swaps the current line with the line above, keeping the caret on the
+    /// moved line at its character column as one undo step.
+    ///
+    /// Returns `false` as a clean no-op when already on the first line.
+    pub fn move_line_up(&mut self) -> bool {
+        let start = self.line_start();
+        if start == 0 {
+            return false;
+        }
+        let end = self.line_end();
+        let prev_end = start - 1;
+        let prev_start = self.text[..prev_end]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let column = self.column();
+        let current = self.text[start..end].to_owned();
+        let previous = self.text[prev_start..prev_end].to_owned();
+
+        let mut swapped = String::with_capacity(current.len() + 1 + previous.len());
+        swapped.push_str(&current);
+        swapped.push('\n');
+        swapped.push_str(&previous);
+
+        self.end_undo_run();
+        self.record(EditKind::Replace, false);
+        self.text.replace_range(prev_start..end, &swapped);
+        self.cursor = self.offset_in_line(prev_start, column);
+        self.end_undo_run();
+        self.after_edit();
+        true
+    }
+
+    /// Swaps the current line with the line below, keeping the caret on the
+    /// moved line at its character column as one undo step.
+    ///
+    /// Returns `false` as a clean no-op when already on the last line.
+    pub fn move_line_down(&mut self) -> bool {
+        let end = self.line_end();
+        if end >= self.text.len() {
+            return false;
+        }
+        let start = self.line_start();
+        let next_start = end + 1;
+        let next_end = self.text[next_start..]
+            .find('\n')
+            .map_or(self.text.len(), |index| next_start + index);
+        let column = self.column();
+        let current = self.text[start..end].to_owned();
+        let next = self.text[next_start..next_end].to_owned();
+
+        let mut swapped = String::with_capacity(next.len() + 1 + current.len());
+        swapped.push_str(&next);
+        swapped.push('\n');
+        swapped.push_str(&current);
+
+        self.end_undo_run();
+        self.record(EditKind::Replace, false);
+        self.text.replace_range(start..next_end, &swapped);
+        let moved_start = start + next.len() + 1;
+        self.cursor = self.offset_in_line(moved_start, column);
+        self.end_undo_run();
+        self.after_edit();
+        true
+    }
+
+    /// Jumps the caret to the first non-whitespace byte (or line end if
+    /// whitespace-only) of `one_based_line`, clamping to `1..=line_count()`.
+    ///
+    /// Returns `false` for line `0` without changing cursor, buffer text,
+    /// `modified`, `revision`, or undo/redo history.
+    pub fn jump_to_line(&mut self, one_based_line: usize) -> bool {
+        if one_based_line == 0 {
+            return false;
+        }
+        let target_line = one_based_line.min(self.line_count());
+        let line_start = if target_line <= 1 {
+            0
+        } else {
+            self.text
+                .match_indices('\n')
+                .nth(target_line - 2)
+                .map_or(self.text.len(), |(index, _)| index + 1)
+        };
+        let line_end = self.text[line_start..]
+            .find('\n')
+            .map_or(self.text.len(), |index| line_start + index);
+        let first_non_ws = self.text[line_start..line_end]
+            .char_indices()
+            .find(|(_, ch)| !ch.is_whitespace())
+            .map_or(line_end, |(offset, _)| line_start + offset);
+        self.set_cursor(first_non_ws);
+        true
+    }
+
     /// Takes back the last change.
     pub fn undo(&mut self) {
         let Some(previous) = self.past.pop() else {

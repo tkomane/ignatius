@@ -15078,3 +15078,137 @@ fn pin_and_compare_result_snapshot_lifecycle_and_connection_clear() {
     assert!(model.pinned_result.is_none());
     assert!(model.result_diff.is_none());
 }
+
+#[test]
+fn editor_line_ops_sync_active_buffer_and_respect_focus_and_help() {
+    let mut model = connected();
+    model
+        .editor
+        .set_text("  SELECT 1\n  FROM orders\n  WHERE id = 2");
+    model.editor.set_position(2, 5);
+    model.sync_active_buffer_from_editor();
+
+    // ToggleLineComment comments line 2 and syncs BufferManager.
+    assert!(update(&mut model, Message::Action(Action::ToggleLineComment)).is_empty());
+    assert_eq!(
+        model.editor.text(),
+        "  SELECT 1\n  -- FROM orders\n  WHERE id = 2"
+    );
+    assert_eq!(
+        model.buffers.active_editor().text(),
+        "  SELECT 1\n  -- FROM orders\n  WHERE id = 2"
+    );
+    assert!(update(&mut model, Message::Action(Action::ToggleLineComment)).is_empty());
+    assert_eq!(
+        model.editor.text(),
+        "  SELECT 1\n  FROM orders\n  WHERE id = 2"
+    );
+
+    // DuplicateLine duplicates line 2 and keeps BufferManager synced.
+    assert!(update(&mut model, Message::Action(Action::DuplicateLine)).is_empty());
+    assert_eq!(
+        model.editor.text(),
+        "  SELECT 1\n  FROM orders\n  FROM orders\n  WHERE id = 2"
+    );
+    assert_eq!(model.editor.position().0, 3);
+    assert_eq!(model.buffers.active_editor().text(), model.editor.text());
+
+    // MoveLineUp and MoveLineDown swap lines cleanly and sync BufferManager.
+    assert!(update(&mut model, Message::Action(Action::MoveLineUp)).is_empty());
+    assert_eq!(model.editor.position().0, 2);
+    assert!(update(&mut model, Message::Action(Action::MoveLineDown)).is_empty());
+    assert_eq!(model.editor.position().0, 3);
+    assert_eq!(model.buffers.active_editor().text(), model.editor.text());
+
+    // Outside Editor focus, line ops and JumpToLine do nothing.
+    model.focus = Focus::Results;
+    let snapshot = model.editor.text().to_owned();
+    for action in [
+        Action::ToggleLineComment,
+        Action::DuplicateLine,
+        Action::MoveLineUp,
+        Action::MoveLineDown,
+        Action::JumpToLine,
+    ] {
+        assert!(update(&mut model, Message::Action(action)).is_empty());
+        assert_eq!(model.editor.text(), snapshot);
+        assert!(model.name_prompt.is_none());
+    }
+
+    // While help is open, line ops do not edit the covered editor.
+    model.focus = Focus::Editor;
+    assert!(update(&mut model, Message::Action(Action::ToggleHelp)).is_empty());
+    for action in [
+        Action::ToggleLineComment,
+        Action::DuplicateLine,
+        Action::MoveLineUp,
+        Action::MoveLineDown,
+    ] {
+        assert!(update(&mut model, Message::Action(action)).is_empty());
+        assert_eq!(model.editor.text(), snapshot);
+        assert!(model.help_open);
+    }
+}
+
+#[test]
+fn jump_to_line_prompt_parses_clamps_cancels_and_reports_invalid_input() {
+    let mut model = connected();
+    model.editor = crate::app::editor::Editor::with_text("SELECT 1\n   FROM orders\nWHERE id = 2");
+    model.editor.set_position(1, 3);
+    model.sync_active_buffer_from_editor();
+    let initial_rev = model.editor.revision();
+
+    // 1. Open JumpToLine and Esc cancels without changing cursor or buffer.
+    assert!(update(&mut model, Message::Action(Action::JumpToLine)).is_empty());
+    assert_eq!(
+        model.name_prompt.as_ref().map(|p| p.purpose),
+        Some(crate::app::model::NamePurpose::JumpToLine)
+    );
+    assert!(update(&mut model, Message::Action(Action::Insert('2'))).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+    assert!(model.name_prompt.is_none());
+    assert_eq!(model.editor.position(), (1, 3));
+    assert!(model.buffer_notice.is_none());
+
+    // 2. Valid line number jumps to first non-whitespace byte, syncs BufferManager, zero I/O.
+    assert!(update(&mut model, Message::Action(Action::JumpToLine)).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Insert('2'))).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.name_prompt.is_none());
+    assert!(model.buffer_notice.is_none());
+    assert_eq!(model.editor.position(), (2, 4));
+    assert_eq!(
+        model.buffers.active_editor().cursor(),
+        model.editor.cursor()
+    );
+    assert_eq!(model.editor.revision(), initial_rev);
+    assert!(!model.editor.is_modified());
+    assert!(!model.editor.can_undo());
+
+    // 3. Out-of-range positive line clamps to last line.
+    assert!(update(&mut model, Message::Action(Action::JumpToLine)).is_empty());
+    for ch in "99".chars() {
+        assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+    }
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert_eq!(model.editor.position(), (3, 1));
+
+    // 4. Invalid inputs ('0' and non-integer) dismiss cleanly and report notice without moving caret.
+    for bad in ["0", "abc", ""] {
+        assert!(update(&mut model, Message::Action(Action::JumpToLine)).is_empty());
+        for ch in bad.chars() {
+            assert!(update(&mut model, Message::Action(Action::Insert(ch))).is_empty());
+        }
+        assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+        assert!(model.name_prompt.is_none());
+        assert_eq!(model.editor.position(), (3, 1));
+        assert!(
+            model
+                .buffer_notice
+                .as_deref()
+                .is_some_and(|n| n.contains("positive integer")),
+            "expected notice for {bad:?}, got {:?}",
+            model.buffer_notice
+        );
+    }
+}

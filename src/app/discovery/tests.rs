@@ -390,3 +390,31 @@ fn palette_note_names_prerequisites_without_doing_work() {
     assert_eq!(model.focus, before.focus);
     assert_eq!(model.editor.text(), before.editor.text());
 }
+
+#[test]
+fn editor_line_ops_and_jump_are_discoverable_when_editor_is_focused() {
+    let mut model = Model::new(100);
+    let actions = [
+        Action::ToggleLineComment,
+        Action::DuplicateLine,
+        Action::MoveLineUp,
+        Action::MoveLineDown,
+        Action::JumpToLine,
+    ];
+    for action in &actions {
+        assert!(action_is_available(&model, action));
+        assert!(palette_actions(&model).contains(action));
+        assert_eq!(palette_group(action), "Editor");
+        assert_eq!(action_prerequisite(&model, action), None);
+    }
+
+    model.focus = Focus::Results;
+    for action in &actions {
+        assert!(!action_is_available(&model, action));
+        assert!(!palette_actions(&model).contains(action));
+        assert_eq!(
+            action_prerequisite(&model, action),
+            Some("focus the editor".to_owned())
+        );
+    }
+}

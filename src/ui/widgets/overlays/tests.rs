@@ -2902,3 +2902,16 @@ fn result_diff_overlay_renders_kpi_strip_badges_and_ascii_fallback() {
     assert!(utext.contains("RESULT SNAPSHOT DIFF"), "{utext}");
     assert!(utext.contains("SCHEMA: +1/-0"), "{utext}");
 }
+
+#[test]
+fn jump_to_line_prompt_renders_line_label_and_title() {
+    let prompt = NamePrompt::for_jump_to_line(2, 12);
+    let pres = presentation(ColorDepth::TrueColor);
+    let area = Rect::new(0, 0, 80, 10);
+    let mut buf = Buffer::empty(area);
+    render_name_prompt(&prompt, &pres, area, &mut buf);
+    let text = buffer_to_string(&buf);
+    assert!(text.contains("Jump to line"), "{text}");
+    assert!(text.contains("Line:"), "{text}");
+    assert!(text.contains("1-12, currently 2"), "{text}");
+}

@@ -2881,6 +2881,8 @@ pub enum NamePurpose {
     ExportRows,
     /// Renaming an editor buffer tab for this session.
     RenameBuffer,
+    /// Jumping the editor caret to a 1-based line number.
+    JumpToLine,
 }
 
 /// A shape for an interactive export of retained rows.
@@ -3007,6 +3009,19 @@ impl NamePrompt {
                 "Tab title is local to this session (up to {} characters).",
                 crate::buffer::MAX_BUFFER_TITLE_CHARS
             ),
+            export_format: None,
+        }
+    }
+
+    /// Opens a prompt for jumping to a 1-based line number in the active editor.
+    #[must_use]
+    pub fn for_jump_to_line(current_line: usize, total_lines: usize) -> Self {
+        Self {
+            typed: String::new(),
+            subject: format!("Jump to line (1-{total_lines}, currently {current_line})"),
+            purpose: NamePurpose::JumpToLine,
+            note: "Enter a 1-based line number; lines past the end clamp to the last line."
+                .to_owned(),
             export_format: None,
         }
     }
