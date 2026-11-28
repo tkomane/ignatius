@@ -223,6 +223,8 @@ pub enum Action {
     CopyRowAsJson,
     /// Open a prompt to update the active PostgreSQL session `search_path`.
     SetSearchPath,
+    /// Apply a structured equality/null filter in Results matching the selected cell.
+    FilterBySelectedCell,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -391,6 +393,7 @@ impl Action {
             Self::InsertColumnInList,
             Self::CopyRowAsJson,
             Self::SetSearchPath,
+            Self::FilterBySelectedCell,
         ]
     }
 }

@@ -563,6 +563,11 @@ without executing SQL automatically:
 - `copy-row-json` serializes the selected row as compact deterministic JSON and
   routes it through the opt-in OSC 52 confirmation review (`[clipboard] osc52 = true`
   and the 1 MiB copy limit).
+- `filter-by-cell` applies a local structured Results filter (`col:=value` or
+  `col:null`) matching the selected retained cell without executing SQL. Typing
+  `/` in Results (`start-filter`) also supports column predicates (`col:val`,
+  `col:=val`, `col:!=val`, `col:null`, `col:!null`, `col:>N`/`>=`/`<`/`<=`) and
+  `!negation` alongside plain substring search.
 
 From the Command Palette (or configurable `[keys]` bindings), `set-search-path`
 opens a session prompt (prefilled with the selected schema in Objects or the

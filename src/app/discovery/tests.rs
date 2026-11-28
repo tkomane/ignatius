@@ -427,6 +427,7 @@ fn quick_stats_and_sql_copy_actions_are_discoverable_only_with_retained_results_
     connected(&mut model);
     let actions = [
         Action::ToggleColumnStats,
+        Action::FilterBySelectedCell,
         Action::InsertCellWhereClause,
         Action::InsertColumnInList,
         Action::CopyRowAsJson,

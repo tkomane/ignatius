@@ -161,6 +161,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("insert-in-list", Action::InsertColumnInList),
     ("copy-row-json", Action::CopyRowAsJson),
     ("set-search-path", Action::SetSearchPath),
+    ("filter-by-cell", Action::FilterBySelectedCell),
 ];
 
 /// The action a configuration name means.
@@ -1108,6 +1109,9 @@ fn description_of(action: &Action) -> &'static str {
     if matches!(action, Action::SetSearchPath) {
         return "Set PostgreSQL session search_path";
     }
+    if matches!(action, Action::FilterBySelectedCell) {
+        return "Filter Results by the selected cell value";
+    }
     Keymap::new()
         .bindings
         .iter()
@@ -1246,6 +1250,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::InsertColumnInList => "Insert IN list",
         Action::CopyRowAsJson => "Copy row JSON",
         Action::SetSearchPath => "Search path",
+        Action::FilterBySelectedCell => "Filter by cell",
     }
 }
 

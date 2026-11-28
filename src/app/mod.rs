@@ -25,6 +25,7 @@ pub mod message;
 pub mod model;
 pub mod palette;
 pub mod plan;
+pub mod result_filter;
 pub mod tree;
 pub mod update;
 
