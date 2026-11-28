@@ -76,6 +76,8 @@ pub struct Palette {
     pub context_note: Option<String>,
     /// Rich saved-query metadata when populated from `Library::list()`.
     saved_queries: Vec<crate::queries::SavedQuery>,
+    /// Rich local history metadata when opened from `Action::OpenHistory`.
+    history_entries: Vec<crate::history::Entry>,
 }
 
 /// What a palette is searching.
@@ -185,6 +187,7 @@ impl Palette {
             purpose: Purpose::GoTo,
             context_note: None,
             saved_queries: Vec::new(),
+            history_entries: Vec::new(),
         }
     }
 
@@ -203,6 +206,45 @@ impl Palette {
     pub fn over_history(entries: Vec<PaletteEntry>) -> Self {
         Self {
             purpose: Purpose::History,
+            ..Self::new(entries)
+        }
+    }
+
+    /// Opens a History palette backed by full sanitized [`Entry`](crate::history::Entry)
+    /// metadata, enabling `@db:` / `@env:` / `@status:` filters and SQL previewing.
+    #[must_use]
+    pub fn from_history_entries(history: &[crate::history::Entry]) -> Self {
+        let mut safe_history = Vec::with_capacity(history.len());
+        let mut entries = Vec::with_capacity(history.len());
+        for entry in history {
+            if crate::history::mentions_a_credential(&entry.sql) {
+                continue;
+            }
+            let safe = crate::history::Entry {
+                at: entry.at.clone(),
+                target: crate::diagnostics::redact_text(&entry.target),
+                database: entry.database.clone(),
+                environment: entry.environment.clone(),
+                sql: crate::diagnostics::redact_text(&entry.sql),
+                outcome: entry.outcome,
+                elapsed_ms: entry.elapsed_ms,
+            };
+            entries.push(PaletteEntry {
+                label: safe.one_line(),
+                detail: format!(
+                    "{}  {}  {}",
+                    safe.when(),
+                    safe.database,
+                    safe.outcome.label()
+                ),
+                group: "History",
+                command: PaletteCommand::Insert(safe.sql.clone()),
+            });
+            safe_history.push(safe);
+        }
+        Self {
+            purpose: Purpose::History,
+            history_entries: safe_history,
             ..Self::new(entries)
         }
     }
@@ -322,13 +364,26 @@ impl Palette {
     /// browsable list rather than an arbitrary one.
     #[must_use]
     pub fn matches(&self) -> Vec<&PaletteEntry> {
+        self.matched_indices()
+            .into_iter()
+            .map(|idx| &self.entries[idx])
+            .collect()
+    }
+
+    fn matched_indices(&self) -> Vec<usize> {
         if self.query.trim().is_empty() {
-            return self.entries.iter().collect();
+            return (0..self.entries.len()).collect();
+        }
+        if self.purpose == Purpose::History
+            && !self.history_entries.is_empty()
+            && self.history_entries.len() == self.entries.len()
+        {
+            return self.matched_history_indices();
         }
         let use_saved_metadata = self.purpose == Purpose::SavedQueries
             && !self.saved_queries.is_empty()
             && self.saved_queries.len() == self.entries.len();
-        let mut scored: Vec<(i32, usize, &PaletteEntry)> = self
+        let mut scored: Vec<(i32, usize)> = self
             .entries
             .iter()
             .enumerate()
@@ -339,22 +394,87 @@ impl Palette {
                     fuzzy_score(&self.query, &entry.label)
                         .or_else(|| fuzzy_score(&self.query, &entry.detail).map(|s| s - 40))
                 };
-                score.map(|score| (score, index, entry))
+                score.map(|score| (score, index))
             })
             .collect();
         // Sort by score, then by original position, so results never reshuffle
         // between identical queries.
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        scored.into_iter().map(|(_, _, entry)| entry).collect()
+        scored.into_iter().map(|(_, idx)| idx).collect()
+    }
+
+    fn matched_history_indices(&self) -> Vec<usize> {
+        let mut db_filter: Option<&str> = None;
+        let mut env_filter: Option<&str> = None;
+        let mut status_filter: Option<&str> = None;
+        let mut free_terms: Vec<&str> = Vec::new();
+
+        for token in self.query.split_whitespace() {
+            if let Some(rest) = token.strip_prefix("@db:") {
+                if !rest.is_empty() {
+                    db_filter = Some(rest);
+                }
+            } else if let Some(rest) = token.strip_prefix("@env:") {
+                if !rest.is_empty() {
+                    env_filter = Some(rest);
+                }
+            } else if let Some(rest) = token.strip_prefix("@status:") {
+                if !rest.is_empty() {
+                    status_filter = Some(rest);
+                }
+            } else {
+                free_terms.push(token);
+            }
+        }
+
+        let needle = free_terms.join(" ");
+        let mut scored: Vec<(i32, usize)> = self
+            .history_entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, hist)| {
+                if let Some(db) = db_filter
+                    && !hist.database.eq_ignore_ascii_case(db)
+                {
+                    return None;
+                }
+                if let Some(env) = env_filter
+                    && !hist.environment.eq_ignore_ascii_case(env)
+                {
+                    return None;
+                }
+                if let Some(status) = status_filter {
+                    let matched_status = crate::history::Outcome::parse(status).map_or_else(
+                        |_| hist.outcome.label().eq_ignore_ascii_case(status),
+                        |parsed| hist.outcome == parsed,
+                    );
+                    if !matched_status {
+                        return None;
+                    }
+                }
+                if needle.is_empty() {
+                    return Some((0, index));
+                }
+                let entry = &self.entries[index];
+                let score = fuzzy_score(&needle, &entry.label)
+                    .or_else(|| fuzzy_score(&needle, &hist.sql).map(|s| s - 15))
+                    .or_else(|| fuzzy_score(&needle, &hist.database).map(|s| s - 30))
+                    .or_else(|| fuzzy_score(&needle, &hist.target).map(|s| s - 40))?;
+                Some((score, index))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        scored.into_iter().map(|(_, idx)| idx).collect()
     }
 
     /// The entry that would be chosen right now.
     #[must_use]
     pub fn selected_entry(&self) -> Option<PaletteEntry> {
-        let matches = self.matches();
-        matches
-            .get(self.selected.min(matches.len().saturating_sub(1)))
-            .map(|entry| (*entry).clone())
+        let indices = self.matched_indices();
+        let orig_idx = indices
+            .get(self.selected.min(indices.len().saturating_sub(1)))
+            .copied()?;
+        self.entries.get(orig_idx).cloned()
     }
 
     /// Types a character.
@@ -386,6 +506,7 @@ impl Palette {
     pub fn supports_preview(&self) -> bool {
         match self.purpose {
             Purpose::SavedQueries | Purpose::Connections | Purpose::Dependencies => true,
+            Purpose::History => !self.history_entries.is_empty(),
             Purpose::GoTo => self
                 .entries
                 .iter()
@@ -405,11 +526,17 @@ impl Palette {
         if !self.supports_preview() {
             return None;
         }
-        let matches = self.matches();
-        if matches.is_empty() {
+        let indices = self.matched_indices();
+        if indices.is_empty() {
             return Some(vec!["No matching entry selected.".to_owned()]);
         }
-        let entry = self.selected_entry()?;
+        let orig_idx = indices[self.selected.min(indices.len() - 1)];
+        if self.purpose == Purpose::History
+            && let Some(hist) = self.history_entries.get(orig_idx)
+        {
+            return Some(history_entry_preview_lines(hist));
+        }
+        let entry = self.entries.get(orig_idx)?;
         if self.purpose == Purpose::SavedQueries
             && let Some(saved) = self
                 .saved_queries
@@ -498,6 +625,47 @@ fn saved_query_preview_lines(query: &crate::queries::SavedQuery) -> Vec<String> 
             }
         } else {
             lines.push(format!("SQL: {}", sanitize_for_display(sql_source)));
+        }
+    }
+    lines
+}
+
+fn history_entry_preview_lines(entry: &crate::history::Entry) -> Vec<String> {
+    const MAX_PREVIEW_SQL_LINES: usize = 24;
+    let mut lines = Vec::new();
+    lines.push(format!("When: {}", sanitize_for_display(&entry.when())));
+    let redacted_target = crate::diagnostics::redact_text(&entry.target);
+    lines.push(format!(
+        "Target: {}",
+        sanitize_for_display(&redacted_target)
+    ));
+    if !entry.database.is_empty() {
+        lines.push(format!(
+            "Database: {}",
+            sanitize_for_display(&entry.database)
+        ));
+    }
+    if !entry.environment.is_empty() {
+        lines.push(format!(
+            "Environment: {}",
+            sanitize_for_display(&entry.environment)
+        ));
+    }
+    lines.push(format!(
+        "Status: {} ({} ms)",
+        entry.outcome.label(),
+        entry.elapsed_ms
+    ));
+    let redacted_sql = crate::diagnostics::redact_text(&entry.sql);
+    if !redacted_sql.trim().is_empty() {
+        lines.push("SQL:".to_owned());
+        let all_lines: Vec<&str> = redacted_sql.lines().collect();
+        for line in all_lines.iter().take(MAX_PREVIEW_SQL_LINES) {
+            lines.push(format!("  {}", sanitize_for_display(line)));
+        }
+        if all_lines.len() > MAX_PREVIEW_SQL_LINES {
+            let omitted = all_lines.len() - MAX_PREVIEW_SQL_LINES;
+            lines.push(format!("  ... ({omitted} more line(s))"));
         }
     }
     lines

@@ -2314,9 +2314,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::OpenHistory => {
-            model.palette = Some(crate::app::palette::Palette::over_history(history_entries(
-                model,
-            )));
+            model.palette = Some(crate::app::palette::Palette::from_history_entries(
+                &model.history,
+            ));
             Vec::new()
         }
         Action::ToggleHistoryRecording => {
@@ -6289,28 +6289,6 @@ fn snippet_library_action(model: &mut Model, action: Action) -> Vec<Effect> {
 }
 
 ///
-/// A separate list rather than a section of the main palette: someone looking
-/// for a past statement is not looking for a command, and a hundred statements
-/// would bury the commands.
-fn history_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
-    use crate::app::palette::{PaletteCommand, PaletteEntry};
-    model
-        .history
-        .iter()
-        .map(|entry| PaletteEntry {
-            label: entry.one_line(),
-            detail: format!(
-                "{}  {}  {}",
-                entry.when(),
-                entry.database,
-                entry.outcome.label()
-            ),
-            group: "History",
-            command: PaletteCommand::Insert(entry.sql.clone()),
-        })
-        .collect()
-}
-
 /// Changes the session shape, restoring before a visible split adjustment.
 fn adjust_panes(model: &mut Model, action: &Action) {
     use crate::ui::layout::{LayoutMode, layout_mode, pane_geometry};

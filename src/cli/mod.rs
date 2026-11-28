@@ -620,6 +620,73 @@ pub enum HistoryAction {
     },
     /// Print where the history is kept.
     Path,
+    /// Search local statement history offline.
+    Search {
+        /// Case-insensitive substring to match in SQL, target, or database.
+        query: Option<String>,
+        /// Filter to an exact database name (case-insensitive).
+        #[arg(long, value_name = "DB")]
+        database: Option<String>,
+        /// Filter to an exact connection environment (`local`, `staging`, `production`).
+        #[arg(long, value_name = "ENV")]
+        environment: Option<String>,
+        /// Filter to an execution outcome (`ok`, `succeeded`, `failed`, `cancelled`, `unknown`).
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
+        /// Only include entries at or after this RFC 3339 timestamp or `YYYY-MM-DD` date.
+        #[arg(long, value_name = "TIMESTAMP")]
+        since: Option<String>,
+        /// Maximum entries to display (newest first, capped at 10,000).
+        #[arg(long, value_name = "N", default_value_t = 50)]
+        limit: usize,
+        /// Emit matching entries as JSON lines.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize local statement history counts and client latency offline.
+    Stats {
+        /// Filter to an exact database name (case-insensitive).
+        #[arg(long, value_name = "DB")]
+        database: Option<String>,
+        /// Filter to an exact connection environment (`local`, `staging`, `production`).
+        #[arg(long, value_name = "ENV")]
+        environment: Option<String>,
+        /// Only include entries at or after this RFC 3339 timestamp or `YYYY-MM-DD` date.
+        #[arg(long, value_name = "TIMESTAMP")]
+        since: Option<String>,
+        /// Emit the summary as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export sanitized local statement history offline (`jsonl`, `csv`, or `sql`).
+    Export {
+        /// Export format: `jsonl`, `csv`, or `sql`.
+        #[arg(long, value_name = "FORMAT", default_value = "jsonl")]
+        format: String,
+        /// Write export to this path instead of stdout.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        /// Case-insensitive substring to match in SQL, target, or database.
+        query: Option<String>,
+        /// Filter to an exact database name (case-insensitive).
+        #[arg(long, value_name = "DB")]
+        database: Option<String>,
+        /// Filter to an exact connection environment (`local`, `staging`, `production`).
+        #[arg(long, value_name = "ENV")]
+        environment: Option<String>,
+        /// Filter to an execution outcome (`ok`, `succeeded`, `failed`, `cancelled`, `unknown`).
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
+        /// Only include entries at or after this RFC 3339 timestamp or `YYYY-MM-DD` date.
+        #[arg(long, value_name = "TIMESTAMP")]
+        since: Option<String>,
+        /// Maximum matching entries to export (newest first, capped at 10,000).
+        #[arg(long, value_name = "N", default_value_t = 1000)]
+        limit: usize,
+        /// Allow overwriting an existing regular output file.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Connection options shared by `connect` and `query`.
@@ -2019,7 +2086,251 @@ fn history_command(
             writeln!(err, "History cleared: {}", history.path().display()).ok();
             Ok(ExitCode::Success)
         }
+        HistoryAction::Search {
+            query,
+            database,
+            environment,
+            status,
+            since,
+            limit,
+            json,
+        } => {
+            let filter = build_history_filter(
+                query.clone(),
+                database.clone(),
+                environment.clone(),
+                status.as_deref(),
+                since.as_deref(),
+                *limit,
+            )?;
+            let entries = history.search(&filter)?;
+            if entries.is_empty() {
+                if !*json {
+                    writeln!(err, "No matching history entries found.").ok();
+                }
+                return Ok(ExitCode::Success);
+            }
+            for entry in &entries {
+                if *json {
+                    let line = serde_json::to_string(entry).unwrap_or_default();
+                    writeln!(out, "{line}").ok();
+                } else {
+                    writeln!(
+                        out,
+                        "{}  {:<9} {:<12} {:<10} {}",
+                        entry.when(),
+                        entry.outcome.label(),
+                        entry.database,
+                        entry.environment,
+                        entry.one_line()
+                    )
+                    .ok();
+                }
+            }
+            if !*json {
+                writeln!(err, "{} matching history entry/entries.", entries.len()).ok();
+            }
+            Ok(ExitCode::Success)
+        }
+        HistoryAction::Stats {
+            database,
+            environment,
+            since,
+            json,
+        } => {
+            let filter = build_history_filter(
+                None,
+                database.clone(),
+                environment.clone(),
+                None,
+                since.as_deref(),
+                crate::history::MAX_HISTORY_QUERY_LIMIT,
+            )?;
+            let entries = history.search(&filter)?;
+            let stats = crate::history::HistoryStats::compute(&entries);
+            if *json {
+                let encoded = serde_json::to_string_pretty(&stats).map_err(|err| {
+                    Diagnostic::new(
+                        DiagnosticKind::Internal,
+                        "could not serialize history statistics",
+                        "computing local history statistics",
+                    )
+                    .likely_cause(err.to_string())
+                })?;
+                writeln!(out, "{encoded}").ok();
+            } else {
+                writeln!(out, "Total entries: {}", stats.total).ok();
+                writeln!(
+                    out,
+                    "Outcomes: ok={}, failed={}, cancelled={}, unknown={}",
+                    stats.succeeded, stats.failed, stats.cancelled, stats.unknown
+                )
+                .ok();
+                if let (Some(med), Some(p95), Some(max)) = (
+                    stats.median_elapsed_ms,
+                    stats.p95_elapsed_ms,
+                    stats.max_elapsed_ms,
+                ) {
+                    writeln!(out, "Latency (ms): median={med}, p95={p95}, max={max}").ok();
+                }
+                if !stats.by_database.is_empty() {
+                    let dbs = stats
+                        .by_database
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(out, "Databases: {dbs}").ok();
+                }
+                if !stats.by_environment.is_empty() {
+                    let envs = stats
+                        .by_environment
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(out, "Environments: {envs}").ok();
+                }
+            }
+            Ok(ExitCode::Success)
+        }
+        HistoryAction::Export {
+            format,
+            output,
+            query,
+            database,
+            environment,
+            status,
+            since,
+            limit,
+            force,
+        } => {
+            let export_format = crate::history::HistoryExportFormat::parse(format)?;
+            let filter = build_history_filter(
+                query.clone(),
+                database.clone(),
+                environment.clone(),
+                status.as_deref(),
+                since.as_deref(),
+                *limit,
+            )?;
+            let entries = history.search(&filter)?;
+            let payload = crate::history::format_history_export(&entries, export_format)?;
+            if let Some(dest) = output {
+                write_history_export_file(dest, &payload, *force)?;
+                writeln!(
+                    err,
+                    "Exported {} history entry/entries to {}.",
+                    entries.len(),
+                    dest.display()
+                )
+                .ok();
+            } else {
+                out.write_all(&payload).map_err(|io_err| {
+                    Diagnostic::new(
+                        DiagnosticKind::Internal,
+                        "failed writing history export to stdout",
+                        "exporting statement history",
+                    )
+                    .likely_cause(io_err.to_string())
+                })?;
+            }
+            Ok(ExitCode::Success)
+        }
     }
+}
+
+fn build_history_filter(
+    query: Option<String>,
+    database: Option<String>,
+    environment: Option<String>,
+    status: Option<&str>,
+    since: Option<&str>,
+    limit: usize,
+) -> Result<crate::history::HistoryFilter, Diagnostic> {
+    if limit == 0 {
+        return Err(Diagnostic::new(
+            DiagnosticKind::Usage,
+            "--limit must be at least 1",
+            "building offline history filter",
+        ));
+    }
+    let outcome = status.map(crate::history::Outcome::parse).transpose()?;
+    let since_ts = since
+        .map(crate::history::parse_since_timestamp)
+        .transpose()?;
+    Ok(crate::history::HistoryFilter {
+        query,
+        database,
+        environment,
+        outcome,
+        since: since_ts,
+        limit: limit.clamp(1, crate::history::MAX_HISTORY_QUERY_LIMIT),
+    })
+}
+
+fn write_history_export_file(
+    destination: &std::path::Path,
+    bytes: &[u8],
+    force: bool,
+) -> Result<(), Diagnostic> {
+    match destination.symlink_metadata() {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!(
+                        "{} is a symbolic link; refusing to overwrite",
+                        destination.display()
+                    ),
+                    "opening history export destination",
+                )
+                .next_action("choose a regular file path instead"));
+            }
+            if !meta.file_type().is_file() {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("{} is not a regular file", destination.display()),
+                    "opening history export destination",
+                ));
+            }
+            if !force {
+                return Err(Diagnostic::new(
+                    DiagnosticKind::Usage,
+                    format!("{} already exists", destination.display()),
+                    "opening history export destination",
+                )
+                .next_action("pass --force to overwrite an existing regular file"));
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("could not inspect {}", destination.display()),
+                "opening history export destination",
+            )
+            .likely_cause(err.to_string()));
+        }
+    }
+    if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("could not create {}", parent.display()),
+                "opening history export destination",
+            )
+            .likely_cause(err.to_string())
+        })?;
+    }
+    crate::platform::write_atomic(destination, bytes).map_err(|err| {
+        Diagnostic::new(
+            DiagnosticKind::Usage,
+            format!("could not write {}", destination.display()),
+            "writing history export",
+        )
+        .likely_cause(err.to_string())
+    })
 }
 
 fn check_command(

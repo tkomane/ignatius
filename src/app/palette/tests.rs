@@ -536,3 +536,58 @@ fn saved_query_library_palette_searches_collections_and_tags_and_renders_multili
         "{billing_preview}"
     );
 }
+
+#[test]
+fn history_palette_supports_inline_metadata_tokens_and_bounded_preview() {
+    let entries = vec![
+        crate::history::Entry {
+            at: "2026-11-28T09:00:00Z".into(),
+            target: "postgres://app:secretpass@localhost:5432/orders".into(),
+            database: "orders".into(),
+            environment: "local".into(),
+            sql: "SELECT id,\n       total\nFROM orders;".into(),
+            outcome: crate::history::Outcome::Succeeded,
+            elapsed_ms: 14,
+        },
+        crate::history::Entry {
+            at: "2026-11-28T09:05:00Z".into(),
+            target: "app@staging:5432/billing".into(),
+            database: "billing".into(),
+            environment: "staging".into(),
+            sql: "SELECT *\nFROM invoices\nWHERE status = 'late';".into(),
+            outcome: crate::history::Outcome::Failed,
+            elapsed_ms: 92,
+        },
+        crate::history::Entry {
+            at: "2026-11-28T09:06:00Z".into(),
+            target: "app@local:5432/orders".into(),
+            database: "orders".into(),
+            environment: "local".into(),
+            sql: "SELECT password_hash FROM users;".into(),
+            outcome: crate::history::Outcome::Succeeded,
+            elapsed_ms: 2,
+        },
+    ];
+
+    let mut pal = Palette::from_history_entries(&entries);
+    assert!(pal.supports_preview());
+    // Credential-mentioning entry is omitted by defense-in-depth.
+    assert_eq!(pal.entries.len(), 2);
+
+    pal.query = "@db:billing @env:staging @status:failed invoices".into();
+    assert_eq!(pal.matches().len(), 1);
+    let preview = pal.selected_preview().expect("history preview").join("\n");
+    assert!(preview.contains("Database: billing"), "{preview}");
+    assert!(preview.contains("Environment: staging"), "{preview}");
+    assert!(preview.contains("Status: failed (92 ms)"), "{preview}");
+    assert!(preview.contains("SQL:\n  SELECT *"), "{preview}");
+
+    // Target credentials are redacted cleanly.
+    pal.query = "@db:orders".into();
+    assert_eq!(pal.matches().len(), 1);
+    let orders_preview = pal.selected_preview().expect("orders preview").join("\n");
+    assert!(
+        !orders_preview.contains("secretpass"),
+        "password leaked in preview: {orders_preview}"
+    );
+}

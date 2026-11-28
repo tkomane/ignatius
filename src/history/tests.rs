@@ -305,3 +305,212 @@ fn only_a_reason_the_user_needs_is_said_out_loud() {
     assert!(Recorded::Written.was_written());
     assert!(!Recorded::Disabled.was_written());
 }
+
+fn dated_entry(
+    at: &str,
+    target: &str,
+    database: &str,
+    environment: &str,
+    sql: &str,
+    outcome: Outcome,
+    elapsed_ms: u64,
+) -> Entry {
+    Entry {
+        at: at.to_owned(),
+        target: target.to_owned(),
+        database: database.to_owned(),
+        environment: environment.to_owned(),
+        sql: sql.to_owned(),
+        outcome,
+        elapsed_ms,
+    }
+}
+
+#[test]
+fn search_filters_newest_first_enforces_cap_and_redacts_defense_in_depth() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let history = history(&dir, 100);
+    // Write raw JSONL lines directly so we can exercise defense-in-depth read filtering.
+    let lines = [
+        serde_json::to_string(&dated_entry(
+            "2026-10-01T10:00:00Z",
+            "postgres://app:hunter2@localhost:5432/orders",
+            "orders",
+            "local",
+            "SELECT * FROM orders;",
+            Outcome::Succeeded,
+            15,
+        ))
+        .unwrap(),
+        serde_json::to_string(&dated_entry(
+            "2026-10-02T12:00:00Z",
+            "app@localhost:5432/billing",
+            "billing",
+            "staging",
+            "SELECT * FROM invoices WHERE status = 'late';",
+            Outcome::Failed,
+            120,
+        ))
+        .unwrap(),
+        serde_json::to_string(&dated_entry(
+            "2026-10-03T14:00:00Z",
+            "app@localhost:5432/billing",
+            "billing",
+            "staging",
+            "ALTER ROLE x PASSWORD 'secret';",
+            Outcome::Succeeded,
+            5,
+        ))
+        .unwrap(),
+        serde_json::to_string(&dated_entry(
+            "2026-10-04T16:00:00Z",
+            "app@localhost:5432/billing",
+            "billing",
+            "production",
+            "SELECT count(*) FROM invoices;",
+            Outcome::Succeeded,
+            40,
+        ))
+        .unwrap(),
+    ];
+    std::fs::write(history.path(), lines.join("\n") + "\n").expect("write history");
+
+    // Credential-mentioning entry written externally is omitted on read.
+    let all = history.search(&HistoryFilter::default()).expect("search");
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[0].sql, "SELECT count(*) FROM invoices;");
+    assert!(
+        !all[2].target.contains("hunter2"),
+        "target must be re-redacted on read: {}",
+        all[2].target
+    );
+
+    let filtered = history
+        .search(&HistoryFilter {
+            query: Some("invoices".to_owned()),
+            database: Some("BILLING".to_owned()),
+            environment: Some("staging".to_owned()),
+            outcome: Some(Outcome::Failed),
+            since: Some(parse_since_timestamp("2026-10-02").expect("since")),
+            limit: 10,
+        })
+        .expect("filtered");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(
+        filtered[0].sql,
+        "SELECT * FROM invoices WHERE status = 'late';"
+    );
+
+    let limited = history
+        .search(&HistoryFilter {
+            limit: 1,
+            ..HistoryFilter::default()
+        })
+        .expect("limited");
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].sql, "SELECT count(*) FROM invoices;");
+}
+
+#[test]
+fn stats_and_export_formats_handle_latencies_csv_quoting_and_redaction() {
+    let entries = vec![
+        dated_entry(
+            "2026-10-01T10:00:00Z",
+            "postgres://app:hunter2@localhost/orders",
+            "orders",
+            "local",
+            "SELECT 1, 'a, \"b\"';",
+            Outcome::Succeeded,
+            10,
+        ),
+        dated_entry(
+            "2026-10-02T10:00:00Z",
+            "app@localhost/orders",
+            "orders",
+            "local",
+            "SELECT * FROM deadlocked;",
+            Outcome::Failed,
+            50,
+        ),
+        dated_entry(
+            "2026-10-03T10:00:00Z",
+            "app@localhost/billing",
+            "billing",
+            "staging",
+            "SELECT pg_sleep(5);",
+            Outcome::Cancelled,
+            200,
+        ),
+        dated_entry(
+            "2026-10-04T10:00:00Z",
+            "app@localhost/billing",
+            "billing",
+            "staging",
+            "SELECT api_key FROM secrets;",
+            Outcome::Succeeded,
+            9999,
+        ),
+    ];
+
+    let stats = HistoryStats::compute(&entries);
+    assert_eq!(stats.total, 3);
+    assert_eq!(stats.succeeded, 1);
+    assert_eq!(stats.failed, 1);
+    assert_eq!(stats.cancelled, 1);
+    assert_eq!(stats.by_database.get("orders"), Some(&2));
+    assert_eq!(stats.by_environment.get("staging"), Some(&1));
+    assert_eq!(stats.median_elapsed_ms, Some(50));
+    assert_eq!(stats.p95_elapsed_ms, Some(200));
+    assert_eq!(stats.max_elapsed_ms, Some(200));
+
+    let csv = String::from_utf8(
+        format_history_export(&entries, HistoryExportFormat::Csv).expect("csv export"),
+    )
+    .expect("utf8");
+    assert!(!csv.contains("hunter2"), "{csv}");
+    assert!(!csv.contains("api_key"), "{csv}");
+    assert!(csv.contains("\"SELECT 1, 'a, \"\"b\"\"';\""), "{csv}");
+
+    let sql = String::from_utf8(
+        format_history_export(&entries, HistoryExportFormat::Sql).expect("sql export"),
+    )
+    .expect("utf8");
+    assert!(sql.contains("Ignatius local history export"), "{sql}");
+    assert!(sql.contains("SELECT * FROM deadlocked;"), "{sql}");
+    assert!(!sql.contains("api_key"), "{sql}");
+
+    let jsonl = String::from_utf8(
+        format_history_export(&entries, HistoryExportFormat::Jsonl).expect("jsonl export"),
+    )
+    .expect("utf8");
+    assert_eq!(jsonl.lines().count(), 3);
+    assert!(!jsonl.contains("hunter2"), "{jsonl}");
+}
+
+#[test]
+fn parses_status_export_format_and_since_timestamps() {
+    assert_eq!(Outcome::parse("OK").unwrap(), Outcome::Succeeded);
+    assert_eq!(Outcome::parse("succeeded").unwrap(), Outcome::Succeeded);
+    assert_eq!(Outcome::parse("failed").unwrap(), Outcome::Failed);
+    assert_eq!(Outcome::parse("canceled").unwrap(), Outcome::Cancelled);
+    assert_eq!(Outcome::parse("unknown").unwrap(), Outcome::Unknown);
+    assert!(Outcome::parse("bogus").is_err());
+
+    assert_eq!(
+        HistoryExportFormat::parse("csv").unwrap(),
+        HistoryExportFormat::Csv
+    );
+    assert_eq!(
+        HistoryExportFormat::parse("jsonl").unwrap(),
+        HistoryExportFormat::Jsonl
+    );
+    assert_eq!(
+        HistoryExportFormat::parse("SQL").unwrap(),
+        HistoryExportFormat::Sql
+    );
+    assert!(HistoryExportFormat::parse("parquet").is_err());
+
+    assert!(parse_since_timestamp("2026-11-28").is_ok());
+    assert!(parse_since_timestamp("2026-11-28T09:30:00Z").is_ok());
+    assert!(parse_since_timestamp("not-a-date").is_err());
+}
