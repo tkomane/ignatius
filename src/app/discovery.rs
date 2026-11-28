@@ -437,6 +437,10 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::ToggleInspector,
         Action::ShowDefinition,
         Action::ShowDependencies,
+        Action::ObjectSelectPreview,
+        Action::ObjectCountRows,
+        Action::ObjectInsertTemplate,
+        Action::ObjectColumnList,
         Action::SchemaDiagram,
         Action::ServerActivity,
         Action::SecurityAudit,
@@ -673,6 +677,35 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         Action::ShowDefinition | Action::ShowDependencies => {
             ctx.focus == Focus::Objects && ctx.has_selected_object
         }
+        Action::ObjectSelectPreview | Action::ObjectCountRows => {
+            ctx.focus == Focus::Objects
+                && !model.phase.is_busy()
+                && model
+                    .tree
+                    .selected_object_with_columns()
+                    .is_some_and(|(obj, _)| {
+                        crate::query::object_sql::is_queryable_relation(obj.kind)
+                    })
+        }
+        Action::ObjectInsertTemplate => {
+            ctx.focus == Focus::Objects
+                && !model.phase.is_busy()
+                && model
+                    .tree
+                    .selected_object_with_columns()
+                    .is_some_and(|(obj, cols)| {
+                        crate::query::object_sql::is_insertable_relation(obj.kind)
+                            && !cols.is_empty()
+                    })
+        }
+        Action::ObjectColumnList => {
+            ctx.focus == Focus::Objects
+                && !model.phase.is_busy()
+                && model
+                    .tree
+                    .selected_object_with_columns()
+                    .is_some_and(|(_, cols)| !cols.is_empty())
+        }
         Action::OpenHistory | Action::ToggleHistoryRecording => {
             ctx.history != HistoryPosture::Disabled
         }
@@ -868,6 +901,33 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         Action::ShowDefinition | Action::ShowDependencies => {
             "a selected object in the tree".to_owned()
         }
+        Action::ObjectSelectPreview | Action::ObjectCountRows => {
+            if ctx.focus != Focus::Objects {
+                "focus Objects on a table or view".to_owned()
+            } else if model.phase.is_busy() {
+                "wait for the current query".to_owned()
+            } else {
+                "select a table or view in Objects".to_owned()
+            }
+        }
+        Action::ObjectInsertTemplate => {
+            if ctx.focus != Focus::Objects {
+                "focus Objects on an expanded table".to_owned()
+            } else if model.phase.is_busy() {
+                "wait for the current query".to_owned()
+            } else {
+                "select an insertable table with loaded columns".to_owned()
+            }
+        }
+        Action::ObjectColumnList => {
+            if ctx.focus != Focus::Objects {
+                "focus Objects on an expanded relation".to_owned()
+            } else if model.phase.is_busy() {
+                "wait for the current query".to_owned()
+            } else {
+                "select an expanded table or view with loaded columns".to_owned()
+            }
+        }
         Action::OpenHistory | Action::ToggleHistoryRecording => {
             "history enabled in configuration".to_owned()
         }
@@ -1025,6 +1085,10 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::ReloadObjects
         | Action::ShowDefinition
         | Action::ShowDependencies
+        | Action::ObjectSelectPreview
+        | Action::ObjectCountRows
+        | Action::ObjectInsertTemplate
+        | Action::ObjectColumnList
         | Action::SchemaDiagram => "Objects",
         Action::OpenQuery
         | Action::OpenHistory

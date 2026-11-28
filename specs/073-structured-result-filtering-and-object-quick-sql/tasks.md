@@ -10,5 +10,5 @@
 
 ## Phase 2: PR 2B - Object-Tree Quick SQL Builders (`feat/m27-object-quick-sql`)
 
-- [ ] T003 Implement pure SQL builders (`src/query/object_sql.rs` + `src/query/object_sql/tests.rs`) for `SELECT ... LIMIT 100`, `SELECT count(*)`, `INSERT INTO ... VALUES (:...)`, and column lists with quoting, NUL checks, and 200-column / 1 MiB bounds.
-- [ ] T004 Wire `Action::ObjectSelectPreview`, `Action::ObjectCountRows`, `Action::ObjectInsertTemplate`, and `Action::ObjectColumnList` across `src/app/`, `src/ui/keymap.rs`, `docs/design/keymap.md`, and reducer/discovery tests, verified with `cargo --locked xtask verify`.
+- [x] T003 Implement pure SQL builders (`src/query/object_sql.rs` + `src/query/object_sql/tests.rs`) for `SELECT ... LIMIT 100`, `SELECT count(*)`, `INSERT INTO ... VALUES (:...)`, and column lists with quoting, NUL checks, and 200-column / 1 MiB bounds.
+- [x] T004 Wire `Action::ObjectSelectPreview`, `Action::ObjectCountRows`, `Action::ObjectInsertTemplate`, and `Action::ObjectColumnList` across `src/app/`, `src/ui/keymap.rs`, `docs/design/keymap.md`, and reducer/discovery tests, verified with `cargo --locked xtask verify`.

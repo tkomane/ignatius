@@ -2346,6 +2346,14 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::FilterBySelectedCell => filter_by_selected_cell(model),
         Action::InsertCellWhereClause => insert_cell_where_clause(model),
         Action::InsertColumnInList => insert_column_in_list(model),
+        Action::ObjectSelectPreview => {
+            insert_object_quick_sql(model, ObjectQuickSqlKind::SelectPreview)
+        }
+        Action::ObjectCountRows => insert_object_quick_sql(model, ObjectQuickSqlKind::CountRows),
+        Action::ObjectInsertTemplate => {
+            insert_object_quick_sql(model, ObjectQuickSqlKind::InsertTemplate)
+        }
+        Action::ObjectColumnList => insert_object_quick_sql(model, ObjectQuickSqlKind::ColumnList),
         Action::GenerateCellUpdate => begin_cell_update(model),
         Action::RefreshResult => begin_refresh_result(model),
         Action::FormatBuffer => {
@@ -7745,6 +7753,114 @@ fn insert_column_in_list(model: &mut Model) -> Vec<Effect> {
     Vec::new()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObjectQuickSqlKind {
+    SelectPreview,
+    CountRows,
+    InsertTemplate,
+    ColumnList,
+}
+
+impl ObjectQuickSqlKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::SelectPreview => "SELECT preview",
+            Self::CountRows => "SELECT count(*)",
+            Self::InsertTemplate => "INSERT template",
+            Self::ColumnList => "column list",
+        }
+    }
+}
+
+/// Inserts a quoted Object Tree quick-SQL template into the active SQL editor as
+/// one undoable edit without executing any SQL against PostgreSQL.
+fn insert_object_quick_sql(model: &mut Model, kind: ObjectQuickSqlKind) -> Vec<Effect> {
+    use crate::query::object_sql::{
+        DEFAULT_PREVIEW_LIMIT, ObjectSqlError, build_column_list_sql, build_count_sql,
+        build_insert_template_sql, build_select_preview_sql, is_insertable_relation,
+        is_queryable_relation,
+    };
+
+    let label = kind.label();
+    if model.focus != Focus::Objects || model.phase.is_busy() {
+        model.buffer_notice = Some(format!(
+            "Focus an object in the Objects tree to insert a {label}."
+        ));
+        return Vec::new();
+    }
+    let Some((object, columns)) = model
+        .tree
+        .selected_object_with_columns()
+        .map(|(obj, cols)| (obj.clone(), cols))
+    else {
+        model.buffer_notice = Some(format!(
+            "Select an object or column in Objects to insert a {label}."
+        ));
+        return Vec::new();
+    };
+
+    let built = match kind {
+        ObjectQuickSqlKind::SelectPreview => {
+            if !is_queryable_relation(object.kind) {
+                Err(ObjectSqlError::UnsupportedObjectKind {
+                    kind: object.kind.singular(),
+                })
+            } else {
+                build_select_preview_sql(
+                    &object.schema,
+                    &object.name,
+                    &columns,
+                    DEFAULT_PREVIEW_LIMIT,
+                )
+            }
+        }
+        ObjectQuickSqlKind::CountRows => {
+            if !is_queryable_relation(object.kind) {
+                Err(ObjectSqlError::UnsupportedObjectKind {
+                    kind: object.kind.singular(),
+                })
+            } else {
+                build_count_sql(&object.schema, &object.name)
+            }
+        }
+        ObjectQuickSqlKind::InsertTemplate => {
+            if !is_insertable_relation(object.kind) {
+                Err(ObjectSqlError::UnsupportedObjectKind {
+                    kind: object.kind.singular(),
+                })
+            } else {
+                build_insert_template_sql(&object.schema, &object.name, &columns)
+            }
+        }
+        ObjectQuickSqlKind::ColumnList => build_column_list_sql(&columns),
+    };
+
+    let sql = match built {
+        Ok(sql) => sql,
+        Err(reason) => {
+            model.buffer_notice = Some(format!("Cannot insert {label}: {reason}."));
+            return Vec::new();
+        }
+    };
+
+    let mut inserted = false;
+    edit_editor(model, |editor| {
+        inserted = editor.insert_paste(&sql);
+    });
+    if inserted {
+        model.focus = Focus::Editor;
+        let obj_display = crate::query::value::sanitize_for_display(&object.qualified_sql());
+        model.buffer_notice = Some(format!(
+            "Inserted {label} for {obj_display} into SQL editor (not executed)."
+        ));
+    } else {
+        model.buffer_notice = Some(format!(
+            "Cannot insert {label}: generated SQL exceeds editor paste limit."
+        ));
+    }
+    Vec::new()
+}
+
 /// Re-derives the selected value after a copy confirmation and wraps it for the
 /// transport. Any changed identity or count is a stale candidate, not a guess.
 fn copy_payload_for_candidate(
@@ -9794,6 +9910,22 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         (
             Action::FilterBySelectedCell,
             "Filter Results by the selected retained cell value",
+        ),
+        (
+            Action::ObjectSelectPreview,
+            "Insert SELECT ... LIMIT 100 preview SQL for the selected object",
+        ),
+        (
+            Action::ObjectCountRows,
+            "Insert SELECT count(*) SQL for the selected object",
+        ),
+        (
+            Action::ObjectInsertTemplate,
+            "Insert INSERT INTO ... VALUES template for the selected table",
+        ),
+        (
+            Action::ObjectColumnList,
+            "Insert quoted column list for the selected object",
         ),
     ] {
         if entries

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m27-structured-result-filter` (PR 2A) and `feat/m27-object-quick-sql` (PR 2B)
 **Created**: 2026-11-28
-**Status**: In Progress
+**Status**: Complete
 **Milestone**: M27 - Structured Result Filtering & Object-Tree Quick SQL
 
 ## Problem Statement
@@ -35,8 +35,8 @@ In the Results pane, pressing `/` accepts both plain substring searches (includi
 With an object selected in the Objects tree:
 - `object-select-preview` inserts `SELECT ... FROM "schema"."name" LIMIT 100;` (using loaded columns when expanded or `*` otherwise), focuses Editor, and does not run SQL.
 - `object-count-rows` inserts `SELECT count(*) FROM "schema"."name";` into the Editor.
-- `object-insert-template` inserts `INSERT INTO "schema"."name" ("col1", ...) VALUES (:col1, ...);` (or `DEFAULT VALUES;` when columns are not yet loaded) for tables/partitioned tables/foreign tables, refusing views/sequences/functions/schemas.
-- `object-column-list` inserts `"col1", "col2", ...` for an expanded relation (or a single quoted column identifier for a column node), refusing unloaded relations cleanly.
+- `object-insert-template` inserts `INSERT INTO "schema"."name" ("col1", ...) VALUES (:col1, ...);` for tables/partitioned tables/foreign tables with loaded columns, refusing views/materialized views/sequences/functions/schemas and unloaded column lists.
+- `object-column-list` inserts `"col1", "col2", ...` for an expanded relation (or parent relation when a column node is selected), refusing unloaded relations cleanly.
 
 ## Functional Requirements
 
