@@ -4,6 +4,77 @@
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
 
+## Wave 124 - M28: Offline history search/stats/export, TUI preview, and M26-M28 docs sync - 28 November 2026
+
+- **W16 / 074 PR #211 (`b168270`, branch `feat/m28-history-search-and-stats`) and PR 3B (branch `docs/m28-roadmap-and-readme-sync`).**
+  PR #211 adds offline history query, latency/outcome aggregation, and export
+  primitives in `src/history.rs` (`MAX_HISTORY_QUERY_LIMIT = 10_000`,
+  `Outcome::parse`, `parse_since_timestamp`, `HistoryFilter`, `History::search`,
+  `HistoryStats::compute`, `HistoryExportFormat`, `format_history_export` with
+  defense-in-depth `mentions_a_credential` exclusion and `redact_text`), extends
+  `HistoryAction` in `src/cli/mod.rs` with offline `ignatius history search`,
+  `stats`, and `export` (with atomic `--output` publication, `--force` guard,
+  and symlink/non-regular file refusal), and upgrades `Action::OpenHistory` to
+  `Palette::from_history_entries` for `@db:`/`@env:`/`@status:` filters and
+  sanitized multi-line Spotlight SQL previews while keeping `Palette::over_history`
+  compatible. PR 3B reconciles `specs/072-*`, `073-*`, `074-*`,
+  `docs/product/roadmap.md`, `docs/product/agent-delivery-plan.md`,
+  `docs/status.md`, `docs/support/compatibility.md`, `CHANGELOG.md`, `README.md`,
+  and `tests/documentation_matches_the_build.rs`, keeping owner/human-gated
+  tasks (`001` T051/T052, `007` T032/T033, `008` T033/T035) open.
+  [Feature 074 tasks](../specs/074-history-search-export-and-m26-m28-docs-sync/tasks.md)
+- **Verification scope for PR #211 (`b168270`) and PR 3B.** PR #211 passed
+  local macOS arm64 `cargo --locked xtask verify` (2,059 `--lib` unit tests,
+  all CLI/contract/integration suites against live plain `127.0.0.1:55432` and
+  verified-TLS `localhost:55433` Docker PostgreSQL 18.7; Unix socket skipped
+  locally) and hosted PR #211 CI + CodeQL (`21/21` executed checks green across
+  PG 14-18, PG 18 Unix socket, Linux/macOS/Windows, MSRV 1.90.0, advisories,
+  secret scan, and CodeQL; Reviewed PostgreSQL fixture drift skipped).
+  `docs/m28-roadmap-and-readme-sync` passes local macOS arm64
+  `cargo --locked xtask verify`, `cargo --locked xtask security`, and
+  `diff -u AGENTS.md CLAUDE.md`.
+
+## Wave 123 - M27: Structured result filtering and object quick SQL - 28 November 2026
+
+- **W16 / 073 PR #209 (`d9da4a5`, branch `feat/m27-structured-result-filter`) and PR #210 (`1b00fe4`, branch `feat/m27-object-quick-sql`).**
+  PR #209 adds `src/app/result_filter.rs` (`MAX_FILTER_TERMS = 16`,
+  `MAX_FILTER_LEN = 1024`, unquoted/quoted column predicates `col:sub`,
+  `col:=exact`, `col:!=exact`, `col:null` vs text `"null"`, `!negation`,
+  numeric comparisons, unknown-column tracking rendered with `Theme`/`Token` in
+  `src/ui/widgets/results.rs`, and `build_cell_filter_expression`) plus
+  `filter-by-cell` (`Action::FilterBySelectedCell`) and `Action::Dismiss`
+  clearing active Results filters. PR #210 adds pure quoted SQL builders in
+  `src/query/object_sql.rs` (`DEFAULT_PREVIEW_LIMIT = 100`,
+  `MAX_OBJECT_SQL_COLUMNS = 200`, `MAX_OBJECT_SQL_BYTES = 1 MiB`) and 4
+  palette-only Object Tree actions (`object-select-preview`, `object-count-rows`,
+  `object-insert-template`, `object-column-list`) inserting formatted SQL into
+  the active editor in one undo step with zero DB side effects.
+  [Feature 073 tasks](../specs/073-structured-result-filtering-and-object-quick-sql/tasks.md)
+- **Verification scope for PR #209 (`d9da4a5`) and PR #210 (`1b00fe4`).**
+  Both PRs passed local macOS arm64 `cargo --locked xtask verify` (2,045 and
+  2,054 `--lib` tests respectively against live plain and TLS Docker PG 18.7;
+  Unix socket skipped locally) and hosted PR CI + CodeQL (`21/21` executed
+  checks green; Reviewed PostgreSQL fixture drift skipped).
+
+## Wave 122 - M26: Session search_path and idle_in_transaction_session_timeout - 28 November 2026
+
+- **W16 / 072 PR #207 (`6c3fdc0`, branch `feat/m26-idle-in-tx-timeout`) and PR #208 (`782a063`, branch `feat/m26-session-search-path`).**
+  PR #207 adds `idle_in_transaction_session_timeout` across `ConnectionArgs`,
+  `ConnectionTarget`, `SUPPORTED_KEYS`, `ConnectionConfig`, `Profile`,
+  `PROFILE_FIELDS`, `--idle-in-transaction-session-timeout`, startup
+  `SET idle_in_transaction_session_timeout = <ms>`, `SessionInfo`,
+  `ConnectionPicker`, `doctor`, and compatibility docs. PR #208 adds
+  `MAX_SEARCH_PATH_SCHEMAS = 32`, `parse_search_path`,
+  `format_set_search_path_sql` (`quote_identifier`), startup & live
+  `Session::set_search_path`, and `set-search-path` (`Action::SetSearchPath`,
+  `NamePurpose::SetSearchPath`, generation-guarded async `Effect::SetSearchPath`).
+  [Feature 072 tasks](../specs/072-session-search-path-and-idle-tx-timeout/tasks.md)
+- **Verification scope for PR #207 (`6c3fdc0`) and PR #208 (`782a063`).**
+  Both PRs passed local macOS arm64 `cargo --locked xtask verify` (2,034 and
+  2,038 `--lib` tests against live plain and TLS Docker PG 18.7; Unix socket
+  skipped locally) and hosted PR CI + CodeQL (`21/21` executed checks green;
+  Reviewed PostgreSQL fixture drift skipped).
+
 ## Wave 121 - M25: Result-grid quick-stats, query-ready SQL/JSON copy, and docs sync - 28 November 2026
 
 - **W16 / 071 PR #203 (`de0728e`, branch `feat/m25-grid-stats-sql-copy` @ `f2c6718`) and PR #204 (branch `docs/m25-roadmap-and-readme-sync`).**

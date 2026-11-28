@@ -843,6 +843,38 @@ ASCII separators when colour or Unicode styling is unavailable.
   compact deterministic JSON (`null` vs `""`, bounded at 1 MiB) routed strictly
   through the opt-in `[clipboard] osc52 = true` confirmation review.
 
+## Structured result filtering and object quick SQL
+
+- **Structured result filtering (`result_filter`)**: Typing `/` in Results supports
+  up to `16` terms (`MAX_FILTER_TERMS`) within `1024` bytes (`MAX_FILTER_LEN`),
+  combining bare terms, quoted phrases, `!negation`, and column predicates
+  (`col:sub`, `col:=exact`, `col:!=exact`, `col:null`, `col:!null`/`col:notnull`,
+  numeric `col:>N`/`>=`/`<`/`<=`). Unknown column names render an explicit warning
+  in Results via `Theme`/`Token` and return zero rows rather than falling back.
+  `filter-by-cell` applies a structured equality/null predicate matching the
+  selected cell; `Esc` clears an active filter in Results without running SQL.
+- **Object-tree quick SQL builders (`object_sql`)**: When Objects has focus,
+  `object-select-preview`, `object-count-rows`, `object-insert-template`, and
+  `object-column-list` insert quoted SQL into the active editor as a single
+  undo step without executing SQL (`DEFAULT_PREVIEW_LIMIT = 100`, capped at
+  `200` columns `MAX_OBJECT_SQL_COLUMNS` and `1 MiB` `MAX_OBJECT_SQL_BYTES`,
+  rejecting empty identifiers and embedded NUL bytes).
+
+## Local history search, statistics and export
+
+- **Offline CLI (`ignatius history`)**: `history search`, `history stats`, and
+  `history export` inspect the local `history.jsonl` file strictly offline
+  without contacting PostgreSQL (`MAX_HISTORY_QUERY_LIMIT = 10_000` entries per
+  query). Filtering supports substring search, `--database`, `--environment`,
+  `--status`, and `--since`. Credential-mentioning statements
+  (`mentions_a_credential`) are omitted and targets/SQL pass through
+  `redact_text` defense-in-depth. Writing via `--output` refuses symlinks and
+  non-regular files, refuses overwriting existing files without `--force`, and
+  publishes atomically (`jsonl`, `csv`, or `sql`).
+- **TUI History palette (`open-history`)**: `Palette::from_history_entries` adds
+  `@db:<name>`, `@env:<name>`, and `@status:<outcome>` inline filter tokens plus
+  a sanitized, bounded SQL + metadata Spotlight preview pane.
+
 ## SQL buffer formatting
 
 The interactive editor supports local formatting through `Ctrl+Shift+F`,

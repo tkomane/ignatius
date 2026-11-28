@@ -1526,3 +1526,93 @@ fn m23_to_m25_documentation_matches_the_build() {
         );
     }
 }
+
+#[test]
+fn m26_to_m28_documentation_matches_the_build() {
+    for (name, content) in [
+        ("docs/support/compatibility.md", COMPATIBILITY),
+        ("CHANGELOG.md", CHANGELOG),
+        ("README.md", README),
+    ] {
+        assert!(
+            !content.contains('\u{2014}'),
+            "{name} must not contain Unicode em dashes"
+        );
+        assert!(
+            !content.contains('\u{2013}'),
+            "{name} must not contain Unicode en dashes"
+        );
+    }
+
+    for (document, name, expected) in [
+        (PRODUCT_ROADMAP, "docs/product/roadmap.md", "M26"),
+        (PRODUCT_ROADMAP, "docs/product/roadmap.md", "M27"),
+        (PRODUCT_ROADMAP, "docs/product/roadmap.md", "M28"),
+        (
+            AGENT_DELIVERY_PLAN,
+            "docs/product/agent-delivery-plan.md",
+            "M26 (`072`)",
+        ),
+        (
+            AGENT_DELIVERY_PLAN,
+            "docs/product/agent-delivery-plan.md",
+            "M27 (`073`)",
+        ),
+        (
+            AGENT_DELIVERY_PLAN,
+            "docs/product/agent-delivery-plan.md",
+            "M28 (`074`)",
+        ),
+        (STATUS, "docs/status.md", "Wave 122"),
+        (STATUS, "docs/status.md", "Wave 123"),
+        (STATUS, "docs/status.md", "Wave 124"),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "idle_in_transaction_session_timeout",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "MAX_SEARCH_PATH_SCHEMAS",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "MAX_FILTER_TERMS",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "object-select-preview",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "MAX_OBJECT_SQL_COLUMNS",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "MAX_HISTORY_QUERY_LIMIT",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "history search",
+        ),
+        (CHANGELOG, "CHANGELOG.md", "Feature 072"),
+        (CHANGELOG, "CHANGELOG.md", "Feature 073"),
+        (CHANGELOG, "CHANGELOG.md", "Feature 074"),
+        (README, "README.md", "--idle-in-transaction-session-timeout"),
+        (README, "README.md", "--search-path"),
+        (README, "README.md", "filter-by-cell"),
+        (README, "README.md", "object-select-preview"),
+        (README, "README.md", "history search"),
+    ] {
+        assert!(
+            document.contains(expected),
+            "{name} is missing M26-M28 documentation item {expected:?}"
+        );
+    }
+}

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m28-history-search-and-stats` (PR 3A) and `docs/m28-roadmap-and-readme-sync` (PR 3B)
 **Created**: 2026-11-28
-**Status**: In Progress
+**Status**: Complete (`#211` `b168270` and M26-M28 docs sync)
 **Milestone**: M28 - Rich History Search/Stats/Export & M26-M28 Docs Sync
 
 ## Problem Statement
