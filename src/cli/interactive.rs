@@ -1479,6 +1479,18 @@ async fn event_loop(
                         connection_generation.load(std::sync::atomic::Ordering::SeqCst),
                     );
                 }
+                Effect::SetSearchPath {
+                    generation,
+                    schemas,
+                } => {
+                    spawn_set_search_path(
+                        tx.clone(),
+                        Arc::clone(&session),
+                        Arc::clone(&connection_generation),
+                        generation,
+                        schemas,
+                    );
+                }
                 Effect::TestHypoIndex { request, query, create_index_sql } => {
                     spawn_test_hypo_index(
                         tx.clone(),
@@ -3750,6 +3762,35 @@ fn spawn_capture_schema_snapshot(
     });
 }
 
+fn spawn_set_search_path(
+    tx: mpsc::UnboundedSender<Message>,
+    slot: SessionSlot,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    request_generation: u64,
+    schemas: Vec<String>,
+) {
+    tokio::spawn(async move {
+        let opened = {
+            let held = slot.read().await;
+            held.clone()
+        };
+        let Some(session) = opened else {
+            return;
+        };
+        let result = session.set_search_path(&schemas).await;
+        if !connection_generation_is_current(&generation, request_generation) {
+            return;
+        }
+        let _ = tx.send(connection_message(
+            request_generation,
+            Message::SearchPathUpdated {
+                generation: request_generation,
+                result: Box::new(result),
+            },
+        ));
+    });
+}
+
 fn spawn_load_connection_pool(
     tx: mpsc::UnboundedSender<Message>,
     slot: Arc<tokio::sync::RwLock<Option<Arc<InstalledSession>>>>,
@@ -4252,6 +4293,9 @@ pub async fn probe_target(
             "idle_in_transaction_session_timeout",
             crate::connection::format_timeout_duration(timeout),
         ));
+    }
+    if let Some(schemas) = &target.search_path {
+        checks.push(Check::ok("search_path", schemas.join(", ")));
     }
 
     if target.endpoints.len() <= 1 {

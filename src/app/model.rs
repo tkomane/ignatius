@@ -2883,6 +2883,8 @@ pub enum NamePurpose {
     RenameBuffer,
     /// Jumping the editor caret to a 1-based line number.
     JumpToLine,
+    /// Updating the active PostgreSQL session `search_path`.
+    SetSearchPath,
 }
 
 /// A shape for an interactive export of retained rows.
@@ -3021,6 +3023,22 @@ impl NamePrompt {
             subject: format!("Jump to line (1-{total_lines}, currently {current_line})"),
             purpose: NamePurpose::JumpToLine,
             note: "Enter a 1-based line number; lines past the end clamp to the last line."
+                .to_owned(),
+            export_format: None,
+        }
+    }
+
+    /// Opens a prompt for updating the active session's PostgreSQL `search_path`.
+    #[must_use]
+    pub fn for_search_path(suggestion: impl Into<String>, current_search_path: &str) -> Self {
+        Self {
+            typed: suggestion.into(),
+            subject: format!(
+                "Set session search_path (currently {})",
+                crate::query::value::sanitize_for_display(current_search_path)
+            ),
+            purpose: NamePurpose::SetSearchPath,
+            note: "Comma-separated schema names (e.g. \"$user\", public). Applied with SET search_path TO ...; reverts on ROLLBACK if inside a transaction."
                 .to_owned(),
             export_format: None,
         }

@@ -1482,6 +1482,34 @@ fn reduce(model: &mut Model, message: Message) -> Vec<Effect> {
             }
             Vec::new()
         }
+        Message::SearchPathUpdated { generation, result } => {
+            if model.connection_generation != generation {
+                return Vec::new();
+            }
+            match *result {
+                Ok(server_path) => {
+                    if let ConnectionState::Connected(info) | ConnectionState::Lost { info } =
+                        &mut model.connection
+                    {
+                        info.search_path = server_path.clone();
+                    }
+                    let tx_note =
+                        if model.transaction == crate::query::result::TransactionState::Open {
+                            " (inside active transaction; ROLLBACK will revert it)"
+                        } else {
+                            ""
+                        };
+                    model.buffer_notice = Some(format!(
+                        "Session search_path updated to {server_path}.{tx_note}"
+                    ));
+                }
+                Err(diagnostic) => {
+                    model.error = Some(diagnostic);
+                    model.error_expanded = false;
+                }
+            }
+            Vec::new()
+        }
         Message::WatchTick => watch_tick(model),
     };
     if crate::ui::widgets::overlay_blocks_panes(model) {
@@ -2393,6 +2421,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
             ));
             Vec::new()
         }
+        Action::SetSearchPath => begin_set_search_path(model),
         Action::MoveWord(direction) if model.focus == Focus::Editor => {
             match direction {
                 Direction::Left => model.editor.move_word_left(),
@@ -7162,6 +7191,37 @@ fn name_action(model: &mut Model, action: Action) -> Vec<Effect> {
                     }
                     Vec::new()
                 }
+                crate::app::model::NamePurpose::SetSearchPath => {
+                    if !model.connection.is_usable() {
+                        model.buffer_notice =
+                            Some("Connect to PostgreSQL before updating search_path.".to_owned());
+                        return Vec::new();
+                    }
+                    if model.phase.is_busy() {
+                        model.buffer_notice = Some(
+                            "Wait for the active query to finish before updating search_path."
+                                .to_owned(),
+                        );
+                        return Vec::new();
+                    }
+                    if model.transaction == crate::query::result::TransactionState::Failed {
+                        model.buffer_notice = Some(
+                            "Run ROLLBACK in the failed transaction before updating search_path."
+                                .to_owned(),
+                        );
+                        return Vec::new();
+                    }
+                    match crate::connection::parse_search_path(&name) {
+                        Ok(schemas) => vec![Effect::SetSearchPath {
+                            generation: model.connection_generation,
+                            schemas,
+                        }],
+                        Err(message) => {
+                            model.buffer_notice = Some(format!("Invalid search_path: {message}."));
+                            Vec::new()
+                        }
+                    }
+                }
                 crate::app::model::NamePurpose::JumpToLine => Vec::new(),
             }
         }
@@ -7376,6 +7436,46 @@ fn begin_copy(model: &mut Model) -> Vec<Effect> {
         bytes,
         characters,
     });
+    Vec::new()
+}
+
+/// Opens the session `search_path` prompt, prefilled from a selected schema node
+/// in Objects when applicable or the current `SessionInfo::search_path`.
+fn begin_set_search_path(model: &mut Model) -> Vec<Effect> {
+    if !model.connection.is_usable() {
+        model.buffer_notice = Some("Connect to PostgreSQL before updating search_path.".to_owned());
+        return Vec::new();
+    }
+    if model.phase.is_busy() {
+        model.buffer_notice =
+            Some("Wait for the active query to finish before updating search_path.".to_owned());
+        return Vec::new();
+    }
+    if model.transaction == crate::query::result::TransactionState::Failed {
+        model.buffer_notice =
+            Some("Run ROLLBACK in the failed transaction before updating search_path.".to_owned());
+        return Vec::new();
+    }
+    let current = model
+        .connection
+        .info()
+        .map_or_else(String::new, |info| info.search_path.clone());
+    let selected_schema = (model.focus == Focus::Objects)
+        .then(|| {
+            model
+                .tree
+                .selected_row()
+                .and_then(|row| model.tree.node(&row.path))
+                .and_then(|node| match &node.kind {
+                    crate::app::tree::NodeKind::Schema(summary) => Some(summary.name.clone()),
+                    _ => None,
+                })
+        })
+        .flatten();
+    let suggestion = selected_schema.unwrap_or_else(|| current.clone());
+    model.name_prompt = Some(crate::app::model::NamePrompt::for_search_path(
+        suggestion, &current,
+    ));
     Vec::new()
 }
 
@@ -9636,6 +9736,10 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         (
             Action::CopyRowAsJson,
             "Copy selected result row as JSON via OSC 52 review",
+        ),
+        (
+            Action::SetSearchPath,
+            "Set the active PostgreSQL session search_path",
         ),
     ] {
         if entries

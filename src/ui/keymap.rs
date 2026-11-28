@@ -160,6 +160,7 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("insert-where-clause", Action::InsertCellWhereClause),
     ("insert-in-list", Action::InsertColumnInList),
     ("copy-row-json", Action::CopyRowAsJson),
+    ("set-search-path", Action::SetSearchPath),
 ];
 
 /// The action a configuration name means.
@@ -1104,6 +1105,9 @@ fn description_of(action: &Action) -> &'static str {
     if matches!(action, Action::CopyRowAsJson) {
         return "Copy selected result row as JSON";
     }
+    if matches!(action, Action::SetSearchPath) {
+        return "Set PostgreSQL session search_path";
+    }
     Keymap::new()
         .bindings
         .iter()
@@ -1241,6 +1245,7 @@ const fn short_label(action: &Action) -> &'static str {
         Action::InsertCellWhereClause => "Insert WHERE",
         Action::InsertColumnInList => "Insert IN list",
         Action::CopyRowAsJson => "Copy row JSON",
+        Action::SetSearchPath => "Search path",
     }
 }
 

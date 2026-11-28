@@ -564,6 +564,11 @@ without executing SQL automatically:
   routes it through the opt-in OSC 52 confirmation review (`[clipboard] osc52 = true`
   and the 1 MiB copy limit).
 
+From the Command Palette (or configurable `[keys]` bindings), `set-search-path`
+opens a session prompt (prefilled with the selected schema in Objects or the
+current `search_path`) that validates schema names and updates PostgreSQL's
+session `search_path` safely via `SET search_path TO ...`.
+
 With the editor focused, `Ctrl+K l` asks PostgreSQL for a structured estimated
 plan for the statement under the cursor. `Ctrl+K a` opens a confirmation before
 `EXPLAIN ANALYZE` executes that statement. The plan is read in the Results pane;

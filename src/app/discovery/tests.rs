@@ -445,3 +445,26 @@ fn quick_stats_and_sql_copy_actions_are_discoverable_only_with_retained_results_
         assert_eq!(action_prerequisite(&model, action), None);
     }
 }
+
+#[test]
+fn set_search_path_is_discoverable_only_when_usable_and_not_failed_tx() {
+    let mut disconnected = Model::new(100);
+    assert!(!action_is_available(&disconnected, &Action::SetSearchPath));
+    assert_eq!(palette_group(&Action::SetSearchPath), "Session");
+    assert_eq!(
+        action_prerequisite(&disconnected, &Action::SetSearchPath),
+        Some("connect first".to_owned())
+    );
+
+    connected(&mut disconnected);
+    assert!(action_is_available(&disconnected, &Action::SetSearchPath));
+    assert!(palette_actions(&disconnected).contains(&Action::SetSearchPath));
+
+    disconnected.transaction = TransactionState::Failed;
+    assert!(!action_is_available(&disconnected, &Action::SetSearchPath));
+    assert!(
+        action_prerequisite(&disconnected, &Action::SetSearchPath)
+            .expect("prereq")
+            .contains("ROLLBACK")
+    );
+}

@@ -3036,6 +3036,7 @@ fn connection_details_surface_configured_session_timeouts() {
     assert!(text.contains("500ms"), "{text}");
     assert!(text.contains("Idle-in-tx timeout"), "{text}");
     assert!(text.contains("2m"), "{text}");
+    assert!(text.contains("Search path"), "{text}");
 }
 
 // ------------------------------------------------------------ chords

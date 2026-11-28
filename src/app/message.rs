@@ -221,6 +221,8 @@ pub enum Action {
     InsertColumnInList,
     /// Copy the selected result row as compact JSON via the opt-in OSC 52 confirmation review.
     CopyRowAsJson,
+    /// Open a prompt to update the active PostgreSQL session `search_path`.
+    SetSearchPath,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -388,6 +390,7 @@ impl Action {
             Self::InsertCellWhereClause,
             Self::InsertColumnInList,
             Self::CopyRowAsJson,
+            Self::SetSearchPath,
         ]
     }
 }
@@ -930,6 +933,13 @@ pub enum Message {
         /// Captured schema snapshot or error.
         result: Box<Result<crate::snapshot::SchemaSnapshot, Diagnostic>>,
     },
+    /// Session `search_path` update finished on PostgreSQL.
+    SearchPathUpdated {
+        /// Connection generation that issued the request.
+        generation: u64,
+        /// Authoritative server `current_setting('search_path')`, or diagnostic.
+        result: Box<Result<String, Diagnostic>>,
+    },
 }
 
 /// Work the runtime should perform on the application's behalf.
@@ -1288,5 +1298,12 @@ pub enum Effect {
         request: u64,
         /// Optional single schema filter.
         schema: Option<String>,
+    },
+    /// Update the active PostgreSQL session's `search_path`.
+    SetSearchPath {
+        /// Connection generation that issued the request.
+        generation: u64,
+        /// Validated schema names in order.
+        schemas: Vec<String>,
     },
 }

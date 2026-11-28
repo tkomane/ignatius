@@ -5686,6 +5686,103 @@ fn idle_in_transaction_session_timeout_enforces_server_setting_and_zero_disable(
     assert!(tree_target.idle_in_transaction_session_timeout.is_none());
 }
 
+#[test]
+fn search_path_configures_startup_and_updates_live_session_safely() {
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    let suffix = format!(
+        "{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let schema_a = format!("m26_sp_a_{suffix}");
+    let schema_b = format!("m26_sp_b_{suffix}");
+
+    let admin_target = resolve(
+        Some(&uri),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("admin target");
+    let admin = runtime
+        .block_on(session::connect(&admin_target, Duration::ZERO))
+        .expect("admin connects");
+
+    let setup_sql = format!(
+        "CREATE SCHEMA {schema_a}; CREATE SCHEMA {schema_b}; \
+         CREATE TABLE {schema_a}.who (label text); INSERT INTO {schema_a}.who VALUES ('from_a'); \
+         CREATE TABLE {schema_b}.who (label text); INSERT INTO {schema_b}.who VALUES ('from_b');"
+    );
+    let setup = runtime.block_on(admin.execute(&setup_sql, 10, JobId(1)));
+    assert!(setup.error.is_none(), "setup failed: {:?}", setup.error);
+
+    // 1. Startup search_path resolves unqualified table in schema_a and populates SessionInfo.
+    let scoped_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            search_path: Some(vec![schema_a.clone(), "public".to_owned()]),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("scoped target");
+    assert!(scoped_target.for_object_tree().search_path.is_none());
+
+    let session = runtime
+        .block_on(session::connect(&scoped_target, Duration::ZERO))
+        .expect("scoped session connects");
+    assert!(
+        session.info().search_path.contains(&schema_a),
+        "expected {} in {:?}",
+        schema_a,
+        session.info().search_path
+    );
+    let read_a = runtime.block_on(session.execute("SELECT label FROM who;", 10, JobId(2)));
+    assert!(read_a.error.is_none(), "read_a failed: {:?}", read_a.error);
+    let label_a = read_a.statements[0]
+        .result_set
+        .as_ref()
+        .and_then(|rs| rs.rows.first())
+        .and_then(|row| row.first())
+        .and_then(ignatius::query::value::Cell::raw)
+        .expect("row from schema_a");
+    assert_eq!(label_a, "from_a");
+
+    // 2. Live Session::set_search_path switches to schema_b safely.
+    let updated = runtime
+        .block_on(session.set_search_path(&[schema_b.clone(), "public".to_owned()]))
+        .expect("set_search_path to schema_b");
+    assert!(updated.contains(&schema_b), "updated path: {updated}");
+
+    let read_b = runtime.block_on(session.execute("SELECT label FROM who;", 10, JobId(3)));
+    assert!(read_b.error.is_none(), "read_b failed: {:?}", read_b.error);
+    let label_b = read_b.statements[0]
+        .result_set
+        .as_ref()
+        .and_then(|rs| rs.rows.first())
+        .and_then(|row| row.first())
+        .and_then(ignatius::query::value::Cell::raw)
+        .expect("row from schema_b");
+    assert_eq!(label_b, "from_b");
+
+    let cleanup_sql = format!(
+        "DROP SCHEMA IF EXISTS {schema_a} CASCADE; DROP SCHEMA IF EXISTS {schema_b} CASCADE;"
+    );
+    let cleanup = runtime.block_on(admin.execute(&cleanup_sql, 10, JobId(4)));
+    assert!(
+        cleanup.error.is_none(),
+        "cleanup failed: {:?}",
+        cleanup.error
+    );
+}
+
 // === M23: Multi-host failover ===
 
 fn splice_failover_candidate(uri: &str, dead_candidate: &str) -> String {

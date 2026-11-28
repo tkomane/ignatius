@@ -11,7 +11,7 @@
 
 ## Phase 2: PR 1B - Configurable `search_path` and Interactive Switcher (`feat/m26-session-search-path`)
 
-- [ ] T004 Implement `MAX_SEARCH_PATH_SCHEMAS`, `parse_search_path`, and `format_set_search_path_sql` in `src/connection/target.rs`, and wire `search_path` across `ConnectionArgs`, `ConnectionTarget`, `SUPPORTED_KEYS`, `Profile`, `PROFILE_FIELDS`, `ConnectionOptions`, `ConnectionPicker`, Connection details, `doctor`, and `docs/support/compatibility.md`.
-- [ ] T005 Enforce startup `SET search_path TO ...` before `bootstrap()` and add `Session::set_search_path` in `src/postgres/session.rs`.
-- [ ] T006 Wire `Action::SetSearchPath`, `NamePurpose::SetSearchPath`, `Effect::SetSearchPath`, and `Message::SearchPathUpdated` across `src/app/`, `src/ui/`, `src/cli/interactive.rs`, and `docs/design/keymap.md`.
-- [ ] T007 Add unit tests (including SQL injection and stale generation guards) and live PostgreSQL integration tests, and verify with `cargo --locked xtask verify`.
+- [x] T004 Implement `MAX_SEARCH_PATH_SCHEMAS`, `parse_search_path`, and `format_set_search_path_sql` in `src/connection/target.rs`, and wire `search_path` across `ConnectionArgs`, `ConnectionTarget`, `SUPPORTED_KEYS`, `Profile`, `PROFILE_FIELDS`, `ConnectionOptions`, `ConnectionPicker`, Connection details, `doctor`, and `docs/support/compatibility.md`.
+- [x] T005 Enforce startup `SET search_path TO ...` before `bootstrap()` and add `Session::set_search_path` in `src/postgres/session.rs`.
+- [x] T006 Wire `Action::SetSearchPath`, `NamePurpose::SetSearchPath`, `Effect::SetSearchPath`, and `Message::SearchPathUpdated` across `src/app/`, `src/ui/`, `src/cli/interactive.rs`, and `docs/design/keymap.md`.
+- [x] T007 Add unit tests (including SQL injection and stale generation guards) and live PostgreSQL integration tests, and verify with `cargo --locked xtask verify`.

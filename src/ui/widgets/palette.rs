@@ -1179,6 +1179,12 @@ pub(crate) fn render_connection_details(
     );
     push_detail(&mut lines, "Posture", posture, theme.style(Token::Info));
     if let Some(info) = model.connection.info() {
+        push_detail(
+            &mut lines,
+            "Search path",
+            sanitize_for_display(&info.search_path),
+            theme.style(Token::Text),
+        );
         if let Some(timeout) = info.statement_timeout {
             push_detail(
                 &mut lines,
