@@ -4060,3 +4060,157 @@ mod with_server {
         assert!(progress_str.starts_with('[') || progress_str.contains("[]"));
     }
 }
+
+#[test]
+fn history_search_stats_and_export_work_offline_and_enforce_safety_guards() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let data_dir = temp.path().join("data");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    let history_file = data_dir.join("history.jsonl");
+    let seed = [
+        serde_json::json!({
+            "at": "2026-10-01T10:00:00Z",
+            "target": "postgres://app:topsecret123@localhost:5432/orders",
+            "database": "orders",
+            "environment": "local",
+            "sql": "SELECT count(*) FROM orders;",
+            "outcome": "succeeded",
+            "elapsed_ms": 12
+        })
+        .to_string(),
+        serde_json::json!({
+            "at": "2026-10-02T12:00:00Z",
+            "target": "app@localhost:5432/billing",
+            "database": "billing",
+            "environment": "staging",
+            "sql": "SELECT * FROM invoices WHERE status = 'late';",
+            "outcome": "failed",
+            "elapsed_ms": 88
+        })
+        .to_string(),
+        serde_json::json!({
+            "at": "2026-10-03T12:00:00Z",
+            "target": "app@localhost:5432/billing",
+            "database": "billing",
+            "environment": "staging",
+            "sql": "ALTER ROLE app PASSWORD 'never-export-this';",
+            "outcome": "succeeded",
+            "elapsed_ms": 4
+        })
+        .to_string(),
+    ]
+    .join("\n")
+        + "\n";
+    std::fs::write(&history_file, seed).expect("write seed history");
+
+    let run = |args: &[&str]| {
+        binary()
+            .env("IGNATIUS_CONFIG_DIR", temp.path().join("config"))
+            .env("IGNATIUS_DATA_DIR", &data_dir)
+            .args(args)
+            .output()
+            .expect("run history subcommand")
+    };
+
+    // Offline search with database/status/since/json filters
+    let search_out = run(&[
+        "history",
+        "search",
+        "invoices",
+        "--database",
+        "billing",
+        "--status",
+        "failed",
+        "--since",
+        "2026-10-02",
+        "--json",
+    ]);
+    assert_eq!(code(&search_out), 0, "{}", stderr(&search_out));
+    let search_str = stdout(&search_out);
+    assert_eq!(search_str.lines().count(), 1, "{search_str}");
+    assert!(search_str.contains("invoices"), "{search_str}");
+    assert!(
+        !search_str.contains("never-export-this"),
+        "credential line must be omitted: {search_str}"
+    );
+
+    // Stats JSON summarizes sanitized entries only
+    let stats_out = run(&["history", "stats", "--json"]);
+    assert_eq!(code(&stats_out), 0, "{}", stderr(&stats_out));
+    let stats_json: serde_json::Value =
+        serde_json::from_str(&stdout(&stats_out)).expect("valid stats json");
+    assert_eq!(stats_json["total"], 2);
+    assert_eq!(stats_json["succeeded"], 1);
+    assert_eq!(stats_json["failed"], 1);
+    assert_eq!(stats_json["max_elapsed_ms"], 88);
+
+    // Export CSV to stdout redacts target passwords and skips credential entries
+    let export_csv = run(&["history", "export", "--format", "csv"]);
+    assert_eq!(code(&export_csv), 0, "{}", stderr(&export_csv));
+    let csv_str = stdout(&export_csv);
+    assert!(csv_str.starts_with("at,target,database,environment,outcome,elapsed_ms,sql"));
+    assert!(!csv_str.contains("topsecret123"), "{csv_str}");
+    assert!(!csv_str.contains("never-export-this"), "{csv_str}");
+
+    // Export --output refuses overwrite without --force and succeeds with --force
+    let out_path = temp.path().join("exported.sql");
+    let first_write = run(&[
+        "history",
+        "export",
+        "--format",
+        "sql",
+        "--output",
+        out_path.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&first_write), 0, "{}", stderr(&first_write));
+    let exported = std::fs::read_to_string(&out_path).expect("read exported sql");
+    assert!(exported.contains("SELECT count(*) FROM orders;"));
+
+    let overwrite_refused = run(&[
+        "history",
+        "export",
+        "--format",
+        "sql",
+        "--output",
+        out_path.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&overwrite_refused), 2);
+
+    let overwrite_forced = run(&[
+        "history",
+        "export",
+        "--format",
+        "jsonl",
+        "--output",
+        out_path.to_str().unwrap(),
+        "--force",
+    ]);
+    assert_eq!(code(&overwrite_forced), 0, "{}", stderr(&overwrite_forced));
+
+    // Refuses symlink destinations even when --force is passed
+    #[cfg(unix)]
+    {
+        let target_real = temp.path().join("real.txt");
+        std::fs::write(&target_real, "keep me").expect("write real");
+        let link_path = temp.path().join("link.sql");
+        std::os::unix::fs::symlink(&target_real, &link_path).expect("create symlink");
+        let symlink_refused = run(&[
+            "history",
+            "export",
+            "--format",
+            "sql",
+            "--output",
+            link_path.to_str().unwrap(),
+            "--force",
+        ]);
+        assert_eq!(code(&symlink_refused), 2);
+        assert_eq!(std::fs::read_to_string(&target_real).unwrap(), "keep me");
+    }
+
+    // Invalid status/since fail with usage exit code 2
+    assert_eq!(code(&run(&["history", "search", "--status", "nope"])), 2);
+    assert_eq!(
+        code(&run(&["history", "stats", "--since", "bad-timestamp"])),
+        2
+    );
+}

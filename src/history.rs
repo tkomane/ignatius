@@ -70,6 +70,22 @@ impl Outcome {
             S::ConnectionLost => Self::Unknown,
         }
     }
+
+    /// Parses a CLI or palette status token case-insensitively.
+    pub fn parse(raw: &str) -> Result<Self, Diagnostic> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "ok" | "succeeded" => Ok(Self::Succeeded),
+            "failed" | "error" => Ok(Self::Failed),
+            "cancelled" | "canceled" => Ok(Self::Cancelled),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("unknown history status {raw:?}"),
+                "filtering statement history by status",
+            )
+            .next_action("use one of: ok, succeeded, failed, cancelled, unknown")),
+        }
+    }
 }
 
 /// One statement, as it is written to the file.
@@ -308,6 +324,22 @@ impl History {
         Ok(entries)
     }
 
+    /// Returns entries matching `filter`, newest first, bounded by [`MAX_HISTORY_QUERY_LIMIT`].
+    ///
+    /// Re-applies [`mentions_a_credential`] filtering and [`redact_text`] on read.
+    pub fn search(&self, filter: &HistoryFilter) -> Result<Vec<Entry>, Diagnostic> {
+        let cap = filter.limit.min(MAX_HISTORY_QUERY_LIMIT);
+        let mut entries = self.entries()?;
+        entries.reverse();
+        let matched = entries
+            .iter()
+            .filter_map(sanitized_entry)
+            .filter(|entry| filter_matches(entry, filter))
+            .take(cap)
+            .collect();
+        Ok(matched)
+    }
+
     /// Empties the history, removing the file entirely.
     pub fn clear(&self) -> Result<(), Diagnostic> {
         match std::fs::remove_file(&self.path) {
@@ -382,6 +414,303 @@ const CREDENTIAL_WORDS: &[&str] = &[
 pub fn mentions_a_credential(sql: &str) -> bool {
     let lowered = sql.to_lowercase();
     CREDENTIAL_WORDS.iter().any(|word| lowered.contains(word))
+}
+
+/// Maximum number of history entries returned by a single offline search or
+/// export query.
+pub const MAX_HISTORY_QUERY_LIMIT: usize = 10_000;
+
+/// Supported output formats for offline history export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryExportFormat {
+    /// One JSON object per line (`history.jsonl` shape).
+    Jsonl,
+    /// RFC 4180 CSV with header row.
+    Csv,
+    /// Plain SQL script with metadata header comments.
+    Sql,
+}
+
+impl HistoryExportFormat {
+    /// Parses a CLI format flag (`jsonl`, `csv`, or `sql`).
+    pub fn parse(raw: &str) -> Result<Self, Diagnostic> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "jsonl" | "ndjson" | "json" => Ok(Self::Jsonl),
+            "csv" => Ok(Self::Csv),
+            "sql" => Ok(Self::Sql),
+            _ => Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!("unsupported history export format {raw:?}"),
+                "choosing a history export format",
+            )
+            .next_action("use one of: jsonl, csv, sql")),
+        }
+    }
+}
+
+/// Filter criteria for searching or exporting local history offline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryFilter {
+    /// Case-insensitive substring filter over SQL, target, or database.
+    pub query: Option<String>,
+    /// Exact case-insensitive database name filter.
+    pub database: Option<String>,
+    /// Exact case-insensitive environment classification filter.
+    pub environment: Option<String>,
+    /// Execution outcome filter.
+    pub outcome: Option<Outcome>,
+    /// Lower-bound UTC timestamp (inclusive).
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    /// Maximum number of matching entries to return (newest first).
+    pub limit: usize,
+}
+
+impl Default for HistoryFilter {
+    fn default() -> Self {
+        Self {
+            query: None,
+            database: None,
+            environment: None,
+            outcome: None,
+            since: None,
+            limit: MAX_HISTORY_QUERY_LIMIT,
+        }
+    }
+}
+
+/// Aggregated statistics computed over local history entries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryStats {
+    /// Total matching entries analyzed.
+    pub total: usize,
+    /// Number of entries ending in `ok` / `succeeded`.
+    pub succeeded: usize,
+    /// Number of entries ending in `failed`.
+    pub failed: usize,
+    /// Number of entries ending in `cancelled`.
+    pub cancelled: usize,
+    /// Number of entries ending in `unknown`.
+    pub unknown: usize,
+    /// Entry counts grouped by database name.
+    pub by_database: std::collections::BTreeMap<String, usize>,
+    /// Entry counts grouped by environment classification.
+    pub by_environment: std::collections::BTreeMap<String, usize>,
+    /// Median observed client duration in milliseconds.
+    pub median_elapsed_ms: Option<u64>,
+    /// 95th-percentile observed client duration in milliseconds.
+    pub p95_elapsed_ms: Option<u64>,
+    /// Maximum observed client duration in milliseconds.
+    pub max_elapsed_ms: Option<u64>,
+}
+
+impl HistoryStats {
+    /// Computes deterministic outcome, target, and latency percentiles over `entries`.
+    #[must_use]
+    pub fn compute(entries: &[Entry]) -> Self {
+        let mut stats = Self {
+            total: 0,
+            succeeded: 0,
+            failed: 0,
+            cancelled: 0,
+            unknown: 0,
+            by_database: std::collections::BTreeMap::new(),
+            by_environment: std::collections::BTreeMap::new(),
+            median_elapsed_ms: None,
+            p95_elapsed_ms: None,
+            max_elapsed_ms: None,
+        };
+        let mut latencies = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if mentions_a_credential(&entry.sql) {
+                continue;
+            }
+            stats.total += 1;
+            match entry.outcome {
+                Outcome::Succeeded => stats.succeeded += 1,
+                Outcome::Failed => stats.failed += 1,
+                Outcome::Cancelled => stats.cancelled += 1,
+                Outcome::Unknown => stats.unknown += 1,
+            }
+            let db_key = if entry.database.is_empty() {
+                "(none)".to_owned()
+            } else {
+                entry.database.clone()
+            };
+            *stats.by_database.entry(db_key).or_insert(0) += 1;
+            let env_key = if entry.environment.is_empty() {
+                "(none)".to_owned()
+            } else {
+                entry.environment.clone()
+            };
+            *stats.by_environment.entry(env_key).or_insert(0) += 1;
+            latencies.push(entry.elapsed_ms);
+        }
+        if !latencies.is_empty() {
+            latencies.sort_unstable();
+            let len = latencies.len();
+            stats.max_elapsed_ms = latencies.last().copied();
+            let lower = latencies[(len - 1) / 2];
+            let upper = latencies[len / 2];
+            stats.median_elapsed_ms = Some(lower.midpoint(upper));
+            let p95_idx = ((len * 95).div_ceil(100)).saturating_sub(1).min(len - 1);
+            stats.p95_elapsed_ms = Some(latencies[p95_idx]);
+        }
+        stats
+    }
+}
+
+/// Parses an RFC 3339 timestamp or `YYYY-MM-DD` UTC date for `--since`.
+pub fn parse_since_timestamp(raw: &str) -> Result<chrono::DateTime<chrono::Utc>, Diagnostic> {
+    let trimmed = raw.trim();
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(parsed.with_timezone(&chrono::Utc));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        && let Some(dt) = date.and_hms_opt(0, 0, 0)
+    {
+        return Ok(dt.and_utc());
+    }
+    Err(Diagnostic::new(
+        DiagnosticKind::Usage,
+        format!("invalid --since timestamp {raw:?}"),
+        "parsing history time filter",
+    )
+    .next_action("provide an RFC 3339 timestamp (2026-11-28T00:00:00Z) or date (2026-11-28)"))
+}
+
+fn sanitized_entry(entry: &Entry) -> Option<Entry> {
+    if mentions_a_credential(&entry.sql) {
+        return None;
+    }
+    Some(Entry {
+        at: entry.at.clone(),
+        target: redact_text(&entry.target),
+        database: entry.database.clone(),
+        environment: entry.environment.clone(),
+        sql: redact_text(&entry.sql),
+        outcome: entry.outcome,
+        elapsed_ms: entry.elapsed_ms,
+    })
+}
+
+fn filter_matches(entry: &Entry, filter: &HistoryFilter) -> bool {
+    if let Some(db) = filter
+        .database
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        && !entry.database.eq_ignore_ascii_case(db)
+    {
+        return false;
+    }
+    if let Some(env) = filter
+        .environment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        && !entry.environment.eq_ignore_ascii_case(env)
+    {
+        return false;
+    }
+    if let Some(outcome) = filter.outcome
+        && entry.outcome != outcome
+    {
+        return false;
+    }
+    if let Some(since) = filter.since {
+        let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&entry.at) else {
+            return false;
+        };
+        if parsed.with_timezone(&chrono::Utc) < since {
+            return false;
+        }
+    }
+    if let Some(needle) = filter
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let needle_lower = needle.to_lowercase();
+        let matched = entry.sql.to_lowercase().contains(&needle_lower)
+            || entry.target.to_lowercase().contains(&needle_lower)
+            || entry.database.to_lowercase().contains(&needle_lower);
+        if !matched {
+            return false;
+        }
+    }
+    true
+}
+
+fn csv_escape(field: &str) -> String {
+    if field.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_owned()
+    }
+}
+
+/// Formats sanitized history entries for offline export.
+///
+/// Re-applies [`mentions_a_credential`] filtering and [`redact_text`] defense-in-depth.
+pub fn format_history_export(
+    entries: &[Entry],
+    format: HistoryExportFormat,
+) -> Result<Vec<u8>, Diagnostic> {
+    let mut out = String::new();
+    match format {
+        HistoryExportFormat::Jsonl => {
+            for entry in entries.iter().filter_map(sanitized_entry) {
+                let line = serde_json::to_string(&entry).map_err(|err| {
+                    Diagnostic::new(
+                        DiagnosticKind::Internal,
+                        "a history entry could not be encoded as JSON",
+                        "exporting statement history",
+                    )
+                    .likely_cause(err.to_string())
+                })?;
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        HistoryExportFormat::Csv => {
+            out.push_str("at,target,database,environment,outcome,elapsed_ms,sql\n");
+            for entry in entries.iter().filter_map(sanitized_entry) {
+                out.push_str(&csv_escape(&entry.at));
+                out.push(',');
+                out.push_str(&csv_escape(&entry.target));
+                out.push(',');
+                out.push_str(&csv_escape(&entry.database));
+                out.push(',');
+                out.push_str(&csv_escape(&entry.environment));
+                out.push(',');
+                out.push_str(entry.outcome.label());
+                out.push(',');
+                out.push_str(&entry.elapsed_ms.to_string());
+                out.push(',');
+                out.push_str(&csv_escape(&entry.sql));
+                out.push('\n');
+            }
+        }
+        HistoryExportFormat::Sql => {
+            out.push_str("-- Ignatius local history export (offline)\n");
+            for entry in entries.iter().filter_map(sanitized_entry) {
+                let target_line = entry.target.replace(['\r', '\n'], " ");
+                let db_line = entry.database.replace(['\r', '\n'], " ");
+                out.push_str(&format!(
+                    "-- [{}] {} | {} | {} | {} ms\n",
+                    entry.when(),
+                    target_line,
+                    db_line,
+                    entry.outcome.label(),
+                    entry.elapsed_ms
+                ));
+                out.push_str(entry.sql.trim_end());
+                out.push_str("\n\n");
+            }
+        }
+    }
+    Ok(out.into_bytes())
 }
 
 #[cfg(test)]

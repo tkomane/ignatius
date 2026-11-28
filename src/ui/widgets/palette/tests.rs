@@ -1202,3 +1202,47 @@ fn saved_query_collection_origin_tags_description_and_multiline_sql_render_with_
         "{ascii_text}"
     );
 }
+
+#[test]
+fn rich_history_palette_renders_spotlight_preview_and_ascii_fallback() {
+    let entries = vec![crate::history::Entry {
+        at: "2026-11-28T09:05:00Z".into(),
+        target: "app@staging:5432/billing".into(),
+        database: "billing".into(),
+        environment: "staging".into(),
+        sql: "SELECT count(*)\nFROM invoices\u{1b}[31m;".into(),
+        outcome: crate::history::Outcome::Failed,
+        elapsed_ms: 45,
+    }];
+    let pal = Palette::from_history_entries(&entries);
+    let p_true = Presentation::new(
+        Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+        Glyphs::new(GlyphTier::Unicode),
+        false,
+    );
+    let mut buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_true, AREA, &mut buf);
+    let text = buffer_to_string(&buf);
+
+    assert!(text.contains("Database: billing"), "{text}");
+    assert!(text.contains("Environment: staging"), "{text}");
+    assert!(text.contains("Status: failed (45 ms)"), "{text}");
+    assert!(text.contains("SQL:"), "{text}");
+    assert!(text.contains("FROM invoices"), "{text}");
+    assert!(!text.contains('\u{1b}'), "control escape leaked: {text:?}");
+    assert!(
+        text.contains("\u{2500}\u{2500}\u{2500}\u{2500}"),
+        "Unicode hairline rule missing: {text}"
+    );
+
+    let p_ascii = Presentation::new(
+        Theme::new(ThemeChoice::Dark, false).with_depth(ColorDepth::None),
+        Glyphs::new(GlyphTier::Ascii),
+        false,
+    );
+    let mut ascii_buf = Buffer::empty(AREA);
+    render_palette(&pal, &p_ascii, AREA, &mut ascii_buf);
+    let ascii_text = buffer_to_string(&ascii_buf);
+    assert!(ascii_text.is_ascii(), "{ascii_text}");
+    assert!(ascii_text.contains("----"), "{ascii_text}");
+}
