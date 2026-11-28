@@ -162,6 +162,10 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("copy-row-json", Action::CopyRowAsJson),
     ("set-search-path", Action::SetSearchPath),
     ("filter-by-cell", Action::FilterBySelectedCell),
+    ("object-select-preview", Action::ObjectSelectPreview),
+    ("object-count-rows", Action::ObjectCountRows),
+    ("object-insert-template", Action::ObjectInsertTemplate),
+    ("object-column-list", Action::ObjectColumnList),
 ];
 
 /// The action a configuration name means.
@@ -1112,6 +1116,18 @@ fn description_of(action: &Action) -> &'static str {
     if matches!(action, Action::FilterBySelectedCell) {
         return "Filter Results by the selected cell value";
     }
+    if matches!(action, Action::ObjectSelectPreview) {
+        return "Insert SELECT ... LIMIT 100 for selected object";
+    }
+    if matches!(action, Action::ObjectCountRows) {
+        return "Insert SELECT count(*) for selected object";
+    }
+    if matches!(action, Action::ObjectInsertTemplate) {
+        return "Insert INSERT INTO ... VALUES template for selected table";
+    }
+    if matches!(action, Action::ObjectColumnList) {
+        return "Insert quoted column list for selected object";
+    }
     Keymap::new()
         .bindings
         .iter()
@@ -1251,6 +1267,10 @@ const fn short_label(action: &Action) -> &'static str {
         Action::CopyRowAsJson => "Copy row JSON",
         Action::SetSearchPath => "Search path",
         Action::FilterBySelectedCell => "Filter by cell",
+        Action::ObjectSelectPreview => "Select preview",
+        Action::ObjectCountRows => "Count rows SQL",
+        Action::ObjectInsertTemplate => "Insert template",
+        Action::ObjectColumnList => "Column list",
     }
 }
 

@@ -543,6 +543,33 @@ impl ObjectTree {
         };
         true
     }
+
+    /// Returns the currently selected object (or parent object when a column is
+    /// selected) together with any loaded child column names in display order.
+    #[must_use]
+    pub fn selected_object_with_columns(&self) -> Option<(&ObjectSummary, Vec<String>)> {
+        let row = self.selected_row()?;
+        let node = self.node(&row.path)?;
+        let object_node = match &node.kind {
+            NodeKind::Object(_) => node,
+            NodeKind::Column(_) if row.path.len() >= 2 => {
+                self.node(&row.path[..row.path.len() - 1])?
+            }
+            _ => return None,
+        };
+        let NodeKind::Object(object) = &object_node.kind else {
+            return None;
+        };
+        let columns = object_node
+            .children
+            .iter()
+            .filter_map(|child| match &child.kind {
+                NodeKind::Column(col) => Some(col.name.clone()),
+                _ => None,
+            })
+            .collect();
+        Some((object, columns))
+    }
 }
 
 /// Flattens a node and its visible descendants.

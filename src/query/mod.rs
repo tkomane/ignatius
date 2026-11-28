@@ -11,6 +11,7 @@ pub mod export;
 pub mod format;
 pub mod highlight;
 pub mod identifiers;
+pub mod object_sql;
 pub mod parameters;
 pub mod plan;
 pub mod result;

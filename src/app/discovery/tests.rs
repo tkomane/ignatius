@@ -469,3 +469,66 @@ fn set_search_path_is_discoverable_only_when_usable_and_not_failed_tx() {
             .contains("ROLLBACK")
     );
 }
+
+#[test]
+fn object_quick_sql_actions_reflect_relation_kind_and_loaded_columns() {
+    use crate::app::tree::{Node, NodeKind};
+    use crate::postgres::metadata::{ColumnInfo, ObjectKind, ObjectSummary};
+
+    let mut model = Model::new(100);
+    connected(&mut model);
+    model.focus = Focus::Objects;
+
+    let mut table = Node::new(NodeKind::Object(ObjectSummary {
+        kind: ObjectKind::Table,
+        schema: "public".to_owned(),
+        name: "orders".to_owned(),
+        readable: true,
+        detail: None,
+    }));
+    model.tree.roots = vec![table.clone()];
+    model.tree.selected = 0;
+
+    // Unexpanded table allows SELECT preview and count(*), not INSERT/column-list.
+    assert!(action_is_available(&model, &Action::ObjectSelectPreview));
+    assert!(action_is_available(&model, &Action::ObjectCountRows));
+    assert!(!action_is_available(&model, &Action::ObjectInsertTemplate));
+    assert!(!action_is_available(&model, &Action::ObjectColumnList));
+    assert_eq!(palette_group(&Action::ObjectSelectPreview), "Objects");
+
+    // Expanding table columns enables INSERT template and column list.
+    table.loaded = true;
+    table.expanded = true;
+    table.children = vec![Node::new(NodeKind::Column(ColumnInfo {
+        name: "id".to_owned(),
+        data_type: "bigint".to_owned(),
+        nullable: false,
+        primary_key: true,
+        default: None,
+    }))];
+    model.tree.roots = vec![table];
+    assert!(action_is_available(&model, &Action::ObjectInsertTemplate));
+    assert!(action_is_available(&model, &Action::ObjectColumnList));
+
+    // A View with loaded columns supports preview/count/column-list, not INSERT.
+    let mut view = Node::new(NodeKind::Object(ObjectSummary {
+        kind: ObjectKind::View,
+        schema: "public".to_owned(),
+        name: "recent_orders".to_owned(),
+        readable: true,
+        detail: None,
+    }));
+    view.loaded = true;
+    view.children = vec![Node::new(NodeKind::Column(ColumnInfo {
+        name: "id".to_owned(),
+        data_type: "bigint".to_owned(),
+        nullable: false,
+        primary_key: false,
+        default: None,
+    }))];
+    model.tree.roots = vec![view];
+    assert!(action_is_available(&model, &Action::ObjectSelectPreview));
+    assert!(action_is_available(&model, &Action::ObjectCountRows));
+    assert!(!action_is_available(&model, &Action::ObjectInsertTemplate));
+    assert!(action_is_available(&model, &Action::ObjectColumnList));
+}

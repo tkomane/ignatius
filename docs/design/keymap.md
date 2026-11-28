@@ -574,6 +574,17 @@ opens a session prompt (prefilled with the selected schema in Objects or the
 current `search_path`) that validates schema names and updates PostgreSQL's
 session `search_path` safely via `SET search_path TO ...`.
 
+From the Command Palette (or configurable `[keys]` bindings) while Objects is
+focused, operators can also generate quoted SQL into the active editor as a
+single undoable edit without executing anything against PostgreSQL:
+- `object-select-preview` inserts `SELECT ... FROM "schema"."name" LIMIT 100;`
+  (using loaded columns or `*`) for the selected relation and focuses Editor.
+- `object-count-rows` inserts `SELECT count(*) AS row_count FROM "schema"."name";`.
+- `object-insert-template` inserts `INSERT INTO "schema"."name" (...) VALUES (:...);`
+  for a table/partitioned/foreign table whose columns are loaded.
+- `object-column-list` inserts `"col1", "col2", ...` for an object whose columns
+  are loaded.
+
 With the editor focused, `Ctrl+K l` asks PostgreSQL for a structured estimated
 plan for the statement under the cursor. `Ctrl+K a` opens a confirmation before
 `EXPLAIN ANALYZE` executes that statement. The plan is read in the Results pane;
@@ -724,7 +735,9 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`, `find-in-buffer`, `replace-in-buffer`, `find-next`, `find-prev`,
 `toggle-comment`, `duplicate-line`, `move-line-up`, `move-line-down`, `jump-to-line`,
-`toggle-column-stats`, `insert-where-clause`, `insert-in-list`, `copy-row-json`.
+`toggle-column-stats`, `insert-where-clause`, `insert-in-list`, `copy-row-json`,
+`set-search-path`, `filter-by-cell`, `object-select-preview`, `object-count-rows`,
+`object-insert-template`, `object-column-list`.
 
 Inside the in-memory Find & Replace bar (`Ctrl+F` / `Ctrl+H`), typing and paste edit the active field, `Enter` or `F3` jumps to the next match, `Up` or `Shift+F3` jumps to the previous match, `Tab` switches between Find and Replace, `Alt+C` toggles case sensitivity (`[Aa]` vs `[aa]`), `Alt+R` replaces the active match, `Alt+A` replaces all matches as one atomic undo step, and `Esc` closes without modifying buffer SQL.
 

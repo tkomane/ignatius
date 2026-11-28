@@ -15628,3 +15628,77 @@ fn filter_by_selected_cell_narrows_retained_rows_with_zero_sql_effects() {
     assert_eq!(model.result_filter, "value:=null");
     assert_eq!(model.filtered_rows(), vec![2]);
 }
+
+#[test]
+fn object_quick_sql_actions_insert_quoted_templates_with_single_undo_and_no_db_effects() {
+    use crate::app::tree::{Node, NodeKind};
+    use crate::postgres::metadata::{ColumnInfo, ObjectKind, ObjectSummary};
+
+    let mut model = connected();
+    let mut table = Node::new(NodeKind::Object(ObjectSummary {
+        kind: ObjectKind::Table,
+        schema: "Sales".to_owned(),
+        name: "Order Items".to_owned(),
+        readable: true,
+        detail: None,
+    }));
+    table.loaded = true;
+    table.expanded = true;
+    table.children = vec![
+        Node::new(NodeKind::Column(ColumnInfo {
+            name: "id".to_owned(),
+            data_type: "bigint".to_owned(),
+            nullable: false,
+            primary_key: true,
+            default: None,
+        })),
+        Node::new(NodeKind::Column(ColumnInfo {
+            name: "unit price".to_owned(),
+            data_type: "numeric".to_owned(),
+            nullable: false,
+            primary_key: false,
+            default: None,
+        })),
+    ];
+    model.tree.roots = vec![table];
+
+    // Preview SELECT
+    model.focus = Focus::Objects;
+    model.tree.selected = 0;
+    model.editor.set_text("");
+    assert!(update(&mut model, Message::Action(Action::ObjectSelectPreview)).is_empty());
+    assert_eq!(model.focus, Focus::Editor);
+    assert_eq!(
+        model.editor.text(),
+        "SELECT \"id\", \"unit price\"\nFROM \"Sales\".\"Order Items\"\nLIMIT 100;"
+    );
+
+    // Undo clears the inserted template in one step.
+    assert!(update(&mut model, Message::Action(Action::Undo)).is_empty());
+    assert_eq!(model.editor.text(), "");
+
+    // SELECT count(*)
+    model.focus = Focus::Objects;
+    assert!(update(&mut model, Message::Action(Action::ObjectCountRows)).is_empty());
+    assert_eq!(model.focus, Focus::Editor);
+    assert_eq!(
+        model.editor.text(),
+        "SELECT count(*) AS row_count\nFROM \"Sales\".\"Order Items\";"
+    );
+
+    // Selecting a child column row still resolves the parent relation for INSERT and columns.
+    model.editor.set_text("");
+    model.focus = Focus::Objects;
+    model.tree.selected = 1;
+    assert!(update(&mut model, Message::Action(Action::ObjectInsertTemplate)).is_empty());
+    assert_eq!(
+        model.editor.text(),
+        "INSERT INTO \"Sales\".\"Order Items\" (\"id\", \"unit price\")\nVALUES (:id, :unit_price);"
+    );
+
+    model.editor.set_text("SELECT ");
+    model.editor.move_buffer_end();
+    model.focus = Focus::Objects;
+    assert!(update(&mut model, Message::Action(Action::ObjectColumnList)).is_empty());
+    assert_eq!(model.editor.text(), "SELECT \"id\", \"unit price\"");
+}

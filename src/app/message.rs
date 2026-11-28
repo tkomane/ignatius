@@ -225,6 +225,14 @@ pub enum Action {
     SetSearchPath,
     /// Apply a structured equality/null filter in Results matching the selected cell.
     FilterBySelectedCell,
+    /// Insert a `SELECT ... LIMIT 100` preview query for the selected Object Tree relation.
+    ObjectSelectPreview,
+    /// Insert a `SELECT count(*)` query for the selected Object Tree relation.
+    ObjectCountRows,
+    /// Insert an `INSERT INTO ... VALUES (:...)` template for the selected Object Tree table.
+    ObjectInsertTemplate,
+    /// Insert a quoted comma-separated column list for the selected Object Tree relation.
+    ObjectColumnList,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -394,6 +402,10 @@ impl Action {
             Self::CopyRowAsJson,
             Self::SetSearchPath,
             Self::FilterBySelectedCell,
+            Self::ObjectSelectPreview,
+            Self::ObjectCountRows,
+            Self::ObjectInsertTemplate,
+            Self::ObjectColumnList,
         ]
     }
 }
