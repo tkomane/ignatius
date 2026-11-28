@@ -2081,6 +2081,8 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         }
         Action::OpenResultControls if model.plan.is_visible() => Vec::new(),
         Action::OpenResultControls => open_result_controls(model),
+        Action::ToggleColumnStats if model.plan.is_visible() => Vec::new(),
+        Action::ToggleColumnStats => apply_grid_command(model, GridCommand::ToggleColumnStats),
         Action::NarrowColumn if model.plan.is_visible() => Vec::new(),
         Action::NarrowColumn => apply_grid_command(model, GridCommand::NarrowSelected),
         Action::WidenColumn if model.plan.is_visible() => Vec::new(),
@@ -2310,6 +2312,9 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::ExplainPlan => begin_plan(model, false),
         Action::AnalyzePlan => begin_plan(model, true),
         Action::CopyValue => begin_copy(model),
+        Action::CopyRowAsJson => begin_copy_row_json(model),
+        Action::InsertCellWhereClause => insert_cell_where_clause(model),
+        Action::InsertColumnInList => insert_column_in_list(model),
         Action::GenerateCellUpdate => begin_cell_update(model),
         Action::RefreshResult => begin_refresh_result(model),
         Action::FormatBuffer => {
@@ -7363,6 +7368,7 @@ fn begin_copy(model: &mut Model) -> Vec<Effect> {
 
     model.clipboard_notice = None;
     model.review_scroll = 0;
+    model.pending_copy_kind = crate::app::model::CopyKind::Cell;
     model.pending_copy = Some(crate::app::model::PendingCopy {
         result_job,
         source_row,
@@ -7370,6 +7376,222 @@ fn begin_copy(model: &mut Model) -> Vec<Effect> {
         bytes,
         characters,
     });
+    Vec::new()
+}
+
+/// Opens a value-free copy confirmation for the selected retained row as compact JSON.
+fn begin_copy_row_json(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.visible_result().is_none()
+    {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    }
+
+    let Some(result_job) = model.last_execution.as_ref().map(|execution| execution.job) else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    };
+    let Some(source_row) = model.selected_source_row() else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    };
+    let Some(set) = model.visible_result().filter(|set| set.is_available()) else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    };
+    if set.columns.is_empty() || set.rows.get(source_row).is_none() {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Unavailable);
+        return Vec::new();
+    }
+    if !model.clipboard_osc52 {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::Disabled);
+        return Vec::new();
+    }
+
+    let row = &set.rows[source_row];
+    let json = match crate::query::copy_sql::build_row_json(&set.columns, row) {
+        Ok(json) => json,
+        Err(_) => {
+            let estimated = row
+                .iter()
+                .map(|cell| cell.raw().map_or(4, str::len))
+                .sum::<usize>()
+                .max(crate::clipboard::MAX_OSC52_BYTES + 1);
+            model.clipboard_notice =
+                Some(crate::app::model::ClipboardNotice::TooLarge { bytes: estimated });
+            return Vec::new();
+        }
+    };
+    let Ok(payload) = crate::clipboard::ClipboardPayload::try_new(json) else {
+        model.clipboard_notice = Some(crate::app::model::ClipboardNotice::TooLarge {
+            bytes: crate::clipboard::MAX_OSC52_BYTES + 1,
+        });
+        return Vec::new();
+    };
+    let bytes = payload.len();
+    let characters = payload.characters();
+    drop(payload);
+
+    model.clipboard_notice = None;
+    model.review_scroll = 0;
+    model.pending_copy_kind = crate::app::model::CopyKind::RowJson;
+    model.pending_copy = Some(crate::app::model::PendingCopy {
+        result_job,
+        source_row,
+        column: model.selected_column,
+        bytes,
+        characters,
+    });
+    Vec::new()
+}
+
+/// Inserts a query-ready `WHERE` clause for the selected retained cell into the
+/// active SQL editor as a single undoable edit without executing any SQL.
+fn insert_cell_where_clause(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.visible_result().is_none()
+    {
+        model.buffer_notice =
+            Some("Focus Results on a retained cell to insert a WHERE clause.".to_owned());
+        return Vec::new();
+    }
+    let Some(source_row) = model.selected_source_row() else {
+        model.buffer_notice =
+            Some("Select a retained result cell to insert a WHERE clause.".to_owned());
+        return Vec::new();
+    };
+    let built = model.visible_result().and_then(|set| {
+        if !set.is_available() {
+            return None;
+        }
+        let visible = model.result_grid.visible_columns(set.columns.len());
+        if !visible.contains(&model.selected_column) {
+            return None;
+        }
+        let col_name = set.columns.get(model.selected_column)?;
+        let cell = set.rows.get(source_row)?.get(model.selected_column)?;
+        Some((
+            col_name.clone(),
+            crate::query::copy_sql::build_where_clause(col_name, cell),
+        ))
+    });
+    let Some((col_name, result)) = built else {
+        model.buffer_notice =
+            Some("Select a retained result cell to insert a WHERE clause.".to_owned());
+        return Vec::new();
+    };
+    let sql = match result {
+        Ok(sql) => sql,
+        Err(reason) => {
+            model.buffer_notice = Some(format!("Cannot insert WHERE clause: {reason}."));
+            return Vec::new();
+        }
+    };
+    let mut inserted = false;
+    edit_editor(model, |editor| {
+        inserted = editor.insert_paste(&sql);
+    });
+    if inserted {
+        model.buffer_notice = Some(format!(
+            "Inserted WHERE clause for {} into SQL editor (not executed).",
+            crate::query::value::sanitize_for_display(&col_name)
+        ));
+    } else {
+        model.buffer_notice = Some(
+            "Cannot insert WHERE clause: generated SQL exceeds editor paste limit.".to_owned(),
+        );
+    }
+    Vec::new()
+}
+
+/// Inserts a query-ready `"col" IN (...)` predicate over distinct non-NULL
+/// values in the visible retained rows of the selected column as one undo step.
+fn insert_column_in_list(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.visible_result().is_none()
+    {
+        model.buffer_notice =
+            Some("Focus Results on a retained column to insert an IN list.".to_owned());
+        return Vec::new();
+    }
+    let visible_rows = model.displayed_rows();
+    if visible_rows.is_empty() {
+        model.buffer_notice =
+            Some("No visible retained rows are available for an IN list.".to_owned());
+        return Vec::new();
+    }
+    let built = model.visible_result().and_then(|set| {
+        if !set.is_available() {
+            return None;
+        }
+        let visible = model.result_grid.visible_columns(set.columns.len());
+        if !visible.contains(&model.selected_column) {
+            return None;
+        }
+        let col_name = set.columns.get(model.selected_column)?;
+        let cells: Vec<&crate::query::value::Cell> = visible_rows
+            .iter()
+            .filter_map(|&row_idx| {
+                set.rows
+                    .get(row_idx)
+                    .and_then(|row| row.get(model.selected_column))
+            })
+            .collect();
+        Some((
+            col_name.clone(),
+            crate::query::copy_sql::build_in_list(
+                col_name,
+                &cells,
+                crate::query::copy_sql::DEFAULT_IN_LIST_MAX_VALUES,
+            ),
+        ))
+    });
+    let Some((col_name, result)) = built else {
+        model.buffer_notice =
+            Some("Select a visible retained column to insert an IN list.".to_owned());
+        return Vec::new();
+    };
+    let (sql, count, truncated) = match result {
+        Ok(res) => res,
+        Err(reason) => {
+            model.buffer_notice = Some(format!("Cannot insert IN list: {reason}."));
+            return Vec::new();
+        }
+    };
+    let mut inserted = false;
+    edit_editor(model, |editor| {
+        inserted = editor.insert_paste(&sql);
+    });
+    if inserted {
+        let col_display = crate::query::value::sanitize_for_display(&col_name);
+        model.buffer_notice = Some(if truncated {
+            format!(
+                "Inserted IN list for {col_display} ({count} distinct values, truncated at {}; not executed).",
+                crate::query::copy_sql::DEFAULT_IN_LIST_MAX_VALUES
+            )
+        } else {
+            format!("Inserted IN list for {col_display} ({count} distinct value(s); not executed).")
+        });
+    } else {
+        model.buffer_notice =
+            Some("Cannot insert IN list: generated SQL exceeds editor paste limit.".to_owned());
+    }
     Vec::new()
 }
 
@@ -7384,27 +7606,39 @@ fn copy_payload_for_candidate(
         || model.plan.is_visible()
         || model.last_execution.as_ref()?.job != candidate.result_job
         || model.selected_source_row() != Some(candidate.source_row)
-        || model.selected_column != candidate.column
     {
         return None;
     }
     let set = model.visible_result().filter(|set| set.is_available())?;
-    if !model
-        .result_grid
-        .visible_columns(set.columns.len())
-        .contains(&candidate.column)
-    {
-        return None;
+    match model.pending_copy_kind {
+        crate::app::model::CopyKind::Cell => {
+            if model.selected_column != candidate.column
+                || !model
+                    .result_grid
+                    .visible_columns(set.columns.len())
+                    .contains(&candidate.column)
+            {
+                return None;
+            }
+            let value = set
+                .rows
+                .get(candidate.source_row)?
+                .get(candidate.column)?
+                .raw()?;
+            if value.len() != candidate.bytes || value.chars().count() != candidate.characters {
+                return None;
+            }
+            crate::clipboard::ClipboardPayload::try_new(value.to_owned()).ok()
+        }
+        crate::app::model::CopyKind::RowJson => {
+            let row = set.rows.get(candidate.source_row)?;
+            let json = crate::query::copy_sql::build_row_json(&set.columns, row).ok()?;
+            if json.len() != candidate.bytes || json.chars().count() != candidate.characters {
+                return None;
+            }
+            crate::clipboard::ClipboardPayload::try_new(json).ok()
+        }
     }
-    let value = set
-        .rows
-        .get(candidate.source_row)?
-        .get(candidate.column)?
-        .raw()?;
-    if value.len() != candidate.bytes || value.chars().count() != candidate.characters {
-        return None;
-    }
-    crate::clipboard::ClipboardPayload::try_new(value.to_owned()).ok()
 }
 
 /// Handles input while a replacement value is being typed for a cell update.
@@ -8440,6 +8674,10 @@ fn apply_grid_command(model: &mut Model, command: GridCommand) -> Vec<Effect> {
                 model.result_grid.note = None;
             }
         }
+        GridCommand::ToggleColumnStats => {
+            model.result_grid.show_quick_stats = !model.result_grid.show_quick_stats;
+            model.result_grid.note = None;
+        }
         GridCommand::ToggleFreezeFirst => {
             if model.result_grid.visible_columns(column_count).is_empty() {
                 model.result_grid.note =
@@ -8530,6 +8768,11 @@ fn grid_control_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry>
     } else {
         "hidden"
     };
+    let stats = if model.result_grid.show_quick_stats {
+        "shown"
+    } else {
+        "hidden"
+    };
     let freeze = if model.result_grid.freeze_first {
         "on"
     } else {
@@ -8566,6 +8809,12 @@ fn grid_control_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry>
             detail: format!("currently {types}"),
             group: "Result grid",
             command: PaletteCommand::Grid(GridCommand::ToggleTypes),
+        },
+        PaletteEntry {
+            label: "Show or hide column quick-stats".into(),
+            detail: format!("currently {stats}"),
+            group: "Result grid",
+            command: PaletteCommand::Grid(GridCommand::ToggleColumnStats),
         },
         PaletteEntry {
             label: "Freeze first visible column".into(),
@@ -9371,6 +9620,22 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         (
             Action::CompareResultSnapshot,
             "Compare the pinned baseline against the current result set",
+        ),
+        (
+            Action::ToggleColumnStats,
+            "Show or hide live column quick-stats in Results",
+        ),
+        (
+            Action::InsertCellWhereClause,
+            "Insert query-ready WHERE clause for selected cell into SQL editor",
+        ),
+        (
+            Action::InsertColumnInList,
+            "Insert query-ready IN (...) list for selected column into SQL editor",
+        ),
+        (
+            Action::CopyRowAsJson,
+            "Copy selected result row as JSON via OSC 52 review",
         ),
     ] {
         if entries

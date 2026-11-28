@@ -185,34 +185,57 @@ fn document(model: &Model, kind: Kind) -> Option<Document> {
     match kind {
         Kind::Copy => {
             let pending = model.pending_copy.as_ref()?;
-            doc.title = "Confirm copy";
+            let is_row_json = model.pending_copy_kind == crate::app::model::CopyKind::RowJson;
+            doc.title = if is_row_json {
+                "Confirm copy row JSON"
+            } else {
+                "Confirm copy"
+            };
             doc.accept = "send once";
-            let column = model
-                .visible_result()
-                .and_then(|set| set.columns.get(pending.column))
-                .map_or_else(
-                    || format!("column {}", pending.column.saturating_add(1)),
-                    |name| {
-                        format!(
-                            "column {} ({})",
-                            pending.column.saturating_add(1),
-                            sanitize_for_display(name)
-                        )
-                    },
+            if is_row_json {
+                let col_count = model.visible_result().map_or(0, |set| set.columns.len());
+                push(
+                    &mut rows,
+                    "Send one selected row as JSON through the terminal?",
+                    Token::Warning,
                 );
-            push(
-                &mut rows,
-                "Send one selected text value through the terminal?",
-                Token::Warning,
-            );
-            push(
-                &mut rows,
-                format!(
-                    "Cell: row {}, {column}",
-                    pending.source_row.saturating_add(1)
-                ),
-                Token::Text,
-            );
+                push(
+                    &mut rows,
+                    format!(
+                        "Row: row {}, {} column(s)",
+                        pending.source_row.saturating_add(1),
+                        col_count
+                    ),
+                    Token::Text,
+                );
+            } else {
+                let column = model
+                    .visible_result()
+                    .and_then(|set| set.columns.get(pending.column))
+                    .map_or_else(
+                        || format!("column {}", pending.column.saturating_add(1)),
+                        |name| {
+                            format!(
+                                "column {} ({})",
+                                pending.column.saturating_add(1),
+                                sanitize_for_display(name)
+                            )
+                        },
+                    );
+                push(
+                    &mut rows,
+                    "Send one selected text value through the terminal?",
+                    Token::Warning,
+                );
+                push(
+                    &mut rows,
+                    format!(
+                        "Cell: row {}, {column}",
+                        pending.source_row.saturating_add(1)
+                    ),
+                    Token::Text,
+                );
+            }
             push(
                 &mut rows,
                 format!(

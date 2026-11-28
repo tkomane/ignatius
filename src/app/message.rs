@@ -213,6 +213,14 @@ pub enum Action {
     MoveLineDown,
     /// Open a prompt to jump the editor caret to a 1-based line number.
     JumpToLine,
+    /// Show or hide the live column quick-stats summary bar in Results.
+    ToggleColumnStats,
+    /// Insert a query-ready `WHERE` clause for the selected result cell into the active editor.
+    InsertCellWhereClause,
+    /// Insert a query-ready `IN (...)` predicate over visible distinct non-NULL values of the selected column.
+    InsertColumnInList,
+    /// Copy the selected result row as compact JSON via the opt-in OSC 52 confirmation review.
+    CopyRowAsJson,
 }
 
 /// Slot targeted by an extended EXPLAIN load for A/B plan comparison.
@@ -376,6 +384,10 @@ impl Action {
             Self::MoveLineUp,
             Self::MoveLineDown,
             Self::JumpToLine,
+            Self::ToggleColumnStats,
+            Self::InsertCellWhereClause,
+            Self::InsertColumnInList,
+            Self::CopyRowAsJson,
         ]
     }
 }

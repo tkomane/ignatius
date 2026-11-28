@@ -5,6 +5,7 @@ pub mod value;
 
 pub mod classify;
 pub mod completion;
+pub mod copy_sql;
 pub mod error_location;
 pub mod export;
 pub mod format;

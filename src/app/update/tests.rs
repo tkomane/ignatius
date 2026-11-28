@@ -1678,6 +1678,16 @@ fn split_grid_page_uses_drawable_rows_including_types() {
         );
         assert_eq!(
             model.selected_row,
+            usize::from(outer_results - 8 - u16::from(with_types))
+        );
+        model.selected_row = 0;
+        model.result_grid.show_quick_stats = false;
+        update(
+            &mut model,
+            Message::Action(Action::MovePage(Direction::Down)),
+        );
+        assert_eq!(
+            model.selected_row,
             usize::from(outer_results - 7 - u16::from(with_types))
         );
     }
@@ -15306,4 +15316,171 @@ fn jump_to_line_prompt_parses_clamps_cancels_and_reports_invalid_input() {
             model.buffer_notice
         );
     }
+}
+
+#[test]
+fn toggle_column_stats_action_and_grid_controls_preserve_preference_across_results() {
+    let mut model = with_grid(
+        &["id", "amount"],
+        &[
+            &[Cell::Text("1".into()), Cell::Text("10".into())],
+            &[Cell::Text("2".into()), Cell::Text("20".into())],
+        ],
+    );
+    assert!(model.result_grid.show_quick_stats);
+
+    // Direct ToggleColumnStats action toggles off and on without I/O.
+    assert!(update(&mut model, Message::Action(Action::ToggleColumnStats)).is_empty());
+    assert!(!model.result_grid.show_quick_stats);
+
+    // Ctrl+K g Result Grid Controls also exposes and toggles column quick-stats.
+    assert!(update(&mut model, Message::Action(Action::OpenResultControls)).is_empty());
+    let palette = model.palette.as_mut().expect("result grid controls");
+    palette.query = "quick-stats".into();
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.result_grid.show_quick_stats);
+
+    // Preference survives reset_for_result.
+    model.result_grid.show_quick_stats = false;
+    model.result_grid.reset_for_result(&["next".into()]);
+    assert!(!model.result_grid.show_quick_stats);
+}
+
+#[test]
+fn insert_cell_where_clause_inserts_as_one_undo_step_and_syncs_buffer_manager() {
+    let mut model = with_grid(
+        &["id", "note"],
+        &[
+            &[Cell::Text("1".into()), Cell::Text("O'Reilly".into())],
+            &[Cell::Text("2".into()), Cell::Null],
+        ],
+    );
+    model.editor = crate::app::editor::Editor::with_text("SELECT * FROM users ");
+    model.sync_active_buffer_from_editor();
+    model.focus = Focus::Results;
+    model.selected_row = 0;
+    model.selected_column = 1;
+
+    let effects = update(&mut model, Message::Action(Action::InsertCellWhereClause));
+    assert!(effects.is_empty(), "must never run SQL");
+    assert_eq!(
+        model.editor.text(),
+        "SELECT * FROM users WHERE \"note\" = 'O''Reilly'"
+    );
+    assert_eq!(model.buffers.active_editor().text(), model.editor.text());
+    assert!(
+        model
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("WHERE") && n.contains("not executed"))
+    );
+
+    // Single undo step reverts the entire inserted clause.
+    model.focus = Focus::Editor;
+    assert!(update(&mut model, Message::Action(Action::Undo)).is_empty());
+    assert_eq!(model.editor.text(), "SELECT * FROM users ");
+    assert_eq!(model.buffers.active_editor().text(), "SELECT * FROM users ");
+
+    // NULL cell emits WHERE "note" IS NULL.
+    model.focus = Focus::Results;
+    model.selected_row = 1;
+    assert!(update(&mut model, Message::Action(Action::InsertCellWhereClause)).is_empty());
+    assert_eq!(
+        model.editor.text(),
+        "SELECT * FROM users WHERE \"note\" IS NULL"
+    );
+}
+
+#[test]
+fn insert_column_in_list_uses_visible_rows_caps_at_200_and_never_runs_sql() {
+    let mut set = ResultSet::new(vec!["key".into(), "empty_col".into()], 300);
+    for i in 0..205 {
+        assert!(set.push(vec![Cell::Text(format!("k{i}")), Cell::Null]));
+    }
+    assert!(set.push(vec![Cell::Text("k0".into()), Cell::Null]));
+    let mut model = with_grid(&["key", "empty_col"], &[]);
+    model.last_execution.as_mut().unwrap().statements[0].result_set = Some(set);
+    model.editor = crate::app::editor::Editor::with_text("SELECT * FROM items WHERE ");
+    model.sync_active_buffer_from_editor();
+    model.focus = Focus::Results;
+    model.selected_column = 0;
+
+    let effects = update(&mut model, Message::Action(Action::InsertColumnInList));
+    assert!(effects.is_empty(), "must never run SQL");
+    assert!(model.editor.text().contains("\"key\" IN ('k0', 'k1',"));
+    assert!(model.editor.text().contains("'k199'"));
+    assert!(!model.editor.text().contains("'k200'"));
+    assert_eq!(model.buffers.active_editor().text(), model.editor.text());
+    assert!(
+        model
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("200") && n.contains("truncated"))
+    );
+
+    // Single undo step removes the entire IN list cleanly.
+    model.focus = Focus::Editor;
+    assert!(update(&mut model, Message::Action(Action::Undo)).is_empty());
+    assert_eq!(model.editor.text(), "SELECT * FROM items WHERE ");
+
+    // All-NULL column refuses cleanly without modifying the editor.
+    model.focus = Focus::Results;
+    model.selected_column = 1;
+    assert!(update(&mut model, Message::Action(Action::InsertColumnInList)).is_empty());
+    assert_eq!(model.editor.text(), "SELECT * FROM items WHERE ");
+    assert!(
+        model
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("no non-NULL"))
+    );
+}
+
+#[test]
+fn copy_row_as_json_respects_osc52_opt_in_confirmation_and_size_bound() {
+    let mut model = copy_model(vec![vec![
+        Cell::Text("1".into()),
+        Cell::Null,
+        Cell::Text("secret".into()),
+    ]]);
+    // Off by default: refuses without pending_copy or effects.
+    assert!(update(&mut model, Message::Action(Action::CopyRowAsJson)).is_empty());
+    assert!(model.pending_copy.is_none());
+    assert_eq!(
+        model.clipboard_notice,
+        Some(crate::app::model::ClipboardNotice::Disabled)
+    );
+
+    // Opt-in enabled: stages value-free confirmation review, then emits Effect::CopyValue on Activate.
+    model.clipboard_osc52 = true;
+    assert!(update(&mut model, Message::Action(Action::CopyRowAsJson)).is_empty());
+    assert!(model.pending_copy.is_some());
+    assert_eq!(
+        model.pending_copy_kind,
+        crate::app::model::CopyKind::RowJson
+    );
+    assert!(!format!("{model:?}").contains("secret"));
+
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert!(model.pending_copy.is_none());
+    let [Effect::CopyValue { payload }] = effects.as_slice() else {
+        panic!("expected one Effect::CopyValue, got {effects:?}");
+    };
+    let json = payload.clone().into_inner();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["id"], "1");
+    assert!(parsed["value"].is_null());
+
+    // Oversized row JSON is refused cleanly under MAX_OSC52_BYTES.
+    let mut big_model = copy_model(vec![vec![
+        Cell::Text("1".into()),
+        Cell::Text("x".repeat(crate::clipboard::MAX_OSC52_BYTES)),
+    ]]);
+    big_model.clipboard_osc52 = true;
+    assert!(update(&mut big_model, Message::Action(Action::CopyRowAsJson)).is_empty());
+    assert!(big_model.pending_copy.is_none());
+    assert!(matches!(
+        big_model.clipboard_notice,
+        Some(crate::app::model::ClipboardNotice::TooLarge { .. })
+    ));
 }

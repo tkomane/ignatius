@@ -85,15 +85,21 @@ fn the_viewport_range_line_states_the_rows_actually_rendered() {
     let area = Rect::new(0, 0, 60, 20);
     let presentation = presentation_at(ColorDepth::TrueColor);
 
-    // 20 rows of area less two borders is 18; the five prelude lines leave 13
-    // rendered rows starting at the top.
+    // 20 rows of area less two borders is 18; five prelude lines plus the
+    // 1-line quick-stats footer leave 12 rendered rows starting at the top.
     let text = buffer_to_string(&render(&model, &presentation, area));
-    assert!(text.contains("rows 1-13 of 30 retained"), "{text}");
+    assert!(text.contains("rows 1-12 of 30 retained"), "{text}");
 
     // Moving the selection one row past the fold scrolls the viewport.
     model.selected_row = 20;
     let text = buffer_to_string(&render(&model, &presentation, area));
-    assert!(text.contains("rows 9-21 of 30 retained"), "{text}");
+    assert!(text.contains("rows 10-21 of 30 retained"), "{text}");
+
+    // Hiding quick-stats restores the 13th row.
+    model.selected_row = 0;
+    model.result_grid.show_quick_stats = false;
+    let text = buffer_to_string(&render(&model, &presentation, area));
+    assert!(text.contains("rows 1-13 of 30 retained"), "{text}");
 }
 
 #[test]
@@ -113,7 +119,7 @@ fn a_truncated_result_states_what_the_server_returned() {
         Rect::new(0, 0, 80, 20),
     ));
     assert!(
-        text.contains("rows 1-13 of 30 retained, of 200,000 returned"),
+        text.contains("rows 1-12 of 30 retained, of 200,000 returned"),
         "{text}"
     );
 }
@@ -2137,4 +2143,62 @@ fn results_toolbar_renders_right_aligned_coordinate_cue_when_width_allows() {
         Some(buf[(col_x, 1)].fg),
         presentation.theme.color(Token::Info)
     );
+}
+
+#[test]
+fn quick_stats_bar_renders_numeric_and_text_summaries_with_ascii_and_unicode_parity() {
+    let mut model = model_with(
+        &["amount", "label"],
+        &[
+            vec![Cell::Text("10".into()), Cell::Text("alpha".into())],
+            vec![Cell::Null, Cell::Text("beta".into())],
+            vec![Cell::Text("30".into()), Cell::Text("alpha".into())],
+        ],
+    );
+    let area = Rect::new(0, 0, 120, 14);
+    for glyphs in [GlyphTier::Ascii, GlyphTier::Unicode] {
+        let pres = Presentation::new(
+            Theme::new(ThemeChoice::Dark, true).with_depth(ColorDepth::TrueColor),
+            Glyphs::new(glyphs),
+            false,
+        );
+        model.selected_column = 0;
+        let numeric_text = buffer_to_string(&render(&model, &pres, area));
+        assert!(
+            numeric_text.contains(
+                "amount: 3 rows | 2 non-null | 1 null | 2 distinct | min 10 .. 30 | sum 40 | avg 20"
+            ),
+            "{glyphs:?}: {numeric_text}"
+        );
+
+        model.selected_column = 1;
+        let text_col = buffer_to_string(&render(&model, &pres, area));
+        assert!(
+            text_col.contains("label: 3 rows | 3 non-null | 0 null | 2 distinct"),
+            "{glyphs:?}: {text_col}"
+        );
+        assert!(
+            !text_col.contains("sum "),
+            "{glyphs:?}: non-numeric column must not invent numeric stats: {text_col}"
+        );
+    }
+
+    // Toggling show_quick_stats hides the bar cleanly.
+    model.result_grid.show_quick_stats = false;
+    let hidden = buffer_to_string(&render(
+        &model,
+        &presentation_at(ColorDepth::TrueColor),
+        area,
+    ));
+    assert!(!hidden.contains("non-null"), "{hidden}");
+
+    // Minimum-height pane with room for only one data row omits quick-stats so the row remains visible.
+    model.result_grid.show_quick_stats = true;
+    let tight = buffer_to_string(&render(
+        &model,
+        &presentation_at(ColorDepth::TrueColor),
+        Rect::new(0, 0, 120, 8),
+    ));
+    assert!(tight.contains("alpha"), "{tight}");
+    assert!(!tight.contains("non-null"), "{tight}");
 }

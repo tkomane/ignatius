@@ -546,10 +546,23 @@ modifying buffer text, undo history, disk state, or database state.
 
 When Results has focus, `Ctrl+K g` opens the same searchable palette over the
 current retained result. It lists local sorting, visible-column selection,
-bounded width controls, type-label visibility, frozen-first-column layout, and
-reset. Choosing a column opens a second searchable palette; duplicate labels
+bounded width controls, type-label visibility, live column quick-stats
+visibility (`toggle-column-stats`), frozen-first-column layout, and reset.
+Choosing a column opens a second searchable palette; duplicate labels
 remain separate because each entry carries its source position. These actions
 never rerun SQL.
+
+From the Command Palette (or configurable `[keys]` bindings), operators can also
+generate query-ready SQL or copy a row as JSON from the focused Results grid
+without executing SQL automatically:
+- `insert-where-clause` inserts `WHERE "col" = '...'` (or `WHERE "col" IS NULL`)
+  for the selected cell into the active SQL editor as one undo step.
+- `insert-in-list` inserts `"col" IN (...)` over distinct non-NULL visible
+  values of the selected column (capped at 200 values) into the active SQL
+  editor as one undo step.
+- `copy-row-json` serializes the selected row as compact deterministic JSON and
+  routes it through the opt-in OSC 52 confirmation review (`[clipboard] osc52 = true`
+  and the 1 MiB copy limit).
 
 With the editor focused, `Ctrl+K l` asks PostgreSQL for a structured estimated
 plan for the statement under the cursor. `Ctrl+K a` opens a confirmation before
@@ -700,7 +713,8 @@ The bindable action names are the authority in `src/ui/keymap.rs`:
 `index-advisor`, `wal-observability`, `connection-pool`, `data-masking`, `data-sync`, `synthetic-seed`, `new-buffer`, `close-buffer`, `next-buffer`, `prev-buffer`, `split-buffer`, `pin-buffer`, `rename-buffer`, `snippet-library`, `restore-session`, `discard-recovery`, `lint-sql`, `logical-replication`, `cluster-config`, `stop-watch`, `data-browser`, `plan-diff`, `result-analytics`, `query-bench`, `schema-snapshot`, `sql-runbook`, `toggle-expanded-row`, `toggle-inspector`, `undo`, `redo`, `delete-forward`,
 `delete-word-left`, `move-line-start`, `move-line-end`, `move-buffer-start`,
 `move-buffer-end`, `find-in-buffer`, `replace-in-buffer`, `find-next`, `find-prev`,
-`toggle-comment`, `duplicate-line`, `move-line-up`, `move-line-down`, `jump-to-line`.
+`toggle-comment`, `duplicate-line`, `move-line-up`, `move-line-down`, `jump-to-line`,
+`toggle-column-stats`, `insert-where-clause`, `insert-in-list`, `copy-row-json`.
 
 Inside the in-memory Find & Replace bar (`Ctrl+F` / `Ctrl+H`), typing and paste edit the active field, `Enter` or `F3` jumps to the next match, `Up` or `Shift+F3` jumps to the previous match, `Tab` switches between Find and Replace, `Alt+C` toggles case sensitivity (`[Aa]` vs `[aa]`), `Alt+R` replaces the active match, `Alt+A` replaces all matches as one atomic undo step, and `Esc` closes without modifying buffer SQL.
 

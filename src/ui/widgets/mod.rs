@@ -770,13 +770,17 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
 
     let rows = model.displayed_rows();
     let header_rows = results::grid_header_rows(model, set, model.presentation.spacing(), inner);
-    let visible_rows = (inner.height as usize).saturating_sub(header_rows).max(1);
+    let footer_rows = results::grid_footer_rows(model, set, model.presentation.spacing(), inner);
+    let drawable_rows = (inner.height as usize).saturating_sub(header_rows + footer_rows);
+    let visible_rows = drawable_rows.max(1);
     let needs_scrollbar = rows.len() > visible_rows;
     let grid_width = (inner.width as usize).saturating_sub(usize::from(needs_scrollbar));
 
+    let top = usize::from(row.saturating_sub(inner.y));
     if needs_scrollbar
         && column == inner.x.saturating_add(inner.width).saturating_sub(1)
-        && usize::from(row.saturating_sub(inner.y)) >= header_rows
+        && top >= header_rows
+        && top < header_rows + drawable_rows
     {
         return Some(Region::ResultsScrollbar);
     }
@@ -809,7 +813,6 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
         .x
         .saturating_add(u16::try_from(gutter.saturating_add(1)).unwrap_or(u16::MAX));
 
-    let top = usize::from(row.saturating_sub(inner.y));
     if top == results::grid_column_header_row(model, model.presentation.spacing(), inner) {
         if let Some(column) = column_at(&window, &widths, content_x, column) {
             return Some(Region::ResultsHeaderCell { column });
@@ -819,7 +822,7 @@ fn results_region(model: &Model, pane: Rect, column: u16, row: u16) -> Option<Re
         }
         return None;
     }
-    if top < header_rows {
+    if top < header_rows || top >= header_rows + drawable_rows {
         return None;
     }
     let position = model

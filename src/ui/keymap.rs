@@ -156,6 +156,10 @@ pub const CONFIGURABLE: &[(&str, Action)] = &[
     ("move-line-up", Action::MoveLineUp),
     ("move-line-down", Action::MoveLineDown),
     ("jump-to-line", Action::JumpToLine),
+    ("toggle-column-stats", Action::ToggleColumnStats),
+    ("insert-where-clause", Action::InsertCellWhereClause),
+    ("insert-in-list", Action::InsertColumnInList),
+    ("copy-row-json", Action::CopyRowAsJson),
 ];
 
 /// The action a configuration name means.
@@ -1088,6 +1092,18 @@ fn description_of(action: &Action) -> &'static str {
     if matches!(action, Action::CompareResultSnapshot) {
         return "Compare the pinned baseline against the current result set";
     }
+    if matches!(action, Action::ToggleColumnStats) {
+        return "Show or hide column quick-stats";
+    }
+    if matches!(action, Action::InsertCellWhereClause) {
+        return "Insert WHERE clause for selected cell into SQL editor";
+    }
+    if matches!(action, Action::InsertColumnInList) {
+        return "Insert IN (...) list for selected column into SQL editor";
+    }
+    if matches!(action, Action::CopyRowAsJson) {
+        return "Copy selected result row as JSON";
+    }
     Keymap::new()
         .bindings
         .iter()
@@ -1221,6 +1237,10 @@ const fn short_label(action: &Action) -> &'static str {
         Action::MoveLineUp => "Move line up",
         Action::MoveLineDown => "Move line down",
         Action::JumpToLine => "Jump to line",
+        Action::ToggleColumnStats => "Column stats",
+        Action::InsertCellWhereClause => "Insert WHERE",
+        Action::InsertColumnInList => "Insert IN list",
+        Action::CopyRowAsJson => "Copy row JSON",
     }
 }
 

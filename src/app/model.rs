@@ -3268,6 +3268,16 @@ impl PendingPlan {
     }
 }
 
+/// What a pending OSC 52 clipboard confirmation is sending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CopyKind {
+    /// A single selected result cell's raw text.
+    #[default]
+    Cell,
+    /// A full selected result row serialized as compact JSON.
+    RowJson,
+}
+
 /// A value-free identity held while a clipboard copy awaits confirmation.
 ///
 /// The raw value remains in the retained result. Keeping only its identity and
@@ -4141,6 +4151,8 @@ pub struct Model {
     pub clipboard_osc52: bool,
     /// A result-cell copy held back until the user confirms it.
     pub pending_copy: Option<PendingCopy>,
+    /// Whether the pending clipboard confirmation targets a single cell or a row JSON object.
+    pub pending_copy_kind: CopyKind,
     /// A result-cell update waiting for live relation metadata.
     pub update_lookup: Option<UpdateLookup>,
     /// A replacement value being typed for a result-cell update.
