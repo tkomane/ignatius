@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m24-editor-edit-ops` (PR 2A) and `feat/m24-editor-find-replace` (PR 2B)
 **Created**: 2026-11-27
-**Status**: Slice 1 (PR 2A) implemented; Slice 2 (PR 2B) planned
+**Status**: Complete (PR 2A #201 `d00c2a7` and PR 2B #202 `f51f727` merged on `main`)
 **Milestone**: M24 - SQL Editor Power Tools
 
 ## Problem Statement

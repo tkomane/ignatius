@@ -1,6 +1,6 @@
 # Roadmap
 
-**Reconciled 2026-11-27; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
+**Reconciled 2026-11-28; replanned 2026-09-04.** Deliver a PostgreSQL workbench that is easy to discover,
 truthful under pressure and dependable in both a terminal and a script.
 The implemented source through Feature 025 (`US1-US10`, `T001-T059`) and the
 Waves 13-15 4-tier TUI elevation and showcase suite (`PR53`, `PR54`, `PR57`) is
@@ -141,6 +141,9 @@ below; broadening the feature list does not move a milestone forward.
 | M20 Optimistic Cell Concurrency & Session Role Routing | Safe optimistic cell-to-UPDATE conflict detection and libpq-compatible `target_session_attrs` session routing | W16 (Feature 066) | Observed-cell `WHERE` predicate and 0-row conflict notice (`#194`), `target_session_attrs` across CLI/URI/env/profile/session bootstrap (`#193`) |
 | M21 Adaptive Chords, Tab Pin/Rename & Result Snapshot Diff | 3-column `Ctrl+K` chord guide, session tab pinning/renaming, and bounded in-memory/CLI A/B result-set diffing | W16 (Feature 067) | Adaptive 1/2/3-column `render_chords` + pinned/renamable tabs (`#196`), ephemeral `PinnedResult` + `ResultDiff` overlay + offline `ignatius result-diff` (`#195`) |
 | M22 Saved Query Collections & Roadmap Alignment | Single-level saved query collections, SQL header tags/descriptions, rich palette preview, offline `ignatius queries`, and reconciled docs | W16 (Feature 068) | Safe `collection/name` paths, `-- @tag:`/`-- @description:` metadata, palette search/preview, offline `ignatius queries list\|show` (`#197`), reconciled status/roadmap/compatibility/README (`#198`) |
+| M23 Multi-Host Failover & Session Timeouts | Libpq-compatible multi-host/multi-port sequential failover and configurable PostgreSQL `statement_timeout` / `lock_timeout` bounds | W16 (Feature 069) | `MAX_ENDPOINTS = 16`, conservative `VerifyFull` default, per-endpoint `.pgpass`, sequential failover without post-success retry (`#199`), `statement_timeout` & `lock_timeout` across CLI/URI/profile/config and session startup (`#200`) |
+| M24 SQL Editor Power Tools | Everyday SQL editor line operations, direct line jumping, and bounded UTF-8-safe literal Find & Replace | W16 (Feature 070) | `toggle-comment`, `duplicate-line`, `move-line-up`/`down`, `jump-to-line` (`#201`), in-memory Find & Replace with `MAX_FIND_MATCHES = 10_000` and atomic 1-undo Replace All (`#202`) |
+| M25 Result-Grid Quick-Stats, SQL Copy & Docs Sync | Live column quick-stats, query-ready `WHERE`/`IN`/JSON copy builders, and reconciled M23-M25 documentation | W16 (Feature 071) | `ColumnQuickStats` (10,000 distinct cap, finite `f64` numerics, `toggle-column-stats`), `insert-where-clause`, `insert-in-list` (200 cap), opt-in OSC 52 `copy-row-json` (`#203`), reconciled status/roadmap/compatibility/CHANGELOG/README |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -309,7 +312,7 @@ M21 (`067-multi-column-chords-tabs-and-result-diff`) is delivered in source on
   [Wave 117](../status.md#wave-117---m21-adaptive-multi-column-chords-tab-pinning-and-result-snapshot-diffing---26-november-2026).
 
 M22 (`068-saved-query-collections-and-roadmap-alignment`) is delivered in source
-on `main` as of 2026-11-27 (PR #197 `3111f0e` and PR #198):
+on `main` as of 2026-11-27 (PR #197 `3111f0e` and PR #198 `ad14f6a`):
 
 - [068 Saved Query Collections, Tag Metadata, Offline CLI, and Roadmap Alignment](../../specs/068-saved-query-collections-and-roadmap-alignment/spec.md)
   adds single-level `collection/name` folders under `queries_dir` with strict
@@ -319,6 +322,46 @@ on `main` as of 2026-11-27 (PR #197 `3111f0e` and PR #198):
   alongside Spec-Kit, roadmap, status, compatibility, CHANGELOG, and README
   reconciliation (#198). Recorded in
   [Wave 118](../status.md#wave-118---m22-saved-query-collections-offline-cli-and-documentation-alignment---27-november-2026).
+
+M23 (`069-multi-host-failover-and-session-timeouts`) is delivered in source on
+`main` as of 2026-11-27 (PR #199 `6b159f3` and PR #200 `dc849e0`):
+
+- [069 Multi-Host Failover and Session Timeouts](../../specs/069-multi-host-failover-and-session-timeouts/spec.md)
+  adds libpq-compatible comma-separated `host`/`port` failover (`MAX_ENDPOINTS = 16`,
+  bracketed IPv6, conservative `VerifyFull` default if any candidate host is
+  non-local, per-endpoint `.pgpass` lookup, sequential failover alongside
+  `target_session_attrs` without TLS downgrade or post-success retry, redacted
+  endpoint diagnostics, and object-tree pinning in #199), plus configurable
+  `statement_timeout` and `lock_timeout` (`0`, integer seconds, or
+  `ms`/`s`/`m`/`h` up to 24h across CLI flags, URI/kv/service, TOML profiles,
+  `[connection]` defaults, integer-millisecond `SET` startup enforcement, and
+  `ConnectionPicker` / `doctor` surfaces in #200). Recorded in
+  [Wave 119](../status.md#wave-119---m23-multi-host-failover-and-session-timeouts---27-november-2026).
+
+M24 (`070-sql-editor-power-tools`) is delivered in source on `main` as of
+2026-11-27 (PR #201 `d00c2a7` and PR #202 `f51f727`):
+
+- [070 SQL Editor Power Tools](../../specs/070-sql-editor-power-tools/spec.md)
+  adds UTF-8-safe, purely in-memory editor line operations (`toggle-comment`,
+  `duplicate-line`, `move-line-up`, `move-line-down`, and non-mutating
+  `jump-to-line` via `NamePurpose::JumpToLine` in #201) plus bounded literal
+  Find & Replace (`MAX_FIND_MATCHES = 10_000`, `find-in-buffer`,
+  `replace-in-buffer`, `find-next`, `find-prev`, `Alt+C`/`Alt+R`/`Alt+A`, atomic
+  1-undo Replace All, buffer-switch cleanup, and `Theme`/`Token` bar and match
+  highlighting in #202). Recorded in
+  [Wave 120](../status.md#wave-120---m24-sql-editor-power-tools---27-november-2026).
+
+M25 (`071-result-grid-quick-stats-sql-copy-and-docs`) is delivered in source on
+`main` as of 2026-11-28 (PR #203 `de0728e` and PR 3B):
+
+- [071 Result-Grid Quick-Stats, Query-Ready SQL & JSON Copy, and Docs Alignment](../../specs/071-result-grid-quick-stats-sql-copy-and-docs/spec.md)
+  adds live column quick-stats (`ColumnQuickStats` capped at 10,000 distinct
+  values with finite `f64` `NumericQuickStats`, `toggle-column-stats`, and a
+  compact `Theme`/`Token` summary bar) and query-ready copy builders
+  (`insert-where-clause`, `insert-in-list` capped at 200 distinct non-NULL
+  values, and opt-in OSC 52 `copy-row-json` in #203), alongside M23-M25
+  documentation reconciliation on `docs/m25-roadmap-and-readme-sync`. Recorded
+  in [Wave 121](../status.md#wave-121---m25-result-grid-quick-stats-query-ready-sqljson-copy-and-docs-sync---28-november-2026).
 
 ```mermaid
 flowchart LR
@@ -349,6 +392,9 @@ flowchart LR
     M19 --> M20["M20 Optimistic Cell Guard & Session Routing (066)"]
     M20 --> M21["M21 3-Col Chords, Tab Pin/Rename & Result Diff (067)"]
     M21 --> M22["M22 Saved Query Collections & Roadmap Sync (068)"]
+    M22 --> M23["M23 Multi-Host Failover & Session Timeouts (069)"]
+    M23 --> M24["M24 SQL Editor Power Tools (070)"]
+    M24 --> M25["M25 Grid Quick-Stats, SQL/JSON Copy & Docs Sync (071)"]
 ```
 
 ## Start here

@@ -12,8 +12,8 @@
 - [x] T005 Add unit tests (`src/connection/target/tests.rs`, `src/postgres/session/tests.rs`, `src/app/connection_picker/tests.rs`, `src/cli/interactive/tests.rs`) and live PostgreSQL 18.7 integration tests (`tests/postgres_integration.rs`) covering plain failover, verified-TLS failover, and multi-endpoint `target_session_attrs=standby` rejection.
 - [x] T006 Verify PR 1A with `cargo --locked xtask verify` against live PostgreSQL 18.7.
 
-## Phase 2: PR 1B - Session Lock and Idle-in-Transaction Timeouts (`feat/m23-session-timeouts`)
+## Phase 2: PR 1B - Session and Lock Timeouts (`feat/m23-session-timeouts`)
 
-- [x] T007 Add `lock_timeout` and `idle_in_transaction_session_timeout` configuration, profile, CLI, and connection parameters in `src/config/schema.rs`, `src/connection/target.rs`, and `src/cli/mod.rs`.
-- [x] T008 Apply and report `lock_timeout` and `idle_in_transaction_session_timeout` during `Session` bootstrap in `src/postgres/session.rs` and `doctor` surfaces.
-- [x] T009 Add unit tests and live PostgreSQL 18.7 integration tests for session/lock timeouts and verify with `cargo --locked xtask verify`.
+- [x] T007 Add `statement_timeout` and `lock_timeout` configuration, profile, CLI, and connection parameters in `src/config/schema.rs`, `src/connection/target.rs`, and `src/cli/mod.rs` (note: PR #200 `dc849e0` scoped Slice 2 to `statement_timeout` and `lock_timeout`; `idle_in_transaction_session_timeout` was not included).
+- [x] T008 Apply and report `statement_timeout` and `lock_timeout` during `Session` bootstrap in `src/postgres/session.rs`, `ConnectionPicker`, `Connection details`, and `doctor` surfaces.
+- [x] T009 Add unit tests and live PostgreSQL 18.7 integration tests for `statement_timeout` (SQLSTATE `57014`) and `lock_timeout` (SQLSTATE `55P03`) and verify with `cargo --locked xtask verify`.

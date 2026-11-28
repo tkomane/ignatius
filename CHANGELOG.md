@@ -8,6 +8,25 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Live result-grid column quick-stats (`ColumnQuickStats`, 10,000 distinct
+  cap, strict finite `f64` numeric summary, `toggle-column-stats` via palette
+  and `Ctrl+K g`) and query-ready copy builders (`insert-where-clause`,
+  `insert-in-list` capped at 200 distinct non-NULL values, and opt-in OSC 52
+  reviewed `copy-row-json`) (`Feature 071`, `#203`).
+- New: Purely in-memory SQL editor power tools: `--` line comment toggle
+  (`Ctrl+/` / `toggle-comment`), duplicate line (`Ctrl+Shift+D` /
+  `duplicate-line`), move line up/down (`Alt+Up`/`Alt+Down`), non-mutating jump
+  to line (`Ctrl+L` / `jump-to-line`), and bounded UTF-8-safe literal Find &
+  Replace (`MAX_FIND_MATCHES = 10_000`, `Ctrl+F`/`Ctrl+H`/`F3`/`Shift+F3`,
+  atomic 1-undo Replace All) (`Feature 070`, `#201`, `#202`).
+- New: Libpq-compatible multi-host/multi-port sequential failover
+  (`MAX_ENDPOINTS = 16`, comma-separated hosts/ports, bracketed IPv6,
+  conservative `VerifyFull` default if any candidate host is non-local,
+  per-endpoint `.pgpass` lookup, sequential failover without post-success retry,
+  object-tree endpoint pinning) and configurable `statement_timeout` /
+  `lock_timeout` (`0`, seconds, or `ms`/`s`/`m`/`h` up to 24h across CLI flags,
+  URI/kv/service, profiles, `[connection]` defaults, and session bootstrap)
+  (`Feature 069`, `#199`, `#200`).
 - New: Saved query collections (`collection/name` under `queries_dir`),
   SQL header metadata (`-- @tag:`, `-- @tags:`, `-- @description:`), Saved
   Queries palette search and bounded multi-line SQL previews, and offline

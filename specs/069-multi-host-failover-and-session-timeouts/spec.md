@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m23-multi-host-failover` (PR 1A) and `feat/m23-session-timeouts` (PR 1B)
 **Created**: 2026-11-27
-**Status**: In Progress (PR 1A Slice 1 in development; PR 1B Slice 2 pending)
+**Status**: Complete (PR 1A #199 `6b159f3` and PR 1B #200 `dc849e0` merged on `main`; Slice 2 delivered `statement_timeout` and `lock_timeout`)
 **Milestone**: M23 - Multi-Host Failover & Session Timeouts
 
 ## Problem Statement

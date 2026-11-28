@@ -1,8 +1,8 @@
 # Feature Specification: Result-Grid Quick-Stats, Query-Ready SQL & JSON Copy, and Docs Alignment
 
-**Feature Branch**: `feat/m25-grid-stats-sql-copy` (PR 3A) and `docs/m23-m25-roadmap-readme-sync` (PR 3B)
+**Feature Branch**: `feat/m25-grid-stats-sql-copy` (PR 3A) and `docs/m25-roadmap-and-readme-sync` (PR 3B)
 **Created**: 2026-11-27
-**Status**: Slice 1 (PR 3A) in progress; Slice 2 (PR 3B) planned
+**Status**: Complete (PR 3A #203 `de0728e` merged on `main`; PR 3B ready on `docs/m25-roadmap-and-readme-sync`)
 **Milestone**: M25 - Result Grid Quick-Stats, Query-Ready SQL Copy & Docs Sync
 
 ## Problem Statement

@@ -200,12 +200,14 @@ including bracketed IPv6 `[::1]:5432,[::1]:5433`) across URIs, keyword/value
 strings, `pg_service.conf`, `PGHOST`/`PGPORT`, CLI `--host`, and profiles up to
 16 endpoints (`MAX_ENDPOINTS`). One port applies to all hosts; multiple ports
 must match the host count. If any candidate host is non-local, default `sslmode`
-is `verify-full`. Candidates are tried sequentially in order alongside
+is `VerifyFull` (`verify-full`). Candidates are tried sequentially in order alongside
 `target_session_attrs`, re-consulting `.pgpass` per endpoint when no explicit
 password was supplied, never downgrading TLS and never retrying once a session
 succeeds. The active session and any object-tree connection bind to the actual
 connected endpoint; total failure reports every attempted endpoint and its
-redacted reason.
+redacted reason. Active `statement_timeout` and `lock_timeout` bounds also
+surface in the connection picker, **Connection and auth details**, and
+`ignatius doctor`.
 
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 `PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
@@ -317,6 +319,26 @@ UTF-8 bytes. Formatting does not contact PostgreSQL, load metadata, write
 history or files, read the clipboard, or emit telemetry. In plain mode, the
 formatted buffer remains pending and interaction text goes to stderr, while
 stdout remains reserved for result data.
+
+## SQL editor power tools
+
+The SQL editor supports purely in-memory, UTF-8-safe line operations and bounded
+literal search/replace with zero disk I/O and zero database calls:
+
+- **Line operations and jump to line**: `toggle-comment` (`Ctrl+/`) toggles
+  leading `-- ` comments while preserving indentation; `duplicate-line`
+  (`Ctrl+Shift+D`) duplicates the active line below; `move-line-up` (`Alt+Up`)
+  and `move-line-down` (`Alt+Down`) swap adjacent lines without adding undo
+  history on boundary no-ops; and `jump-to-line` (`Ctrl+L`) moves the caret to
+  a 1-based line without mutating SQL text, `modified`, revision, or undo
+  history. Each mutating operation records one undoable edit.
+- **Bounded literal Find & Replace**: `find-in-buffer` (`Ctrl+F`),
+  `replace-in-buffer` (`Ctrl+H`), `find-next` (`F3`), and `find-prev`
+  (`Shift+F3`) perform non-overlapping UTF-8-safe literal search capped at
+  `MAX_FIND_MATCHES = 10_000` (avoiding regex backtracking). Inside the bar,
+  `Alt+C` toggles case sensitivity, `Alt+R` replaces the active match, `Alt+A`
+  runs an atomic single-undo Replace All, and `Esc` or switching editor buffers
+  clears ephemeral Find/Replace state cleanly.
 
 ## Prompted named parameters
 
@@ -782,6 +804,25 @@ The local view is interactive-only. CSV, TSV, JSON, NDJSON, Markdown, table
 output, streaming export, history, and the editor continue to use server order,
 server values, and their existing contracts. The grid degrades to words and
 ASCII separators when colour or Unicode styling is unavailable.
+
+## Result-grid quick-stats and query-ready copy
+
+- **Column quick-stats (`ColumnQuickStats`)**: When enabled (`toggle-column-stats`
+  via the Command Palette, `[keys]`, or `Ctrl+K g`), the Results pane displays a
+  1-line summary bar over currently visible retained rows with total rows,
+  non-NULL count, NULL count, and distinct non-NULL cardinality capped at
+  `10,000` (`MAX_QUICK_STATS_DISTINCT`). Numeric summary fields (`min`, `max`,
+  `sum`, `avg`) appear only when `non_null > 0` and every non-NULL cell parses as
+  a finite `f64` (mixed text/numeric columns never skip strings). The bar omits
+  itself when inner pane height lacks spare room.
+- **Query-ready copy builders**: `insert-where-clause` (`WHERE "col" = 'escaped'`
+  or `WHERE "col" IS NULL`) and `insert-in-list` (`"col" IN (...)` over distinct
+  non-NULL visible/retained values in encounter order, capped at `200` values
+  and refusing empty non-NULL sets) insert escaped SQL into the active editor
+  as one undo step without executing SQL, quoting identifiers and refusing NUL
+  bytes or payloads over 1 MiB. `copy-row-json` serializes the selected row as
+  compact deterministic JSON (`null` vs `""`, bounded at 1 MiB) routed strictly
+  through the opt-in `[clipboard] osc52 = true` confirmation review.
 
 ## SQL buffer formatting
 
