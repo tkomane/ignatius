@@ -64,7 +64,7 @@ The top rail keeps your active role, host, database, `[PROD]` / `[STAGING]` envi
   </picture>
 </p>
 
-While a query runs, a 5-cell phosphor comet glides back and forth beside `Running` and a live tenth-of-a-second clock. When rows land, `Completed`, the header rule, and the row-number gutter flash green and settle back cleanly, alongside a right-aligned `row/total · column` coordinate readout in the toolbar. Inside the grid, `[null]`, empty strings, and literal `NULL` stay visually distinct even without colour, and locally sorted columns show an inline chevron (`▾` / `▴`).
+While a query runs, a 5-cell phosphor comet glides back and forth beside `Running` and a live tenth-of-a-second clock. When rows land, `Completed`, the header rule, and the row-number gutter flash green and settle back cleanly, alongside a right-aligned `row/total · column` coordinate readout in the toolbar. Inside the grid, `[null]`, empty strings, and literal `NULL` stay visually distinct even without colour, locally sorted columns show an inline chevron (`▾` / `▴`), a 1-line column quick-stats bar summarizes row/non-NULL/NULL/distinct counts and finite numeric `min`/`max`/`sum`/`avg` (`toggle-column-stats` or `Ctrl+K g`), and query-ready copy builders turn cells or rows into escaped `WHERE` / `IN (...)` editor snippets (`insert-where-clause`, `insert-in-list`) or opt-in OSC 52 row JSON (`copy-row-json`).
 
 <p align="center">
   <picture>
@@ -84,7 +84,7 @@ Press `Ctrl+C` at any time to send a PostgreSQL cancel request; the comet turns 
   </picture>
 </p>
 
-Press `Ctrl+Shift+F` to format your SQL locally with a crisp green wave down the editor statement gutter. Press `Ctrl+K l` for a safe estimated plan or `Ctrl+K a` for `EXPLAIN ANALYZE`: the plan explorer surfaces a KPI strip (`Nodes`, `Planning`, `Execution`, `Hotspot`), sweeps 5-cell proportional micro-bars across each node, scores exclusive self-time/self-cost so attention flags the actual bottleneck node rather than the root, and highlights `[estimate mismatch]` rows cleanly.
+Press `Ctrl+Shift+F` to format your SQL locally with a crisp green wave down the editor statement gutter, toggle `--` line comments (`Ctrl+/`), duplicate (`Ctrl+Shift+D`) or reorder (`Alt+Up`/`Alt+Down`) lines, jump to a line (`Ctrl+L`), or search and replace across the active buffer with bounded UTF-8-safe literal Find & Replace (`Ctrl+F` / `Ctrl+H`, `F3` / `Shift+F3`, atomic single-undo Replace All). Press `Ctrl+K l` for a safe estimated plan or `Ctrl+K a` for `EXPLAIN ANALYZE`: the plan explorer surfaces a KPI strip (`Nodes`, `Planning`, `Execution`, `Hotspot`), sweeps 5-cell proportional micro-bars across each node, scores exclusive self-time/self-cost so attention flags the actual bottleneck node rather than the root, and highlights `[estimate mismatch]` rows cleanly.
 
 <p align="center">
   <img src="docs/assets/screenshots/plan-explorer.png" alt="The EXPLAIN ANALYZE plan explorer showing the KPI strip, proportional 5-cell self-time micro-bars, non-root exclusive-time bottleneck detection on Sort, unclipped [estimate mismatch] markers, and self time in the detail pane." width="92%" />
@@ -276,6 +276,9 @@ Every action has a configurable name under `[keys]`, every chord appears in help
 # A connection URI. Keep the password out of it.
 ignatius connect "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
 
+# Multi-host failover with bounded statement and lock timeouts
+ignatius connect --host primary.internal,standby.internal --port 5432 --username app_user --dbname analytics --target-session-attrs read-write --statement-timeout 30s --lock-timeout 500ms
+
 # Individual flags, asking PostgreSQL to enforce a read-only primary or standby session
 ignatius connect --host db.internal --port 5432 --username app_user --dbname analytics --sslmode verify-full --read-only --target-session-attrs read-only
 
@@ -283,7 +286,7 @@ ignatius connect --host db.internal --port 5432 --username app_user --dbname ana
 ignatius connect @production-orders
 ```
 
-Remote hosts default to `verify-full`. Failed TLS connections never downgrade or retry in plaintext, `target_session_attrs` (`any`, `read-write`, `read-only`, `primary`, `standby` via CLI, URI, `PGTARGETSESSIONATTRS`, `pg_service.conf`, or profile `target-session-attrs`) verifies PostgreSQL `transaction_read_only` and `pg_is_in_recovery()` without silent downgrade or retry, and unsupported options such as `sslcrl` or `channel_binding` fail explicitly rather than being silently ignored.
+Multi-host lists (`host1,host2`, up to 16 endpoints) fail over sequentially alongside `target_session_attrs` (`any`, `read-write`, `read-only`, `primary`, `standby`), defaulting to `verify-full` whenever any candidate host is non-local, re-consulting `.pgpass` per endpoint, never downgrading TLS, and never retrying once a session succeeds. `--statement-timeout` and `--lock-timeout` (or profile `statement-timeout` / `lock-timeout` up to 24h) enforce session timeouts at startup, while unsupported options such as `sslcrl` or `channel_binding` fail explicitly rather than being silently ignored.
 
 ### Configuration Profiles (`config.toml`)
 
@@ -570,8 +573,8 @@ Feature slugs such as `026-schema-er-diagrams` correspond to [the roadmap](docs/
 **Exploring and querying**
 
 - Object tree across schemas, tables, views, functions, indexes, constraints, and sequences, with fuzzy filter highlighting, hairline scrollbars, definitions (`Ctrl+K d`), and reverse dependencies (`Ctrl+K y`).
-- Up to 16 SQL editor buffers with tab pills, session tab pinning (`Ctrl+K 9`) and renaming (`Ctrl+K 0`), vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, snippet library (`Ctrl+K ;`), saved query collections with `-- @tag:` / `-- @description:` headers (`Ctrl+K w`, `Ctrl+K o`, `ignatius queries`), and bounded bracketed paste.
-- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`), optimistic cell-update conflict guards (`Ctrl+K u`), and pinned in-memory result-set A/B diffing (`pin-result`, `compare-result`, `ignatius result-diff`).
+- Up to 16 SQL editor buffers with tab pills, session tab pinning (`Ctrl+K 9`) and renaming (`Ctrl+K 0`), vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, line ops (`Ctrl+/` comment, `Ctrl+Shift+D` duplicate, `Alt+Up`/`Alt+Down` move, `Ctrl+L` jump to line), bounded UTF-8-safe literal Find & Replace (`Ctrl+F` / `Ctrl+H`, `F3` / `Shift+F3`), snippet library (`Ctrl+K ;`), saved query collections with `-- @tag:` / `-- @description:` headers (`Ctrl+K w`, `Ctrl+K o`, `ignatius queries`), and bounded bracketed paste.
+- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, live column quick-stats (`toggle-column-stats`), query-ready SQL/JSON builders (`insert-where-clause`, `insert-in-list`, opt-in OSC 52 `copy-row-json`), local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`), optimistic cell-update conflict guards (`Ctrl+K u`), and pinned in-memory result-set A/B diffing (`pin-result`, `compare-result`, `ignatius result-diff`).
 - Bounded `psql` backslash commands (`\d`, `\dt`, `\conninfo`, `\x`, `\watch` with `Ctrl+K :` stop) without claiming full `psql` parity.
 - Query plans, estimated (`Ctrl+K l`) or measured (`Ctrl+K a`) with KPI strip and exclusive self-time bottleneck micro-bars, plus extended `EXPLAIN (BUFFERS, WAL)` A/B plan comparison (`Ctrl+K /`, `ignatius plan-diff`).
 

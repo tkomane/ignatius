@@ -1,8 +1,101 @@
 # Status
 
-**Updated: 2026-11-27.** This file is the resumption point. Read it, then check
+**Updated: 2026-11-28.** This file is the resumption point. Read it, then check
 `git log`, `specs/001-foundation-vertical-slice/tasks.md`, and the working tree
 before trusting anything else.
+
+## Wave 121 - M25: Result-grid quick-stats, query-ready SQL/JSON copy, and docs sync - 28 November 2026
+
+- **W16 / 071 PR #203 (`de0728e`, branch `feat/m25-grid-stats-sql-copy` @ `f2c6718`) and PR #204 (branch `docs/m25-roadmap-and-readme-sync`).**
+  PR #203 adds live result-grid column quick-stats (`ColumnQuickStats` capped at
+  `MAX_QUICK_STATS_DISTINCT = 10_000`, `NumericQuickStats` computed only when
+  `non_null > 0` and every non-NULL cell parses as a finite `f64`,
+  `ResultGridState::show_quick_stats` default `true`, `toggle-column-stats` in
+  the Command Palette and `Ctrl+K g`, and a 1-line bottom summary bar using
+  `Theme`/`Token` synced with `grid_capacity` and mouse hit-testing) plus pure
+  query-ready copy builders in `src/query/copy_sql.rs` (`build_where_clause`,
+  `build_in_list` capped at 200 distinct non-NULL values, and compact
+  deterministic `build_row_json` with NUL refusal and 1 MiB bounds).
+  `insert-where-clause` and `insert-in-list` insert SQL into the active editor
+  as one undo step without executing SQL, while `copy-row-json` routes through
+  the existing opt-in `[clipboard] osc52 = true` confirmation review
+  (`pending_copy` / `CopyKind::RowJson` / `MAX_OSC52_BYTES`). PR #204
+  reconciles Spec-Kit specs/tasks (`069`, `070`, `071` T005-T006),
+  `docs/product/roadmap.md`, `docs/product/agent-delivery-plan.md`,
+  `docs/status.md`, `docs/support/compatibility.md`, `CHANGELOG.md`, `README.md`,
+  and `tests/documentation_matches_the_build.rs`, keeping owner/human-gated
+  tasks (`001` T051/T052, `007` T032/T033, `008` T033/T035) open.
+  [Feature 071 tasks](../specs/071-result-grid-quick-stats-sql-copy-and-docs/tasks.md)
+- **Verification scope for PR #203 (`f2c6718`) and PR #204.** PR #203 passed
+  local macOS arm64 `cargo --locked xtask verify` (2,034 `--lib` unit tests,
+  all contract/integration suites against live plain `127.0.0.1:55432` and
+  verified-TLS `localhost:55433` Docker PostgreSQL 18.7; Unix socket skipped
+  locally because `IGNATIUS_TEST_PG_SOCKET_URI` is unset) and hosted PR #203
+  CI + CodeQL (`21/21` executed checks across PostgreSQL 14-18, PG 18 Unix
+  socket, Linux/macOS/Windows, MSRV 1.90.0, dependency advisories, secret scan,
+  and CodeQL; Reviewed PostgreSQL fixtures skipped). `main` CI/CodeQL on
+  `de0728e` was in progress when PR #204 branched; PR #204 passes local
+  macOS arm64 `cargo --locked xtask verify` and `cargo --locked xtask security`
+  against live plain and verified-TLS Docker PostgreSQL 18.7 (with Unix socket
+  skipped locally because `IGNATIUS_TEST_PG_SOCKET_URI` is unset, `gitleaks`
+  skipped in a linked git worktree, and `cargo-deny` skipped when absent from
+  `PATH`).
+
+## Wave 120 - M24: SQL editor power tools - 27 November 2026
+
+- **W16 / 070 PR #201 (`d00c2a7`, branch `feat/m24-editor-edit-ops` @ `b7b4fb8`) and PR #202 (`f51f727`, branch `feat/m24-editor-find-replace` @ `5d2efc5`).**
+  PR #201 delivered purely in-memory, UTF-8-safe SQL editor line operations
+  (`toggle_line_comment` on `Ctrl+/` / `toggle-comment`, `duplicate_line` on
+  `Ctrl+Shift+D` / `duplicate-line`, `move_line_up` on `Alt+Up` / `move-line-up`,
+  `move_line_down` on `Alt+Down` / `move-line-down`, and non-mutating
+  `jump_to_line` on `Ctrl+L` / `jump-to-line` via `NamePurpose::JumpToLine`)
+  with single-undo isolation, `BufferManager` sync, and zero disk or database
+  I/O. PR #202 delivered bounded literal Find & Replace (`MAX_FIND_MATCHES = 10_000`,
+  `find_matches`, `replace_match`, atomic 1-undo `replace_all`,
+  `FindReplaceState`, `Ctrl+F` / `find-in-buffer`, `Ctrl+H` /
+  `replace-in-buffer`, `F3` / `find-next`, `Shift+F3` / `find-prev`,
+  `Alt+C`/`Alt+R`/`Alt+A`, buffer-switch clearing, and `Theme`/`Token` bar and
+  match highlighting).
+  [Feature 070 tasks](../specs/070-sql-editor-power-tools/tasks.md)
+- **Verification scope for PR #201 (`b7b4fb8`) and PR #202 (`5d2efc5`).** Both
+  PRs passed local macOS arm64 `cargo --locked xtask verify` (2,011 / 2,018
+  `--lib` unit tests, all contract/integration suites against live plain
+  `127.0.0.1:55432` and verified-TLS `localhost:55433` Docker PostgreSQL 18.7;
+  Unix socket skipped locally because `IGNATIUS_TEST_PG_SOCKET_URI` is unset).
+  Hosted PR #201 and PR #202 checks passed `21/21` executed checks each, and
+  `main` CI and CodeQL passed on both `d00c2a7` and `f51f727` across PostgreSQL
+  14-18, PG 18 Unix socket, Linux/macOS/Windows, MSRV 1.90.0, and CodeQL
+  (Reviewed PostgreSQL fixtures skipped).
+
+## Wave 119 - M23: Multi-host failover and session timeouts - 27 November 2026
+
+- **W16 / 069 PR #199 (`6b159f3`, branch `feat/m23-multi-host-failover` @ `366af4b`) and PR #200 (`dc849e0`, branch `feat/m23-session-timeouts` @ `53e3b4c`).**
+  PR #199 implemented libpq-compatible comma-separated `host`/`port` resolution
+  (`MAX_ENDPOINTS = 16`, `Endpoint`, `candidate_targets()`, `for_endpoint()`,
+  bracketed IPv6, conservative `VerifyFull` default whenever any candidate host
+  is non-local, per-endpoint `.pgpass` lookup when no explicit password was
+  supplied, sequential failover alongside `target_session_attrs` without TLS
+  downgrade or post-success retry, redacted multi-endpoint failure summaries,
+  `SessionInfo::target` connected-endpoint reporting, and object-tree pinning).
+  PR #200 added configurable `statement_timeout` and `lock_timeout`
+  (`parse_timeout_duration` supporting `0`/`0ms`/`0s`, integer seconds, or
+  `ms`/`s`/`m`/`h` up to 24h; `--statement-timeout` / `--lock-timeout`,
+  URI/kv/service, profile `statement-timeout` / `lock-timeout`, `[connection]`
+  `statement-timeout-seconds` / `lock-timeout-seconds`, integer-millisecond
+  `SET` startup enforcement, bounded `30s`/`5s` object-tree metadata timeouts,
+  and `ConnectionPicker` / `Connection details` / `doctor` surfacing).
+  [Feature 069 tasks](../specs/069-multi-host-failover-and-session-timeouts/tasks.md)
+- **Verification scope for PR #199 (`366af4b`) and PR #200 (`53e3b4c`).** Both
+  PRs passed local macOS arm64 `cargo --locked xtask verify` (1,994 / 2,002
+  `--lib` unit tests, 97 / 99 `postgres_integration` tests against live plain
+  `127.0.0.1:55432` and verified-TLS `localhost:55433` Docker PostgreSQL 18.7;
+  Unix socket skipped locally because `IGNATIUS_TEST_PG_SOCKET_URI` is unset)
+  and `cargo --locked xtask security` (`gitleaks` skipped in linked worktree and
+  `cargo-deny` skipped when absent from `PATH`). Hosted PR #199 and PR #200
+  checks passed `21/21` executed checks each, and `main` CI and CodeQL passed
+  on both `6b159f3` and `dc849e0` across PostgreSQL 14-18, PG 18 Unix socket,
+  Linux/macOS/Windows, MSRV 1.90.0, and CodeQL (Reviewed PostgreSQL fixtures
+  skipped).
 
 ## Wave 118 - M22: Saved query collections, offline CLI, and documentation alignment - 27 November 2026
 

@@ -1433,3 +1433,96 @@ fn constitution_editorial_craft_principle_and_widget_token_discipline() {
         }
     }
 }
+
+#[test]
+fn m23_to_m25_documentation_matches_the_build() {
+    for (name, content) in [
+        ("docs/support/compatibility.md", COMPATIBILITY),
+        ("CHANGELOG.md", CHANGELOG),
+    ] {
+        assert!(
+            !content.contains('\u{2014}'),
+            "{name} must not contain Unicode em dashes"
+        );
+        assert!(
+            !content.contains('\u{2013}'),
+            "{name} must not contain Unicode en dashes"
+        );
+    }
+
+    for (document, name, expected) in [
+        (PRODUCT_ROADMAP, "docs/product/roadmap.md", "M23"),
+        (PRODUCT_ROADMAP, "docs/product/roadmap.md", "M24"),
+        (PRODUCT_ROADMAP, "docs/product/roadmap.md", "M25"),
+        (
+            AGENT_DELIVERY_PLAN,
+            "docs/product/agent-delivery-plan.md",
+            "M23 (`069`)",
+        ),
+        (
+            AGENT_DELIVERY_PLAN,
+            "docs/product/agent-delivery-plan.md",
+            "M24 (`070`)",
+        ),
+        (
+            AGENT_DELIVERY_PLAN,
+            "docs/product/agent-delivery-plan.md",
+            "M25 (`071`)",
+        ),
+        (STATUS, "docs/status.md", "Wave 119"),
+        (STATUS, "docs/status.md", "Wave 120"),
+        (STATUS, "docs/status.md", "Wave 121"),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "MAX_ENDPOINTS",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "--statement-timeout",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "--lock-timeout",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "MAX_FIND_MATCHES",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "ColumnQuickStats",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "insert-where-clause",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "insert-in-list",
+        ),
+        (
+            COMPATIBILITY,
+            "docs/support/compatibility.md",
+            "copy-row-json",
+        ),
+        (CHANGELOG, "CHANGELOG.md", "Feature 069"),
+        (CHANGELOG, "CHANGELOG.md", "Feature 070"),
+        (CHANGELOG, "CHANGELOG.md", "Feature 071"),
+        (README, "README.md", "--statement-timeout"),
+        (README, "README.md", "toggle-column-stats"),
+        (README, "README.md", "insert-where-clause"),
+        (README, "README.md", "copy-row-json"),
+    ] {
+        assert!(
+            document.contains(expected),
+            "{name} is missing M23-M25 documentation item {expected:?}"
+        );
+    }
+}
