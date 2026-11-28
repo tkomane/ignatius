@@ -80,6 +80,7 @@ fn validation_reports_every_problem_at_once() {
             application_name: "  ".into(),
             statement_timeout_seconds: 0,
             lock_timeout_seconds: 0,
+            idle_in_transaction_session_timeout_seconds: 0,
         },
         ..Config::default()
     };
@@ -442,23 +443,37 @@ fn profile_target_session_attrs_round_trips_and_validates() {
 fn profile_and_connection_timeouts_round_trip_and_validate() {
     assert!(PROFILE_FIELDS.contains(&"statement-timeout"));
     assert!(PROFILE_FIELDS.contains(&"lock-timeout"));
+    assert!(PROFILE_FIELDS.contains(&"idle-in-transaction-session-timeout"));
 
     let config: Config = toml::from_str(
-        "[connection]\nstatement-timeout-seconds = 30\nlock-timeout-seconds = 5\n\n\
-         [profiles.p]\nhost = \"localhost\"\nstatement-timeout = \"15s\"\nlock-timeout = \"500ms\"\n",
+        "[connection]\nstatement-timeout-seconds = 30\nlock-timeout-seconds = 5\n\
+         idle-in-transaction-session-timeout-seconds = 120\n\n\
+         [profiles.p]\nhost = \"localhost\"\nstatement-timeout = \"15s\"\nlock-timeout = \"500ms\"\n\
+         idle-in-transaction-session-timeout = \"5m\"\n",
     )
     .expect("parse timeouts");
     assert_eq!(config.connection.statement_timeout_seconds, 30);
     assert_eq!(config.connection.lock_timeout_seconds, 5);
+    assert_eq!(
+        config
+            .connection
+            .idle_in_transaction_session_timeout_seconds,
+        120
+    );
     assert!(config.validate().is_empty());
     let profile = &config.profiles["p"];
     assert_eq!(profile.statement_timeout.as_deref(), Some("15s"));
     assert_eq!(profile.lock_timeout.as_deref(), Some("500ms"));
+    assert_eq!(
+        profile.idle_in_transaction_session_timeout.as_deref(),
+        Some("5m")
+    );
     assert!(profile.validate("p").is_ok());
 
     let serialized = toml::to_string(&config).expect("serialize");
     assert!(serialized.contains("statement-timeout = \"15s\""));
     assert!(serialized.contains("lock-timeout = \"500ms\""));
+    assert!(serialized.contains("idle-in-transaction-session-timeout = \"5m\""));
 
     let bad_profile: Config =
         toml::from_str("[profiles.bad]\nhost = \"localhost\"\nstatement-timeout = \"-10s\"\n")

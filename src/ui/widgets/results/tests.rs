@@ -1282,6 +1282,7 @@ fn connected_empty(sql: &str) -> Model {
             environment: crate::connection::Environment::Local,
             statement_timeout: None,
             lock_timeout: None,
+            idle_in_transaction_session_timeout: None,
         }));
     model.editor.set_text(sql);
     model

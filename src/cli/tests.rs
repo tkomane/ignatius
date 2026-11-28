@@ -398,6 +398,10 @@ fn implicit_interactive_start_is_kept_only_when_no_route_option_was_typed() {
             lock_timeout: Some("5s".into()),
             ..ConnectionOptions::default()
         },
+        ConnectionOptions {
+            idle_in_transaction_session_timeout: Some("2m".into()),
+            ..ConnectionOptions::default()
+        },
     ] {
         assert!(
             options.has_explicit_route(),
@@ -2445,6 +2449,8 @@ fn session_timeout_cli_flags_validate_and_override_profile() {
         "500ms",
         "--lock-timeout",
         "2s",
+        "--idle-in-transaction-session-timeout",
+        "3m",
     ])
     .expect("parse timeout flags");
     let Some(Command::Query { connection, .. }) = cli.command else {
@@ -2452,9 +2458,17 @@ fn session_timeout_cli_flags_validate_and_override_profile() {
     };
     assert_eq!(connection.statement_timeout.as_deref(), Some("500ms"));
     assert_eq!(connection.lock_timeout.as_deref(), Some("2s"));
+    assert_eq!(
+        connection.idle_in_transaction_session_timeout.as_deref(),
+        Some("3m")
+    );
     let args = connection.to_args().expect("to_args");
     assert_eq!(args.statement_timeout, Some(Duration::from_millis(500)));
     assert_eq!(args.lock_timeout, Some(Duration::from_secs(2)));
+    assert_eq!(
+        args.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(180))
+    );
 
     let bad = ConnectionOptions {
         statement_timeout: Some("-5s".into()),
@@ -2468,7 +2482,8 @@ fn session_timeout_cli_flags_validate_and_override_profile() {
         "[profiles.timed]\n\
          host = \"db.example.net\"\n\
          statement-timeout = \"30s\"\n\
-         lock-timeout = \"5s\"\n",
+         lock-timeout = \"5s\"\n\
+         idle-in-transaction-session-timeout = \"4m\"\n",
     );
     let (_, profile_args) =
         resolve_target_and_profile(Some("@timed"), &options(None), &config).expect("profile");
@@ -2477,16 +2492,25 @@ fn session_timeout_cli_flags_validate_and_override_profile() {
         Some(Duration::from_secs(30))
     );
     assert_eq!(profile_args.lock_timeout, Some(Duration::from_secs(5)));
+    assert_eq!(
+        profile_args.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(240))
+    );
 
     let cli_override = ConnectionOptions {
         statement_timeout: Some("0".into()),
         lock_timeout: Some("250ms".into()),
+        idle_in_transaction_session_timeout: Some("45s".into()),
         ..options(Some("timed"))
     };
     let (_, override_args) =
         resolve_target_and_profile(None, &cli_override, &config).expect("cli overrides profile");
     assert_eq!(override_args.statement_timeout, Some(Duration::ZERO));
     assert_eq!(override_args.lock_timeout, Some(Duration::from_millis(250)));
+    assert_eq!(
+        override_args.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(45))
+    );
 
     let bad_profile = with_profiles(
         "[profiles.broken]\n\

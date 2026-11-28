@@ -120,6 +120,7 @@ fn model(presentation: Presentation, catalog: &ValidatedThemes, scene: &str) -> 
         environment: Environment::Production,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     }));
     model.editor.set_text(
         "-- Synthetic presentation fixture\nSELECT * FROM synthetic_values WHERE note = 'NULL';\n",
@@ -1019,6 +1020,7 @@ fn reference_journeys_j1_through_j8_preserve_safety_recovery_and_visual_cues() {
         environment: Environment::Production,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     }));
 
     let ascii_none = Presentation::new(
@@ -1514,6 +1516,7 @@ fn showcase_base_model(theme_choice: ThemeChoice) -> Model {
         environment: Environment::Production,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     }));
 
     let extra_tables = [

@@ -191,13 +191,19 @@ fn target_session_attrs_is_shown_in_picker_only_when_not_any() {
 #[test]
 fn session_timeouts_are_shown_in_picker_detail_when_configured() {
     let timed = profile(
-        "host = \"db.example.net\"\nstatement-timeout = \"30s\"\nlock-timeout = \"500ms\"\n",
+        "host = \"db.example.net\"\nstatement-timeout = \"30s\"\nlock-timeout = \"500ms\"\n\
+         idle-in-transaction-session-timeout = \"5m\"\n",
     );
     let summary = ConnectionProfileSummary::from_profile("timed", &timed, &BTreeMap::new());
     assert_eq!(summary.statement_timeout.as_deref(), Some("30s"));
     assert_eq!(summary.lock_timeout.as_deref(), Some("500ms"));
+    assert_eq!(
+        summary.idle_in_transaction_session_timeout.as_deref(),
+        Some("5m")
+    );
     assert!(summary.detail().contains("statement-timeout 30s"));
     assert!(summary.detail().contains("lock-timeout 500ms"));
+    assert!(summary.detail().contains("idle-in-tx-timeout 5m"));
 
     let disabled = profile("host = \"db.example.net\"\nstatement-timeout = \"0\"\n");
     let disabled_summary =

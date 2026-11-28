@@ -169,7 +169,7 @@ is shown as unknown when that view is not readable.
 
 **Applied**: `service`, `passfile`, `host`, `port`, `dbname`, `user`, `password`,
 `sslmode`, `target_session_attrs`, `application_name`, `connect_timeout`,
-`statement_timeout`, `lock_timeout`.
+`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`.
 
 `target_session_attrs` follows the libpq vocabulary (`any`, `read-write`,
 `read-only`, `primary`, `standby`) across CLI (`--target-session-attrs`),
@@ -181,18 +181,23 @@ connection error and are never silently downgraded or retried. Internal
 object-tree connections clear `target_session_attrs` back to `any` and enforce
 their own read-only transaction posture.
 
-`statement_timeout` and `lock_timeout` accept `0` / `0ms` / `0s` (explicitly
-disabled via `SET ... = 0`), integer seconds (for example `30`), or a positive
-duration ending in `ms`, `s`, `m`, or `h` up to 24 hours (`86400s`). Precedence
-from highest to lowest is `--statement-timeout` / `--lock-timeout`, URI or
-keyword/service `statement_timeout` / `lock_timeout`, profile
-`statement-timeout` / `lock-timeout`, and global `[connection]` defaults
-(`statement-timeout-seconds` / `lock-timeout-seconds`, with `statement_timeout`
-also falling back to `[query] statement-timeout-ms` when unset). On PostgreSQL
+`statement_timeout`, `lock_timeout`, and `idle_in_transaction_session_timeout`
+accept `0` / `0ms` / `0s` (explicitly disabled via `SET ... = 0`), integer
+seconds (for example `30`), or a positive duration ending in `ms`, `s`, `m`, or
+`h` up to 24 hours (`86400s`). Precedence from highest to lowest is
+`--statement-timeout` / `--lock-timeout` / `--idle-in-transaction-session-timeout`,
+URI or keyword/service `statement_timeout` / `lock_timeout` /
+`idle_in_transaction_session_timeout`, profile `statement-timeout` /
+`lock-timeout` / `idle-in-transaction-session-timeout`, and global
+`[connection]` defaults (`statement-timeout-seconds` / `lock-timeout-seconds` /
+`idle-in-transaction-session-timeout-seconds`, with `statement_timeout` also
+falling back to `[query] statement-timeout-ms` when unset). On PostgreSQL
 session startup Ignatius enforces configured values with integer-millisecond
-`SET statement_timeout = <ms>` and `SET lock_timeout = <ms>`. Internal
-object-tree connections apply their own bounded metadata timeouts (`30s`
-statement timeout and `5s` lock timeout).
+`SET statement_timeout = <ms>`, `SET lock_timeout = <ms>`, and
+`SET idle_in_transaction_session_timeout = <ms>`. Internal object-tree
+connections apply their own bounded metadata timeouts (`30s` statement timeout
+and `5s` lock timeout) without inheriting user
+`idle_in_transaction_session_timeout`.
 
 **Multi-host failover**: `host` and `port` accept libpq-style comma-separated
 lists (`host1,host2` and `port1,port2`, or `postgres://user@h1:5432,h2:5433/db`,
@@ -205,9 +210,9 @@ is `VerifyFull` (`verify-full`). Candidates are tried sequentially in order alon
 password was supplied, never downgrading TLS and never retrying once a session
 succeeds. The active session and any object-tree connection bind to the actual
 connected endpoint; total failure reports every attempted endpoint and its
-redacted reason. Active `statement_timeout` and `lock_timeout` bounds also
-surface in the connection picker, **Connection and auth details**, and
-`ignatius doctor`.
+redacted reason. Active `statement_timeout`, `lock_timeout`, and
+`idle_in_transaction_session_timeout` bounds also surface in the connection
+picker, **Connection and auth details**, and `ignatius doctor`.
 
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 `PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
@@ -238,8 +243,9 @@ then the password file, then the prompt.
 **Profiles**: a `[profiles]` table in `config.toml` names a connection, reached
 as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
 `user`, `sslmode`, `target-session-attrs`, `environment`, `read-only`,
-`description`, `auth`, `statement-timeout` and `lock-timeout`, and nothing
-else. It never carries a password.
+`description`, `auth`, `statement-timeout`, `lock-timeout`, and
+`idle-in-transaction-session-timeout`, and nothing else. It never carries a
+password.
 
 ## Interactive connection picker
 

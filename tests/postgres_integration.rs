@@ -5579,6 +5579,111 @@ fn lock_timeout_aborts_contended_lock_with_55p03_and_object_tree_stays_bounded()
         tree_session.info().lock_timeout,
         Some(ignatius::connection::target::DEFAULT_OBJECT_TREE_LOCK_TIMEOUT)
     );
+    assert!(
+        tree_session
+            .info()
+            .idle_in_transaction_session_timeout
+            .is_none()
+    );
+}
+
+#[test]
+fn idle_in_transaction_session_timeout_enforces_server_setting_and_zero_disable() {
+    let uri = target_or_skip!();
+    let config = Config::default();
+    let runtime = runtime();
+
+    // 1. Explicit 100ms timeout is reflected via SHOW and terminates an idle open transaction.
+    let target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            idle_in_transaction_session_timeout: Some(Duration::from_millis(100)),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("target resolves");
+    assert_eq!(
+        target.idle_in_transaction_session_timeout,
+        Some(Duration::from_millis(100))
+    );
+
+    let session = runtime
+        .block_on(session::connect(&target, Duration::ZERO))
+        .expect("session connects");
+    assert_eq!(
+        session.info().idle_in_transaction_session_timeout,
+        Some(Duration::from_millis(100))
+    );
+
+    let show = runtime.block_on(session.execute(
+        "SHOW idle_in_transaction_session_timeout;",
+        10,
+        JobId(1),
+    ));
+    assert!(show.error.is_none(), "SHOW failed: {:?}", show.error);
+    let shown = show.statements[0]
+        .result_set
+        .as_ref()
+        .and_then(|rs| rs.rows.first())
+        .and_then(|row| row.first())
+        .and_then(ignatius::query::value::Cell::raw)
+        .expect("SHOW row");
+    assert_eq!(shown, "100ms");
+
+    let begin = runtime.block_on(session.execute("BEGIN;", 10, JobId(2)));
+    assert!(begin.error.is_none(), "BEGIN failed: {:?}", begin.error);
+
+    std::thread::sleep(Duration::from_millis(250));
+
+    let after_idle = runtime.block_on(session.execute("SELECT 1;", 10, JobId(3)));
+    assert!(
+        after_idle.error.is_some()
+            || after_idle.status == ignatius::query::ExecutionStatus::ConnectionLost,
+        "idle transaction exceeding 100ms must terminate on PostgreSQL: {after_idle:?}"
+    );
+
+    // 2. Explicit 0 disables idle_in_transaction_session_timeout.
+    let disabled_target = resolve(
+        Some(&uri),
+        &ConnectionArgs {
+            idle_in_transaction_session_timeout: Some(Duration::ZERO),
+            ..ConnectionArgs::default()
+        },
+        &EnvSnapshot::from_process(),
+        &config.connection,
+    )
+    .expect("disabled target resolves");
+    let disabled_session = runtime
+        .block_on(session::connect(&disabled_target, Duration::ZERO))
+        .expect("disabled session connects");
+    assert_eq!(
+        disabled_session.info().idle_in_transaction_session_timeout,
+        Some(Duration::ZERO)
+    );
+    let show_disabled = runtime.block_on(disabled_session.execute(
+        "SHOW idle_in_transaction_session_timeout;",
+        10,
+        JobId(4),
+    ));
+    assert!(
+        show_disabled.error.is_none(),
+        "SHOW disabled failed: {:?}",
+        show_disabled.error
+    );
+    let shown_disabled = show_disabled.statements[0]
+        .result_set
+        .as_ref()
+        .and_then(|rs| rs.rows.first())
+        .and_then(|row| row.first())
+        .and_then(ignatius::query::value::Cell::raw)
+        .expect("SHOW disabled row");
+    assert_eq!(shown_disabled, "0");
+
+    // 3. Object tree never inherits user idle_in_transaction_session_timeout.
+    let tree_target = target.for_object_tree();
+    assert!(tree_target.idle_in_transaction_session_timeout.is_none());
 }
 
 // === M23: Multi-host failover ===

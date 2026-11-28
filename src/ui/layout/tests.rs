@@ -646,6 +646,7 @@ fn session(environment: Environment, tls: TlsState) -> Box<SessionInfo> {
         environment,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     })
 }
 
@@ -3024,6 +3025,7 @@ fn connection_details_surface_configured_session_timeouts() {
     if let ConnectionState::Connected(info) = &mut model.connection {
         info.statement_timeout = Some(Duration::from_secs(30));
         info.lock_timeout = Some(Duration::from_millis(500));
+        info.idle_in_transaction_session_timeout = Some(Duration::from_secs(120));
     }
     model.connection_details = true;
 
@@ -3032,6 +3034,8 @@ fn connection_details_surface_configured_session_timeouts() {
     assert!(text.contains("30s"), "{text}");
     assert!(text.contains("Lock timeout"), "{text}");
     assert!(text.contains("500ms"), "{text}");
+    assert!(text.contains("Idle-in-tx timeout"), "{text}");
+    assert!(text.contains("2m"), "{text}");
 }
 
 // ------------------------------------------------------------ chords

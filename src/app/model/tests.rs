@@ -60,6 +60,7 @@ fn a_lost_connection_still_names_its_target() {
         environment: Environment::Local,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     });
     let lost = ConnectionState::Lost { info };
     assert!(lost.label().contains("connection lost"));

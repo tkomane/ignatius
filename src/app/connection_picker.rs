@@ -39,6 +39,8 @@ pub struct ConnectionProfileSummary {
     pub statement_timeout: Option<String>,
     /// Configured `lock_timeout` display string when set.
     pub lock_timeout: Option<String>,
+    /// Configured `idle_in_transaction_session_timeout` display string when set.
+    pub idle_in_transaction_session_timeout: Option<String>,
     /// Configured classification, or the default unclassified state.
     pub environment: String,
     /// Whether the profile asks PostgreSQL to make the session read-only.
@@ -100,6 +102,11 @@ impl ConnectionProfileSummary {
                 .as_deref()
                 .and_then(|value| crate::connection::parse_timeout_duration(value).ok())
                 .map(crate::connection::format_timeout_duration),
+            idle_in_transaction_session_timeout: profile
+                .idle_in_transaction_session_timeout
+                .as_deref()
+                .and_then(|value| crate::connection::parse_timeout_duration(value).ok())
+                .map(crate::connection::format_timeout_duration),
             environment: bounded(&profile.environment.as_deref().map_or_else(
                 || "environment unclassified".to_owned(),
                 |value| format!("environment {value}"),
@@ -129,6 +136,9 @@ impl ConnectionProfileSummary {
         }
         if let Some(timeout) = &self.lock_timeout {
             parts.push(format!("lock-timeout {timeout}"));
+        }
+        if let Some(timeout) = &self.idle_in_transaction_session_timeout {
+            parts.push(format!("idle-in-tx-timeout {timeout}"));
         }
         if self.read_only {
             parts.push("read-only".to_owned());

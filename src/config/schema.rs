@@ -284,6 +284,9 @@ pub struct Profile {
     /// Session `lock_timeout` duration (for example `"5s"`, `"500ms"`, or `"0"` to disable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lock_timeout: Option<String>,
+    /// Session `idle_in_transaction_session_timeout` duration (for example `"5m"`, `"30s"`, or `"0"` to disable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_in_transaction_session_timeout: Option<String>,
     /// Anything else the file said, kept so it can be refused by name.
     #[serde(flatten)]
     pub other: std::collections::BTreeMap<String, toml::Value>,
@@ -303,6 +306,7 @@ pub const PROFILE_FIELDS: &[&str] = &[
     "auth",
     "statement-timeout",
     "lock-timeout",
+    "idle-in-transaction-session-timeout",
 ];
 
 impl Profile {
@@ -403,6 +407,22 @@ impl Profile {
             .likely_cause(message)
             .next_action(
                 "use 0 to disable, integer seconds, or a duration like 500ms, 5s, 1m (max 24h)",
+            ));
+        }
+
+        if let Some(value) = &self.idle_in_transaction_session_timeout
+            && let Err(message) = crate::connection::target::parse_timeout_duration(value)
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!(
+                    "profile {name:?} has an invalid idle-in-transaction-session-timeout"
+                ),
+                "reading connection profiles",
+            )
+            .likely_cause(message)
+            .next_action(
+                "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
             ));
         }
 
@@ -716,6 +736,9 @@ pub struct ConnectionConfig {
     /// Default session `lock_timeout`, in seconds. Zero leaves the server default in place.
     #[serde(default)]
     pub lock_timeout_seconds: u64,
+    /// Default session `idle_in_transaction_session_timeout`, in seconds. Zero leaves the server default in place.
+    #[serde(default)]
+    pub idle_in_transaction_session_timeout_seconds: u64,
 }
 
 impl Default for ConnectionConfig {
@@ -725,6 +748,7 @@ impl Default for ConnectionConfig {
             application_name: default_application_name(),
             statement_timeout_seconds: 0,
             lock_timeout_seconds: 0,
+            idle_in_transaction_session_timeout_seconds: 0,
         }
     }
 }
@@ -820,6 +844,13 @@ impl<S, D> ConfigSchema<S, D> {
         if self.connection.lock_timeout_seconds > max_seconds {
             issues.push(ValidationIssue {
                 path: "connection.lock-timeout-seconds".into(),
+                message: format!("exceeds maximum of {max_seconds} seconds (24h)"),
+                suggestion: "use 0 to leave the server default, or at most 86400 seconds".into(),
+            });
+        }
+        if self.connection.idle_in_transaction_session_timeout_seconds > max_seconds {
+            issues.push(ValidationIssue {
+                path: "connection.idle-in-transaction-session-timeout-seconds".into(),
                 message: format!("exceeds maximum of {max_seconds} seconds (24h)"),
                 suggestion: "use 0 to leave the server default, or at most 86400 seconds".into(),
             });

@@ -60,6 +60,7 @@ fn posture_is_stated_in_words() {
         environment: crate::connection::Environment::Local,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     };
     assert_eq!(info.posture(), "read-write");
     info.read_only = true;

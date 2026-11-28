@@ -344,6 +344,9 @@ fn configured_session_timeouts_appear_in_environment_report_and_default_omits_th
     let mut config = Config::default();
     config.connection.statement_timeout_seconds = 30;
     config.connection.lock_timeout_seconds = 5;
+    config
+        .connection
+        .idle_in_transaction_session_timeout_seconds = 120;
     let loaded = Ok(Loaded {
         config,
         themes: crate::ui::theme::ValidatedThemes::default(),
@@ -357,5 +360,8 @@ fn configured_session_timeouts_appear_in_environment_report_and_default_omits_th
         .find(|c| c.name == "session timeouts")
         .expect("session timeouts check must appear when configured");
     assert_eq!(check.status, CheckStatus::Ok);
-    assert_eq!(check.detail, "statement_timeout=30s, lock_timeout=5s");
+    assert_eq!(
+        check.detail,
+        "statement_timeout=30s, lock_timeout=5s, idle_in_transaction_session_timeout=2m"
+    );
 }

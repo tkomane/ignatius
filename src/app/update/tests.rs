@@ -2135,6 +2135,7 @@ fn session() -> Box<SessionInfo> {
         environment: Environment::Local,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     })
 }
 
@@ -14834,6 +14835,7 @@ fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished
         target_session_attrs: None,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,
@@ -14966,6 +14968,7 @@ fn pin_and_compare_result_snapshot_lifecycle_and_connection_clear() {
         target_session_attrs: None,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,
