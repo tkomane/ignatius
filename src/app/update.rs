@@ -2044,6 +2044,8 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
                 model.plan.clear();
             } else if model.help_open {
                 model.help_open = false;
+            } else if model.focus == Focus::Results && !model.result_filter.is_empty() {
+                model.result_filter.clear();
             } else if !model.tree.filter.is_empty() {
                 model.tree.filter.clear();
             } else if model.error.is_some() {
@@ -2341,6 +2343,7 @@ fn apply_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::AnalyzePlan => begin_plan(model, true),
         Action::CopyValue => begin_copy(model),
         Action::CopyRowAsJson => begin_copy_row_json(model),
+        Action::FilterBySelectedCell => filter_by_selected_cell(model),
         Action::InsertCellWhereClause => insert_cell_where_clause(model),
         Action::InsertColumnInList => insert_column_in_list(model),
         Action::GenerateCellUpdate => begin_cell_update(model),
@@ -7551,6 +7554,53 @@ fn begin_copy_row_json(model: &mut Model) -> Vec<Effect> {
     Vec::new()
 }
 
+/// Applies a structured equality/null filter in Results matching the selected
+/// retained cell without executing any SQL.
+fn filter_by_selected_cell(model: &mut Model) -> Vec<Effect> {
+    if refuse_unavailable_result(model) {
+        return Vec::new();
+    }
+    if model.focus != Focus::Results
+        || model.phase.is_busy()
+        || model.plan.is_visible()
+        || model.visible_result().is_none()
+    {
+        model.buffer_notice =
+            Some("Focus Results on a retained cell to filter by cell.".to_owned());
+        return Vec::new();
+    }
+    let Some(source_row) = model.selected_source_row() else {
+        model.buffer_notice = Some("Select a retained result cell to filter by cell.".to_owned());
+        return Vec::new();
+    };
+    let expr = model.visible_result().and_then(|set| {
+        if !set.is_available() {
+            return None;
+        }
+        let visible = model.result_grid.visible_columns(set.columns.len());
+        if !visible.contains(&model.selected_column) {
+            return None;
+        }
+        let col_name = set.columns.get(model.selected_column)?;
+        let cell = set.rows.get(source_row)?.get(model.selected_column)?;
+        Some(crate::app::result_filter::build_cell_filter_expression(
+            col_name, cell,
+        ))
+    });
+    let Some(expr) = expr else {
+        model.buffer_notice = Some("Select a retained result cell to filter by cell.".to_owned());
+        return Vec::new();
+    };
+    model.result_filter = expr.clone();
+    model.result_filtering = false;
+    model.selected_row = 0;
+    model.buffer_notice = Some(format!(
+        "Filtered Results to {}.",
+        crate::query::value::sanitize_for_display(&expr)
+    ));
+    Vec::new()
+}
+
 /// Inserts a query-ready `WHERE` clause for the selected retained cell into the
 /// active SQL editor as a single undoable edit without executing any SQL.
 fn insert_cell_where_clause(model: &mut Model) -> Vec<Effect> {
@@ -9740,6 +9790,10 @@ fn palette_entries(model: &Model) -> Vec<crate::app::palette::PaletteEntry> {
         (
             Action::SetSearchPath,
             "Set the active PostgreSQL session search_path",
+        ),
+        (
+            Action::FilterBySelectedCell,
+            "Filter Results by the selected retained cell value",
         ),
     ] {
         if entries

@@ -307,12 +307,25 @@ pub(crate) fn render_results(
     // held, of how many the server sent. Collapsing those into one number is
     // the lie this pane exists not to tell.
     if !model.result_filter.trim().is_empty() {
-        let filter_tag = if model.visible_result().is_some_and(|set| set.is_truncated()) {
-            "  [filtered retained rows]".to_owned()
+        let unknown = model.result_filter_unknown_columns();
+        if unknown.is_empty() {
+            let filter_tag = if model.visible_result().is_some_and(|set| set.is_truncated()) {
+                "  [filtered retained rows]".to_owned()
+            } else {
+                format!("  [{}]", model.result_window_label())
+            };
+            title_spans.push(Span::styled(filter_tag, theme.style(Token::Info)));
         } else {
-            format!("  [{}]", model.result_window_label())
-        };
-        title_spans.push(Span::styled(filter_tag, theme.style(Token::Info)));
+            let joined = unknown
+                .iter()
+                .map(|name| sanitize_for_display(name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            title_spans.push(Span::styled(
+                format!("  [unknown filter column: {joined}]"),
+                theme.style(Token::Warning),
+            ));
+        }
     }
     if model.result_filtering {
         title_spans.push(Span::styled(
@@ -1699,6 +1712,7 @@ fn render_grid(
     }
 
     if rows.is_empty() {
+        let unknown = model.result_filter_unknown_columns();
         let message = if model.result_filter.trim().is_empty() && set.rows_seen > 0 {
             format!(
                 "No rows retained; PostgreSQL delivered {} rows.",
@@ -1707,6 +1721,17 @@ fn render_grid(
         } else if model.result_filter.trim().is_empty() {
             "No rows returned. Edit the SQL or use the command palette for the next action."
                 .to_owned()
+        } else if !unknown.is_empty() {
+            let joined = unknown
+                .iter()
+                .map(|name| sanitize_for_display(name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Unknown filter column ({joined}) for filter {:?}. {} clears the filter.",
+                sanitize_for_display(&model.result_filter),
+                action_key_label(keymap, &crate::app::Action::Dismiss)
+            )
         } else {
             format!(
                 "No retained row contains {:?}. {} clears the filter.",

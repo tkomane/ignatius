@@ -4564,22 +4564,20 @@ impl Model {
         let Some(set) = self.visible_result() else {
             return Vec::new();
         };
-        if !set.is_available() {
+        crate::app::result_filter::filter_rows(set, &self.result_filter)
+    }
+
+    /// Unknown column names referenced with explicit operators in `result_filter`.
+    #[must_use]
+    pub fn result_filter_unknown_columns(&self) -> Vec<String> {
+        let Some(set) = self.visible_result() else {
+            return Vec::new();
+        };
+        if !set.is_available() || self.result_filter.trim().is_empty() {
             return Vec::new();
         }
-        if self.result_filter.trim().is_empty() {
-            return (0..set.rows.len()).collect();
-        }
-        let needle = self.result_filter.to_lowercase();
-        set.rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                row.iter()
-                    .any(|cell| cell.display().to_lowercase().contains(&needle))
-            })
-            .map(|(index, _)| index)
-            .collect()
+        crate::app::result_filter::ParsedResultFilter::parse(&self.result_filter, &set.columns)
+            .unknown_columns
     }
 
     /// The source row of the result the selection points at after filtering and

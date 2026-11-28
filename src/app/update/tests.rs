@@ -15602,3 +15602,29 @@ fn set_search_path_validates_guards_transactions_and_rejects_stale_generations()
             .is_some_and(|n| n.contains("ROLLBACK"))
     );
 }
+
+#[test]
+fn filter_by_selected_cell_narrows_retained_rows_with_zero_sql_effects() {
+    let mut model = copy_model(vec![
+        vec![Cell::Text("1".into()), Cell::Text("paid".into())],
+        vec![Cell::Text("2".into()), Cell::Null],
+        vec![Cell::Text("3".into()), Cell::Text("null".into())],
+    ]);
+    model.focus = Focus::Results;
+    model.selected_row = 1;
+    model.selected_column = 1;
+
+    // SQL NULL cell filters to `value:null` and excludes literal "null".
+    assert!(update(&mut model, Message::Action(Action::FilterBySelectedCell)).is_empty());
+    assert_eq!(model.result_filter, "value:null");
+    assert_eq!(model.filtered_rows(), vec![1]);
+    assert_eq!(model.selected_row, 0);
+
+    // Dismiss clears filter and lets us select literal "null" row.
+    assert!(update(&mut model, Message::Action(Action::Dismiss)).is_empty());
+    assert!(model.result_filter.is_empty());
+    model.selected_row = 2;
+    assert!(update(&mut model, Message::Action(Action::FilterBySelectedCell)).is_empty());
+    assert_eq!(model.result_filter, "value:=null");
+    assert_eq!(model.filtered_rows(), vec![2]);
+}

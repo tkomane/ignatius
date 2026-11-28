@@ -407,6 +407,7 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::AnalyzePlan,
         Action::CopyValue,
         Action::CopyRowAsJson,
+        Action::FilterBySelectedCell,
         Action::InsertCellWhereClause,
         Action::InsertColumnInList,
         Action::GenerateCellUpdate,
@@ -523,7 +524,9 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         }
         Action::ExplainPlan => plan_action_is_available(model, false),
         Action::AnalyzePlan => plan_action_is_available(model, true),
-        Action::CopyValue | Action::InsertCellWhereClause => copy_action_is_available(model),
+        Action::CopyValue | Action::InsertCellWhereClause | Action::FilterBySelectedCell => {
+            copy_action_is_available(model)
+        }
         Action::InsertColumnInList => {
             model.focus == Focus::Results
                 && !model.phase.is_busy()
@@ -799,7 +802,7 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
                 "a retained result column to resize".to_owned()
             }
         }
-        Action::CopyValue | Action::InsertCellWhereClause => {
+        Action::CopyValue | Action::InsertCellWhereClause | Action::FilterBySelectedCell => {
             if ctx.focus != Focus::Results {
                 "focus Results on a retained cell".to_owned()
             } else if model.phase.is_busy() {
@@ -1010,6 +1013,7 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::WidenColumn
         | Action::CopyValue
         | Action::CopyRowAsJson
+        | Action::FilterBySelectedCell
         | Action::InsertCellWhereClause
         | Action::InsertColumnInList
         | Action::GenerateCellUpdate

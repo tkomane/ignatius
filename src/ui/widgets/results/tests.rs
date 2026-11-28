@@ -147,6 +147,29 @@ fn a_filtered_result_names_the_match_count_without_hiding_retention() {
 }
 
 #[test]
+fn structured_filter_unknown_column_renders_warning_without_silently_falling_back() {
+    let mut model = model_with(
+        &["status", "amount"],
+        &[vec![Cell::Text("paid".into()), Cell::Text("100".into())]],
+    );
+    model.result_filter = "missing_col:=paid".into();
+    assert!(model.filtered_rows().is_empty());
+    let text = buffer_to_string(&render(
+        &model,
+        &presentation_at(ColorDepth::TrueColor),
+        Rect::new(0, 0, 120, 20),
+    ));
+    assert!(
+        text.contains("unknown filter column: missing_col"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Unknown filter column (missing_col)"),
+        "{text}"
+    );
+}
+
+#[test]
 fn an_empty_result_keeps_its_wording_and_never_says_rows_0_0() {
     let model = model_with(&["value"], &[]);
     let text = buffer_to_string(&render(
