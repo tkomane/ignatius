@@ -684,6 +684,13 @@ pub struct ConnectionOptions {
     /// duration with `ms`, `s`, `m`, or `h` (up to `24h`).
     #[arg(long, value_name = "DUR")]
     pub lock_timeout: Option<String>,
+
+    /// Maximum duration a session may remain idle inside an open transaction.
+    ///
+    /// Accepts `0` / `0ms` / `0s` to disable, integer seconds (e.g. `300`), or a
+    /// duration with `ms`, `s`, `m`, or `h` (up to `24h`).
+    #[arg(long, value_name = "DUR")]
+    pub idle_in_transaction_session_timeout: Option<String>,
 }
 
 impl ConnectionOptions {
@@ -703,6 +710,7 @@ impl ConnectionOptions {
             || self.profile.is_some()
             || self.statement_timeout.is_some()
             || self.lock_timeout.is_some()
+            || self.idle_in_transaction_session_timeout.is_some()
     }
 
     /// Converts to resolved connection arguments.
@@ -756,6 +764,21 @@ impl ConnectionOptions {
             ),
             None => None,
         };
+        let idle_in_transaction_session_timeout = match &self.idle_in_transaction_session_timeout {
+            Some(text) => Some(
+                crate::connection::parse_timeout_duration(text).map_err(|message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Usage,
+                        message,
+                        "reading --idle-in-transaction-session-timeout",
+                    )
+                    .next_action(
+                        "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
+                    )
+                })?,
+            ),
+            None => None,
+        };
         Ok(ConnectionArgs {
             read_only: self.read_only,
             host: self.host.clone(),
@@ -768,6 +791,7 @@ impl ConnectionOptions {
             auth: self.auth.clone(),
             statement_timeout,
             lock_timeout,
+            idle_in_transaction_session_timeout,
         })
     }
 
@@ -872,6 +896,25 @@ impl ConnectionOptions {
                     .likely_cause(message)
                     .next_action(
                         "use 0 to disable, integer seconds, or a duration like 500ms, 5s, 1m (max 24h)",
+                    )
+                })?,
+            );
+        }
+        if args.idle_in_transaction_session_timeout.is_none()
+            && let Some(text) = &profile.idle_in_transaction_session_timeout
+        {
+            args.idle_in_transaction_session_timeout = Some(
+                crate::connection::parse_timeout_duration(text).map_err(|message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        format!(
+                            "profile {name:?} has an invalid idle-in-transaction-session-timeout"
+                        ),
+                        "reading connection profiles",
+                    )
+                    .likely_cause(message)
+                    .next_action(
+                        "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
                     )
                 })?,
             );

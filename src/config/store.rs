@@ -325,9 +325,10 @@ statement-timeout-ms = 0
 [connection]
 connect-timeout-seconds = 10
 application-name = "ignatius"
-# Default session statement_timeout and lock_timeout in seconds. 0 leaves the server's own.
+# Default session statement_timeout, lock_timeout, and idle_in_transaction_session_timeout in seconds. 0 leaves the server's own.
 statement-timeout-seconds = 0
 lock-timeout-seconds = 0
+idle-in-transaction-session-timeout-seconds = 0
 
 [history]
 # Statements that have run, kept on this machine only. A statement mentioning a

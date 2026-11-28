@@ -52,6 +52,7 @@ fn connected(model: &mut Model) {
         environment: Environment::Local,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     }));
 }
 
@@ -199,6 +200,7 @@ fn unusable_connection_postures_never_offer_run() {
                 environment: Environment::Local,
                 statement_timeout: None,
                 lock_timeout: None,
+                idle_in_transaction_session_timeout: None,
             }),
         },
         ConnectionState::Failed(Box::new(crate::diagnostics::Diagnostic::new(

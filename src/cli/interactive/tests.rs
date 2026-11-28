@@ -383,6 +383,7 @@ fn runtime_geometry_changed_input_cannot_accept_before_the_new_frame_is_painted(
                 environment: crate::connection::Environment::Local,
                 statement_timeout: None,
                 lock_timeout: None,
+                idle_in_transaction_session_timeout: None,
             }));
         model.pending_plan = Some(crate::app::model::PendingPlan {
             sql: "SELECT 1;".into(),
@@ -2535,7 +2536,7 @@ async fn doctor_probe_target_displays_configured_session_timeouts() {
     let target = if crate::platform::supports_unix_sockets() {
         crate::connection::resolve(
             Some(&format!(
-                "host={} statement_timeout=30s lock_timeout=500ms",
+                "host={} statement_timeout=30s lock_timeout=500ms idle_in_transaction_session_timeout=2m",
                 missing_socket.display()
             )),
             &crate::connection::ConnectionArgs::default(),
@@ -2560,6 +2561,12 @@ async fn doctor_probe_target_displays_configured_session_timeouts() {
         .expect("lock_timeout check");
     assert_eq!(lock.status, CheckStatus::Ok);
     assert_eq!(lock.detail, "500ms");
+    let idle = checks
+        .iter()
+        .find(|c| c.name == "idle_in_transaction_session_timeout")
+        .expect("idle_in_transaction_session_timeout check");
+    assert_eq!(idle.status, CheckStatus::Ok);
+    assert_eq!(idle.detail, "2m");
 }
 
 #[tokio::test]

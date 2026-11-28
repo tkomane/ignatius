@@ -1195,6 +1195,14 @@ pub(crate) fn render_connection_details(
                 theme.style(Token::Text),
             );
         }
+        if let Some(timeout) = info.idle_in_transaction_session_timeout {
+            push_detail(
+                &mut lines,
+                "Idle-in-tx timeout",
+                crate::connection::format_timeout_duration(timeout),
+                theme.style(Token::Text),
+            );
+        }
     }
 
     push_details_section(&mut lines, "Transport", theme);

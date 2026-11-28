@@ -274,6 +274,7 @@ fn connected_model(env: crate::connection::Environment) -> Model {
         environment: env,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     }));
     model
 }

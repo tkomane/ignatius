@@ -19,6 +19,7 @@ fn target(sslmode: SslMode) -> ConnectionTarget {
         connect_timeout: Duration::from_secs(5),
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
         environment: crate::connection::Environment::Local,
         read_only: false,
         notes: Vec::new(),

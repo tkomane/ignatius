@@ -43,6 +43,7 @@ fn session() -> Box<SessionInfo> {
         environment: Environment::Local,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     })
 }
 
@@ -69,6 +70,7 @@ fn profile() -> ConnectionProfileSummary {
         target_session_attrs: None,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
         environment: "local".into(),
         read_only: false,
         auth: None,

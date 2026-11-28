@@ -721,11 +721,12 @@ fn parse_and_format_timeout_duration_handle_valid_bounds_and_errors() {
 
 #[test]
 fn session_timeouts_follow_precedence_and_object_tree_bounds() {
-    let (_dir, service_path) =
-        service_file("[s]\nhost=db.example.net\nstatement_timeout=20s\nlock_timeout=3s\n");
+    let (_dir, service_path) = service_file(
+        "[s]\nhost=db.example.net\nstatement_timeout=20s\nlock_timeout=3s\nidle_in_transaction_session_timeout=4m\n",
+    );
     let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &service_path)]);
 
-    // Default config leaves both unset.
+    // Default config leaves all unset.
     let default_target = resolve(
         None,
         &ConnectionArgs::default(),
@@ -735,11 +736,13 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
     .expect("default");
     assert!(default_target.statement_timeout.is_none());
     assert!(default_target.lock_timeout.is_none());
+    assert!(default_target.idle_in_transaction_session_timeout.is_none());
 
     // Global config defaults apply when > 0.
     let global_cfg = ConnectionConfig {
         statement_timeout_seconds: 45,
         lock_timeout_seconds: 7,
+        idle_in_transaction_session_timeout_seconds: 120,
         ..ConnectionConfig::default()
     };
     let from_global = resolve(
@@ -751,6 +754,10 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
     .expect("global config");
     assert_eq!(from_global.statement_timeout, Some(Duration::from_secs(45)));
     assert_eq!(from_global.lock_timeout, Some(Duration::from_secs(7)));
+    assert_eq!(
+        from_global.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(120))
+    );
 
     // Service beats global config.
     let from_service = resolve(
@@ -765,10 +772,16 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
         Some(Duration::from_secs(20))
     );
     assert_eq!(from_service.lock_timeout, Some(Duration::from_secs(3)));
+    assert_eq!(
+        from_service.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(240))
+    );
 
     // URI/kv beats service and global config, including explicit 0 (disabled).
     let from_uri = resolve(
-        Some("postgres://app@db.example.net/orders?statement_timeout=0&lock_timeout=500ms"),
+        Some(
+            "postgres://app@db.example.net/orders?statement_timeout=0&lock_timeout=500ms&idle_in_transaction_session_timeout=15s",
+        ),
         &ConnectionArgs::default(),
         &EnvSnapshot::default(),
         &global_cfg,
@@ -776,21 +789,30 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
     .expect("uri");
     assert_eq!(from_uri.statement_timeout, Some(Duration::ZERO));
     assert_eq!(from_uri.lock_timeout, Some(Duration::from_millis(500)));
+    assert_eq!(
+        from_uri.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(15))
+    );
     assert!(
         !from_uri
             .notes
             .iter()
-            .any(|n| n.subject == "statement_timeout" || n.subject == "lock_timeout"),
+            .any(|n| n.subject == "statement_timeout"
+                || n.subject == "lock_timeout"
+                || n.subject == "idle_in_transaction_session_timeout"),
         "supported timeout keys must not emit unsupported notes: {:?}",
         from_uri.notes
     );
 
     // Explicit CLI args beat URI, service, and global config.
     let from_cli = resolve(
-        Some("service=s statement_timeout=2m lock_timeout=10s"),
+        Some(
+            "service=s statement_timeout=2m lock_timeout=10s idle_in_transaction_session_timeout=10m",
+        ),
         &ConnectionArgs {
             statement_timeout: Some(Duration::from_millis(250)),
             lock_timeout: Some(Duration::ZERO),
+            idle_in_transaction_session_timeout: Some(Duration::from_secs(30)),
             ..ConnectionArgs::default()
         },
         &env,
@@ -799,6 +821,10 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
     .expect("cli");
     assert_eq!(from_cli.statement_timeout, Some(Duration::from_millis(250)));
     assert_eq!(from_cli.lock_timeout, Some(Duration::ZERO));
+    assert_eq!(
+        from_cli.idle_in_transaction_session_timeout,
+        Some(Duration::from_secs(30))
+    );
 
     // Invalid timeout in URI or service fails with Config diagnostic.
     let err = resolve(
@@ -810,6 +836,15 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
     .expect_err("invalid uri statement_timeout");
     assert_eq!(err.kind, DiagnosticKind::Config);
 
+    let idle_err = resolve(
+        Some("postgres://app@db.example.net/orders?idle_in_transaction_session_timeout=25h"),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config(),
+    )
+    .expect_err("invalid uri idle_in_transaction_session_timeout");
+    assert_eq!(idle_err.kind, DiagnosticKind::Config);
+
     // Object tree enforces bounded metadata timeouts regardless of user target timeouts.
     let tree_target = from_cli.for_object_tree();
     assert_eq!(
@@ -819,6 +854,10 @@ fn session_timeouts_follow_precedence_and_object_tree_bounds() {
     assert_eq!(
         tree_target.lock_timeout,
         Some(DEFAULT_OBJECT_TREE_LOCK_TIMEOUT)
+    );
+    assert!(
+        tree_target.idle_in_transaction_session_timeout.is_none(),
+        "object tree must not inherit user idle_in_transaction_session_timeout"
     );
 }
 

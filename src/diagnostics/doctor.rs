@@ -318,6 +318,19 @@ pub fn environment_report(
         };
         let lock = (loaded.config.connection.lock_timeout_seconds > 0)
             .then(|| std::time::Duration::from_secs(loaded.config.connection.lock_timeout_seconds));
+        let idle_in_tx = (loaded
+            .config
+            .connection
+            .idle_in_transaction_session_timeout_seconds
+            > 0)
+        .then(|| {
+            std::time::Duration::from_secs(
+                loaded
+                    .config
+                    .connection
+                    .idle_in_transaction_session_timeout_seconds,
+            )
+        });
         let mut timeout_parts = Vec::new();
         if let Some(duration) = statement {
             timeout_parts.push(format!(
@@ -328,6 +341,12 @@ pub fn environment_report(
         if let Some(duration) = lock {
             timeout_parts.push(format!(
                 "lock_timeout={}",
+                crate::connection::format_timeout_duration(duration)
+            ));
+        }
+        if let Some(duration) = idle_in_tx {
+            timeout_parts.push(format!(
+                "idle_in_transaction_session_timeout={}",
                 crate::connection::format_timeout_duration(duration)
             ));
         }

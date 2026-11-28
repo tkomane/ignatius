@@ -4247,6 +4247,12 @@ pub async fn probe_target(
             crate::connection::format_timeout_duration(timeout),
         ));
     }
+    if let Some(timeout) = target.idle_in_transaction_session_timeout {
+        checks.push(Check::ok(
+            "idle_in_transaction_session_timeout",
+            crate::connection::format_timeout_duration(timeout),
+        ));
+    }
 
     if target.endpoints.len() <= 1 {
         match &target.host {

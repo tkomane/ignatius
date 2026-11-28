@@ -347,6 +347,8 @@ pub struct ConnectionArgs {
     pub statement_timeout: Option<Duration>,
     /// `--lock-timeout`
     pub lock_timeout: Option<Duration>,
+    /// `--idle-in-transaction-session-timeout`
+    pub idle_in_transaction_session_timeout: Option<Duration>,
 }
 
 /// Copying a password on purpose.
@@ -426,6 +428,8 @@ pub struct ConnectionTarget {
     pub statement_timeout: Option<Duration>,
     /// Session `lock_timeout`, when explicitly configured. `Some(Duration::ZERO)` disables it.
     pub lock_timeout: Option<Duration>,
+    /// Session `idle_in_transaction_session_timeout`, when explicitly configured. `Some(Duration::ZERO)` disables it.
+    pub idle_in_transaction_session_timeout: Option<Duration>,
     /// User-declared classification of this database.
     pub environment: Environment,
     /// Whether the session should be made read-only at the server.
@@ -571,6 +575,7 @@ impl ConnectionTarget {
         copy.target_session_attrs = TargetSessionAttrs::Any;
         copy.statement_timeout = Some(DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT);
         copy.lock_timeout = Some(DEFAULT_OBJECT_TREE_LOCK_TIMEOUT);
+        copy.idle_in_transaction_session_timeout = None;
         copy.endpoints = vec![Endpoint {
             host: self.host.clone(),
             port: self.port,
@@ -648,6 +653,7 @@ impl ConnectionTarget {
             connect_timeout: self.connect_timeout,
             statement_timeout: self.statement_timeout,
             lock_timeout: self.lock_timeout,
+            idle_in_transaction_session_timeout: self.idle_in_transaction_session_timeout,
             environment: self.environment.clone(),
             read_only: self.read_only,
             notes: self.notes.clone(),
@@ -701,6 +707,7 @@ const SUPPORTED_KEYS: &[&str] = &[
     "connect_timeout",
     "statement_timeout",
     "lock_timeout",
+    "idle_in_transaction_session_timeout",
 ];
 
 /// Parameters whose silent omission could weaken confidentiality or identity
@@ -934,6 +941,15 @@ pub fn resolve(
         },
     };
 
+    let idle_in_transaction_session_timeout = match args.idle_in_transaction_session_timeout {
+        Some(duration) => Some(duration),
+        None => match parse_layered_timeout("idle_in_transaction_session_timeout")? {
+            Some(duration) => Some(duration),
+            None => (config.idle_in_transaction_session_timeout_seconds > 0)
+                .then(|| Duration::from_secs(config.idle_in_transaction_session_timeout_seconds)),
+        },
+    };
+
     // A password file is the last resort and the safest of the routes: it keeps
     // the password off the command line, out of the environment, and out of
     // shell history. It is only read when nothing else supplied one.
@@ -991,6 +1007,7 @@ pub fn resolve(
         connect_timeout,
         statement_timeout,
         lock_timeout,
+        idle_in_transaction_session_timeout,
         environment: args.environment.clone().unwrap_or_default(),
         read_only: args.read_only,
         notes,

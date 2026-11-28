@@ -26,6 +26,7 @@ fn connected_model() -> Model {
             environment: Environment::Local,
             statement_timeout: None,
             lock_timeout: None,
+            idle_in_transaction_session_timeout: None,
         })),
     );
     model

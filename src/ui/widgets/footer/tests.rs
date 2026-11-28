@@ -491,6 +491,7 @@ fn footer_uses_tonal_key_pills_and_ascii_or_unicode_hint_separators() {
         environment: crate::connection::Environment::Local,
         statement_timeout: None,
         lock_timeout: None,
+        idle_in_transaction_session_timeout: None,
     }));
     model.focus = Focus::Editor;
     model.editor.set_text("SELECT 1;");
@@ -599,6 +600,7 @@ fn connected_editor_model() -> Model {
             environment: crate::connection::Environment::Local,
             statement_timeout: None,
             lock_timeout: None,
+            idle_in_transaction_session_timeout: None,
         }));
     model.focus = crate::app::model::Focus::Editor;
     model.editor.set_text("SELECT 1;");

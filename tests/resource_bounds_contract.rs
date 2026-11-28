@@ -315,6 +315,7 @@ fn w10_local_input_palette_and_completion_p95_within_100ms_and_state_invariant()
             environment: Environment::Local,
             statement_timeout: None,
             lock_timeout: None,
+            idle_in_transaction_session_timeout: None,
         })),
     );
 

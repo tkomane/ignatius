@@ -66,6 +66,8 @@ pub struct SessionInfo {
     pub statement_timeout: Option<Duration>,
     /// Session `lock_timeout` applied by Ignatius, when configured.
     pub lock_timeout: Option<Duration>,
+    /// Session `idle_in_transaction_session_timeout` applied by Ignatius, when configured.
+    pub idle_in_transaction_session_timeout: Option<Duration>,
 }
 
 impl SessionInfo {
@@ -2796,6 +2798,16 @@ async fn connect_candidate(
             .map_err(|err| from_connect_error(&err, target))?;
     }
 
+    if let Some(duration) = target.idle_in_transaction_session_timeout {
+        let millis = duration.as_millis();
+        client
+            .batch_execute(&format!(
+                "SET idle_in_transaction_session_timeout = {millis}"
+            ))
+            .await
+            .map_err(|err| from_connect_error(&err, target))?;
+    }
+
     let (info, in_recovery) = bootstrap(&client, target, effective_statement_timeout).await?;
     if let Err(diagnostic) = verify_target_session_attrs(target, info.read_only, in_recovery) {
         drop(client);
@@ -3065,6 +3077,7 @@ async fn bootstrap(
         environment: target.environment.clone(),
         statement_timeout: effective_statement_timeout,
         lock_timeout: target.lock_timeout,
+        idle_in_transaction_session_timeout: target.idle_in_transaction_session_timeout,
     };
     let in_recovery = matches!(get("in_recovery").as_str(), "t" | "true");
 
