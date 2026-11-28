@@ -276,8 +276,8 @@ Every action has a configurable name under `[keys]`, every chord appears in help
 # A connection URI. Keep the password out of it.
 ignatius connect "postgres://app_user@db.internal:5432/analytics?sslmode=verify-full"
 
-# Multi-host failover with bounded statement and lock timeouts
-ignatius connect --host primary.internal,standby.internal --port 5432 --username app_user --dbname analytics --target-session-attrs read-write --statement-timeout 30s --lock-timeout 500ms
+# Multi-host failover with bounded statement, lock, and idle-in-transaction timeouts and search_path
+ignatius connect --host primary.internal,standby.internal --port 5432 --username app_user --dbname analytics --target-session-attrs read-write --statement-timeout 30s --lock-timeout 500ms --idle-in-transaction-session-timeout 60s --search-path analytics,public
 
 # Individual flags, asking PostgreSQL to enforce a read-only primary or standby session
 ignatius connect --host db.internal --port 5432 --username app_user --dbname analytics --sslmode verify-full --read-only --target-session-attrs read-only
@@ -286,7 +286,7 @@ ignatius connect --host db.internal --port 5432 --username app_user --dbname ana
 ignatius connect @production-orders
 ```
 
-Multi-host lists (`host1,host2`, up to 16 endpoints) fail over sequentially alongside `target_session_attrs` (`any`, `read-write`, `read-only`, `primary`, `standby`), defaulting to `verify-full` whenever any candidate host is non-local, re-consulting `.pgpass` per endpoint, never downgrading TLS, and never retrying once a session succeeds. `--statement-timeout` and `--lock-timeout` (or profile `statement-timeout` / `lock-timeout` up to 24h) enforce session timeouts at startup, while unsupported options such as `sslcrl` or `channel_binding` fail explicitly rather than being silently ignored.
+Multi-host lists (`host1,host2`, up to 16 endpoints) fail over sequentially alongside `target_session_attrs` (`any`, `read-write`, `read-only`, `primary`, `standby`), defaulting to `verify-full` whenever any candidate host is non-local, re-consulting `.pgpass` per endpoint, never downgrading TLS, and never retrying once a session succeeds. `--statement-timeout`, `--lock-timeout`, and `--idle-in-transaction-session-timeout` (or profile timeout settings up to 24h) enforce session timeouts at startup alongside `--search-path` (`SET search_path TO ...` using `quote_identifier`), while unsupported options such as `sslcrl` or `channel_binding` fail explicitly rather than being silently ignored.
 
 ### Configuration Profiles (`config.toml`)
 
@@ -415,6 +415,9 @@ ignatius doctor
 ignatius config validate
 ignatius connect --check @production-orders
 ignatius history list
+ignatius history search "invoices" --database billing --status failed --since 2026-10-01
+ignatius history stats --json
+ignatius history export --format csv --output history.csv
 ignatius history clear --yes
 ignatius snippet list
 ignatius snippet show cache-hit-ratio
@@ -572,9 +575,9 @@ Feature slugs such as `026-schema-er-diagrams` correspond to [the roadmap](docs/
 
 **Exploring and querying**
 
-- Object tree across schemas, tables, views, functions, indexes, constraints, and sequences, with fuzzy filter highlighting, hairline scrollbars, definitions (`Ctrl+K d`), and reverse dependencies (`Ctrl+K y`).
-- Up to 16 SQL editor buffers with tab pills, session tab pinning (`Ctrl+K 9`) and renaming (`Ctrl+K 0`), vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, line ops (`Ctrl+/` comment, `Ctrl+Shift+D` duplicate, `Alt+Up`/`Alt+Down` move, `Ctrl+L` jump to line), bounded UTF-8-safe literal Find & Replace (`Ctrl+F` / `Ctrl+H`, `F3` / `Shift+F3`), snippet library (`Ctrl+K ;`), saved query collections with `-- @tag:` / `-- @description:` headers (`Ctrl+K w`, `Ctrl+K o`, `ignatius queries`), and bounded bracketed paste.
-- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, live column quick-stats (`toggle-column-stats`), query-ready SQL/JSON builders (`insert-where-clause`, `insert-in-list`, opt-in OSC 52 `copy-row-json`), local filtering, frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`), optimistic cell-update conflict guards (`Ctrl+K u`), and pinned in-memory result-set A/B diffing (`pin-result`, `compare-result`, `ignatius result-diff`).
+- Object tree across schemas, tables, views, functions, indexes, constraints, and sequences, with fuzzy filter highlighting, hairline scrollbars, definitions (`Ctrl+K d`), reverse dependencies (`Ctrl+K y`), live `search_path` switching (`set-search-path`), and safe non-executing quick SQL builders (`object-select-preview`, `object-count-rows`, `object-insert-template`, `object-column-list`).
+- Up to 16 SQL editor buffers with tab pills, session tab pinning (`Ctrl+K 9`) and renaming (`Ctrl+K 0`), vertical/horizontal split views (`Ctrl+K =`, `Ctrl+K \`), SQL-aware delimiter matching, local formatting with statement gutter ripples, line ops (`Ctrl+/` comment, `Ctrl+Shift+D` duplicate, `Alt+Up`/`Alt+Down` move, `Ctrl+L` jump to line), bounded UTF-8-safe literal Find & Replace (`Ctrl+F` / `Ctrl+H`, `F3` / `Shift+F3`), snippet library (`Ctrl+K ;`), saved query collections with `-- @tag:` / `-- @description:` headers (`Ctrl+K w`, `Ctrl+K o`, `ignatius queries`), History Spotlight preview with `@db:`/`@env:`/`@status:` filters (`Ctrl+K s`, `ignatius history search|stats|export`), and bounded bracketed paste.
+- Result grid with inline sort chevrons, toolbar coordinate readout (`row/total · column`), hairline scrollbars, live column quick-stats (`toggle-column-stats`), query-ready SQL/JSON builders (`insert-where-clause`, `insert-in-list`, opt-in OSC 52 `copy-row-json`), structured column filtering (`/` predicates, `!negation`, `col:null`, numeric ops, `filter-by-cell`), frozen and hidden columns (`Ctrl+K g`), expanded row inspection (`Ctrl+K x`), structured tree inspection of JSONB, arrays, ranges, PostGIS geometry/geography, and pgvector types (`Ctrl+K i`), optimistic cell-update conflict guards (`Ctrl+K u`), and pinned in-memory result-set A/B diffing (`pin-result`, `compare-result`, `ignatius result-diff`).
 - Bounded `psql` backslash commands (`\d`, `\dt`, `\conninfo`, `\x`, `\watch` with `Ctrl+K :` stop) without claiming full `psql` parity.
 - Query plans, estimated (`Ctrl+K l`) or measured (`Ctrl+K a`) with KPI strip and exclusive self-time bottleneck micro-bars, plus extended `EXPLAIN (BUFFERS, WAL)` A/B plan comparison (`Ctrl+K /`, `ignatius plan-diff`).
 

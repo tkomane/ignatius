@@ -8,6 +8,22 @@ source can generate user-facing notes.
 
 ## Unreleased
 
+- New: Offline local history tooling (`ignatius history search|stats|export` with
+  `MAX_HISTORY_QUERY_LIMIT = 10_000`, `jsonl`/`csv`/`sql` formats, atomic file
+  output, `--force`, symlink refusal, and defense-in-depth `mentions_a_credential`
+  + `redact_text` sanitization) and TUI History Spotlight preview with
+  `@db:`/`@env:`/`@status:` inline filters (`Feature 074`, `#211`).
+- New: Structured result-grid filtering (`MAX_FILTER_TERMS = 16`, column
+  predicates, `col:null` vs text `"null"`, `!negation`, numeric ordering,
+  unknown-column indicator, `filter-by-cell`) and pure quoted Object-Tree quick
+  SQL actions (`object-select-preview`, `object-count-rows`,
+  `object-insert-template`, `object-column-list`, `MAX_OBJECT_SQL_COLUMNS = 200`)
+  inserting into the editor as a single undo step (`Feature 073`, `#209`, `#210`).
+- New: Configurable `idle_in_transaction_session_timeout` (`#207`) and
+  `search_path` (`MAX_SEARCH_PATH_SCHEMAS = 32`, `quote_identifier` startup and
+  live `Session::set_search_path`, interactive `set-search-path` switcher) across
+  CLI flags, URIs, profiles, `[connection]`, `ConnectionPicker`, and `doctor`
+  (`Feature 072`, `#207`, `#208`).
 - New: Live result-grid column quick-stats (`ColumnQuickStats`, 10,000 distinct
   cap, strict finite `f64` numeric summary, `toggle-column-stats` via palette
   and `Ctrl+K g`) and query-ready copy builders (`insert-where-clause`,

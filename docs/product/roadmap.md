@@ -143,7 +143,10 @@ below; broadening the feature list does not move a milestone forward.
 | M22 Saved Query Collections & Roadmap Alignment | Single-level saved query collections, SQL header tags/descriptions, rich palette preview, offline `ignatius queries`, and reconciled docs | W16 (Feature 068) | Safe `collection/name` paths, `-- @tag:`/`-- @description:` metadata, palette search/preview, offline `ignatius queries list\|show` (`#197`), reconciled status/roadmap/compatibility/README (`#198`) |
 | M23 Multi-Host Failover & Session Timeouts | Libpq-compatible multi-host/multi-port sequential failover and configurable PostgreSQL `statement_timeout` / `lock_timeout` bounds | W16 (Feature 069) | `MAX_ENDPOINTS = 16`, conservative `VerifyFull` default, per-endpoint `.pgpass`, sequential failover without post-success retry (`#199`), `statement_timeout` & `lock_timeout` across CLI/URI/profile/config and session startup (`#200`) |
 | M24 SQL Editor Power Tools | Everyday SQL editor line operations, direct line jumping, and bounded UTF-8-safe literal Find & Replace | W16 (Feature 070) | `toggle-comment`, `duplicate-line`, `move-line-up`/`down`, `jump-to-line` (`#201`), in-memory Find & Replace with `MAX_FIND_MATCHES = 10_000` and atomic 1-undo Replace All (`#202`) |
-| M25 Result-Grid Quick-Stats, SQL Copy & Docs Sync | Live column quick-stats, query-ready `WHERE`/`IN`/JSON copy builders, and reconciled M23-M25 documentation | W16 (Feature 071) | `ColumnQuickStats` (10,000 distinct cap, finite `f64` numerics, `toggle-column-stats`), `insert-where-clause`, `insert-in-list` (200 cap), opt-in OSC 52 `copy-row-json` (`#203`), reconciled status/roadmap/compatibility/CHANGELOG/README |
+| M25 Result-Grid Quick-Stats, SQL Copy & Docs Sync | Live column quick-stats, query-ready `WHERE`/`IN`/JSON copy builders, and reconciled M23-M25 documentation | W16 (Feature 071) | `ColumnQuickStats` (10,000 distinct cap, finite `f64` numerics, `toggle-column-stats`), `insert-where-clause`, `insert-in-list` (200 cap), opt-in OSC 52 `copy-row-json` (`#203`), reconciled status/roadmap/compatibility/CHANGELOG/README (`#204`) |
+| M26 Session Search Path & Idle-in-Tx Timeout | Configurable PostgreSQL `idle_in_transaction_session_timeout`, configurable `search_path`, and interactive schema switching | W16 (Feature 072) | `idle_in_transaction_session_timeout` across CLI/URI/kv/profile/`[connection]`/startup (`#207`), `search_path` (`MAX_SEARCH_PATH_SCHEMAS = 32`, `quote_identifier`) + `set-search-path` interactive switcher (`#208`) |
+| M27 Structured Result Filtering & Object Quick SQL | Column-aware structured result filtering, `filter-by-cell`, and safe Object-Tree quick SQL builders | W16 (Feature 073) | `result_filter` (`MAX_FILTER_TERMS = 16`, `col:val`, `col:null`, `!negation`, numeric ops, `filter-by-cell`) (`#209`), `object_sql` (`object-select-preview`, `object-count-rows`, `object-insert-template`, `object-column-list`, 200-column / 1 MiB bounds) (`#210`) |
+| M28 Rich History Search/Export & Docs Sync | Offline local history search, stats, sanitized export, TUI Spotlight preview, and M26-M28 docs sync | W16 (Feature 074) | Offline `ignatius history search\|stats\|export`, `MAX_HISTORY_QUERY_LIMIT = 10_000`, `@db:`/`@env:`/`@status:` palette filters & SQL preview (`#211`), reconciled M26-M28 status/roadmap/compatibility/CHANGELOG/README |
 
 M9 is delivered in source as of 2026-11-12: Features 041, 042 and 043 are
 implemented, and each carries focused and full verification recorded in
@@ -363,6 +366,40 @@ M25 (`071-result-grid-quick-stats-sql-copy-and-docs`) is delivered in source on
   documentation reconciliation on `docs/m25-roadmap-and-readme-sync`. Recorded
   in [Wave 121](../status.md#wave-121---m25-result-grid-quick-stats-query-ready-sqljson-copy-and-docs-sync---28-november-2026).
 
+M26 (`072-session-search-path-and-idle-tx-timeout`) is delivered in source on
+`main` as of 2026-11-28 (PR #207 `6c3fdc0` and PR #208 `782a063`):
+
+- [072 Session Search Path and Idle-in-Transaction Timeout](../../specs/072-session-search-path-and-idle-tx-timeout/spec.md)
+  adds `--idle-in-transaction-session-timeout`, URI/kv/profile/`[connection]`
+  configuration, and integer-millisecond startup enforcement (`#207`), plus
+  configurable `search_path` (`MAX_SEARCH_PATH_SCHEMAS = 32`), `quote_identifier`
+  startup/live `Session::set_search_path`, and the interactive `set-search-path`
+  switcher (`#208`). Recorded in
+  [Wave 122](../status.md#wave-122---m26-session-search_path-and-idle_in_transaction_session_timeout---28-november-2026).
+
+M27 (`073-structured-result-filtering-and-object-quick-sql`) is delivered in
+source on `main` as of 2026-11-28 (PR #209 `d9da4a5` and PR #210 `1b00fe4`):
+
+- [073 Structured Result Filtering and Object Quick SQL](../../specs/073-structured-result-filtering-and-object-quick-sql/spec.md)
+  adds `src/app/result_filter.rs` (`MAX_FILTER_TERMS = 16`, column predicates,
+  negation, `col:null`, numeric ordering, unknown-column warning) and
+  `filter-by-cell` (`#209`), plus pure quoted Object-Tree SQL builders in
+  `src/query/object_sql.rs` (`object-select-preview`, `object-count-rows`,
+  `object-insert-template`, `object-column-list`) with single-undo editor
+  insertion and zero DB side effects (`#210`). Recorded in
+  [Wave 123](../status.md#wave-123---m27-structured-result-filtering-and-object-quick-sql---28-november-2026).
+
+M28 (`074-history-search-export-and-m26-m28-docs-sync`) is delivered in source
+on `main` as of 2026-11-28 (PR #211 `b168270` and docs sync on
+`docs/m28-roadmap-and-readme-sync`):
+
+- [074 Local History Search/Export and M26-M28 Docs Sync](../../specs/074-history-search-export-and-m26-m28-docs-sync/spec.md)
+  adds offline `ignatius history search|stats|export` with defense-in-depth
+  credential exclusion and `redact_text` sanitization, `Palette::from_history_entries`
+  Spotlight SQL preview and `@db:`/`@env:`/`@status:` filters (`#211`), and M26-M28
+  documentation reconciliation. Recorded in
+  [Wave 124](../status.md#wave-124---m28-offline-history-searchstatsexport-tui-preview-and-m26-m28-docs-sync---28-november-2026).
+
 ```mermaid
 flowchart LR
     %% Planning dependencies, not a runtime deployment.
@@ -395,6 +432,9 @@ flowchart LR
     M22 --> M23["M23 Multi-Host Failover & Session Timeouts (069)"]
     M23 --> M24["M24 SQL Editor Power Tools (070)"]
     M24 --> M25["M25 Grid Quick-Stats, SQL/JSON Copy & Docs Sync (071)"]
+    M25 --> M26["M26 Session Search Path & Idle-in-Tx Timeout (072)"]
+    M26 --> M27["M27 Structured Result Filtering & Object Quick SQL (073)"]
+    M27 --> M28["M28 History Search/Export & M26-M28 Docs Sync (074)"]
 ```
 
 ## Start here
