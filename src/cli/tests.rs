@@ -402,6 +402,10 @@ fn implicit_interactive_start_is_kept_only_when_no_route_option_was_typed() {
             idle_in_transaction_session_timeout: Some("2m".into()),
             ..ConnectionOptions::default()
         },
+        ConnectionOptions {
+            search_path: Some("analytics, public".into()),
+            ..ConnectionOptions::default()
+        },
     ] {
         assert!(
             options.has_explicit_route(),
@@ -2520,4 +2524,40 @@ fn session_timeout_cli_flags_validate_and_override_profile() {
     let err = resolve_target_and_profile(Some("@broken"), &options(None), &bad_profile)
         .expect_err("invalid profile lock-timeout must fail");
     assert_eq!(err.kind, DiagnosticKind::Config);
+
+    let sp_cli = Cli::try_parse_from([
+        "ignatius",
+        "query",
+        "-c",
+        "SELECT 1",
+        "--search-path",
+        "\"$user\", billing, public",
+    ])
+    .expect("parse --search-path");
+    let Some(Command::Query {
+        connection: sp_conn,
+        ..
+    }) = sp_cli.command
+    else {
+        panic!("expected query command");
+    };
+    let sp_args = sp_conn.to_args().expect("to_args search-path");
+    assert_eq!(
+        sp_args.search_path,
+        Some(vec![
+            "$user".to_owned(),
+            "billing".to_owned(),
+            "public".to_owned()
+        ])
+    );
+
+    let sp_config = with_profiles(
+        "[profiles.sp]\nhost = \"db.example.net\"\nsearch-path = \"reporting, public\"\n",
+    );
+    let (_, sp_profile_args) =
+        resolve_target_and_profile(Some("@sp"), &options(None), &sp_config).expect("profile");
+    assert_eq!(
+        sp_profile_args.search_path,
+        Some(vec!["reporting".to_owned(), "public".to_owned()])
+    );
 }

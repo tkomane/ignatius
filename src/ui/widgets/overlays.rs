@@ -32,6 +32,7 @@ pub(crate) fn render_name_prompt(
 
     let input_label = match prompt.purpose {
         crate::app::model::NamePurpose::JumpToLine => "Line: ",
+        crate::app::model::NamePurpose::SetSearchPath => "Schemas: ",
         crate::app::model::NamePurpose::SaveQuery
         | crate::app::model::NamePurpose::ExportRows
         | crate::app::model::NamePurpose::RenameBuffer => "Name: ",
@@ -64,6 +65,10 @@ pub(crate) fn render_name_prompt(
         ),
         crate::app::model::NamePurpose::JumpToLine => format!(
             " {}Jump to line  Enter to jump, Esc to cancel ",
+            presentation.icon(Icon::Editor)
+        ),
+        crate::app::model::NamePurpose::SetSearchPath => format!(
+            " {}Set search_path  Enter to apply, Esc to cancel ",
             presentation.icon(Icon::Editor)
         ),
         crate::app::model::NamePurpose::SaveQuery | crate::app::model::NamePurpose::ExportRows => {

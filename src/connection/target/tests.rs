@@ -1200,3 +1200,87 @@ fn candidate_targets_reconsult_pgpass_per_endpoint_unless_explicit_password_supp
     assert_eq!(scratch.database, "orders_scratch");
     assert_eq!(scratch.endpoints.len(), 3);
 }
+
+#[test]
+fn search_path_parser_quotes_safely_and_enforces_bounds() {
+    assert_eq!(
+        parse_search_path("\"$user\", analytics, public").expect("standard search_path"),
+        vec![
+            "$user".to_owned(),
+            "analytics".to_owned(),
+            "public".to_owned()
+        ]
+    );
+    assert_eq!(
+        parse_search_path("$user, \"my,schema\", \"weird\"\"name\"").expect("quoted search_path"),
+        vec![
+            "$user".to_owned(),
+            "my,schema".to_owned(),
+            "weird\"name".to_owned()
+        ]
+    );
+
+    // SQL injection payload stays safely inside a single quoted identifier.
+    let injected = parse_search_path("public; DROP TABLE users; --").expect("quoted safely");
+    assert_eq!(injected, vec!["public; DROP TABLE users; --".to_owned()]);
+    assert_eq!(
+        format_set_search_path_sql(&injected),
+        "SET search_path TO \"public; DROP TABLE users; --\""
+    );
+    assert_eq!(
+        format_set_search_path_sql(&["$user".to_owned(), "public".to_owned()]),
+        "SET search_path TO \"$user\", \"public\""
+    );
+
+    // Rejects empty, empty segments, unclosed quotes, NUL/control, and > MAX_SEARCH_PATH_SCHEMAS.
+    for bad in [
+        "",
+        "   ",
+        "a,,b",
+        ",public",
+        "public,",
+        "\"unclosed",
+        "a\0b",
+        "a\nb",
+        "\"\"",
+    ] {
+        assert!(parse_search_path(bad).is_err(), "{bad:?} must fail");
+    }
+    let too_many = (0..=MAX_SEARCH_PATH_SCHEMAS)
+        .map(|i| format!("s{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(parse_search_path(&too_many).is_err());
+
+    // URI/service/CLI precedence and object-tree isolation.
+    let (_dir, service_path) = service_file("[sp]\nhost=db.example.net\nsearch_path=svc, public\n");
+    let env = EnvSnapshot::from_pairs(&[("PGSERVICEFILE", &service_path)]);
+    let from_service = resolve(
+        Some("service=sp"),
+        &ConnectionArgs::default(),
+        &env,
+        &config(),
+    )
+    .expect("service search_path");
+    assert_eq!(
+        from_service.search_path,
+        Some(vec!["svc".to_owned(), "public".to_owned()])
+    );
+
+    let from_uri = resolve(
+        Some("postgres://app@db.example.net/orders?search_path=reporting,public"),
+        &ConnectionArgs::default(),
+        &EnvSnapshot::default(),
+        &config(),
+    )
+    .expect("uri search_path");
+    assert_eq!(
+        from_uri.search_path,
+        Some(vec!["reporting".to_owned(), "public".to_owned()])
+    );
+    assert!(
+        !from_uri.notes.iter().any(|n| n.subject == "search_path"),
+        "supported search_path must not emit unsupported note"
+    );
+    assert!(from_uri.for_object_tree().search_path.is_none());
+}

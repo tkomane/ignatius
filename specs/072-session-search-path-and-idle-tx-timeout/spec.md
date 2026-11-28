@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/m26-idle-in-tx-timeout` (PR 1A) and `feat/m26-session-search-path` (PR 1B)
 **Created**: 2026-11-28
-**Status**: In Progress
+**Status**: Complete (PR 1A #207 `6c3fdc0` merged on `main`; PR 1B ready on `feat/m26-session-search-path`)
 **Milestone**: M26 - Session Search Path & Idle-in-Transaction Timeout
 
 ## Problem Statement

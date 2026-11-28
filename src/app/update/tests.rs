@@ -14836,6 +14836,7 @@ fn switching_connections_waits_for_running_benchmark_and_cleans_up_once_finished
         statement_timeout: None,
         lock_timeout: None,
         idle_in_transaction_session_timeout: None,
+        search_path: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,
@@ -14969,6 +14970,7 @@ fn pin_and_compare_result_snapshot_lifecycle_and_connection_clear() {
         statement_timeout: None,
         lock_timeout: None,
         idle_in_transaction_session_timeout: None,
+        search_path: None,
         environment: "staging".to_owned(),
         read_only: false,
         auth: None,
@@ -15486,4 +15488,117 @@ fn copy_row_as_json_respects_osc52_opt_in_confirmation_and_size_bound() {
         big_model.clipboard_notice,
         Some(crate::app::model::ClipboardNotice::TooLarge { .. })
     ));
+}
+
+#[test]
+fn set_search_path_validates_guards_transactions_and_rejects_stale_generations() {
+    // 1. Disconnected refuses cleanly without opening prompt.
+    let mut disconnected = Model::new(100);
+    assert!(update(&mut disconnected, Message::Action(Action::SetSearchPath)).is_empty());
+    assert!(disconnected.name_prompt.is_none());
+    assert!(
+        disconnected
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("Connect"))
+    );
+
+    // 2. Failed transaction refuses cleanly.
+    let mut failed_tx = connected();
+    failed_tx.transaction = crate::query::result::TransactionState::Failed;
+    assert!(update(&mut failed_tx, Message::Action(Action::SetSearchPath)).is_empty());
+    assert!(failed_tx.name_prompt.is_none());
+    assert!(
+        failed_tx
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("ROLLBACK"))
+    );
+
+    // 3. Objects focus on a schema node prefills that schema name.
+    let mut model = connected();
+    model.sidebar_visible = true;
+    model.focus = Focus::Objects;
+    model.tree.set_schemas(vec![crate::postgres::SchemaSummary {
+        name: "analytics".to_owned(),
+        usable: true,
+        counts: std::collections::BTreeMap::new(),
+    }]);
+    assert!(update(&mut model, Message::Action(Action::SetSearchPath)).is_empty());
+    let prompt = model.name_prompt.as_ref().expect("prompt opened");
+    assert_eq!(
+        prompt.purpose,
+        crate::app::model::NamePurpose::SetSearchPath
+    );
+    assert_eq!(prompt.typed, "analytics");
+
+    // 4. Invalid search_path input is rejected before emitting an effect.
+    assert!(update(&mut model, Message::Action(Action::Insert(','))).is_empty());
+    assert!(update(&mut model, Message::Action(Action::Activate)).is_empty());
+    assert!(model.name_prompt.is_none());
+    assert!(
+        model
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("Invalid search_path"))
+    );
+
+    // 5. Valid search_path emits Effect::SetSearchPath bound to connection_generation.
+    model.focus = Focus::Editor;
+    assert!(update(&mut model, Message::Action(Action::SetSearchPath)).is_empty());
+    if let Some(prompt) = model.name_prompt.as_mut() {
+        prompt.typed = "\"$user\", analytics, public".to_owned();
+    }
+    let generation = model.connection_generation;
+    let effects = update(&mut model, Message::Action(Action::Activate));
+    assert_eq!(
+        effects,
+        vec![Effect::SetSearchPath {
+            generation,
+            schemas: vec![
+                "$user".to_owned(),
+                "analytics".to_owned(),
+                "public".to_owned()
+            ],
+        }]
+    );
+
+    // 6. Stale generation reply is discarded without updating SessionInfo.
+    assert!(
+        update(
+            &mut model,
+            Message::SearchPathUpdated {
+                generation: generation + 99,
+                result: Box::new(Ok("stale_schema".to_owned())),
+            }
+        )
+        .is_empty()
+    );
+    assert_ne!(
+        model.connection.info().map(|i| i.search_path.as_str()),
+        Some("stale_schema")
+    );
+
+    // 7. Current generation reply updates SessionInfo::search_path and notes active tx.
+    model.transaction = crate::query::result::TransactionState::Open;
+    assert!(
+        update(
+            &mut model,
+            Message::SearchPathUpdated {
+                generation,
+                result: Box::new(Ok("\"$user\", analytics, public".to_owned())),
+            }
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        model.connection.info().map(|i| i.search_path.as_str()),
+        Some("\"$user\", analytics, public")
+    );
+    assert!(
+        model
+            .buffer_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("ROLLBACK"))
+    );
 }

@@ -287,6 +287,9 @@ pub struct Profile {
     /// Session `idle_in_transaction_session_timeout` duration (for example `"5m"`, `"30s"`, or `"0"` to disable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_in_transaction_session_timeout: Option<String>,
+    /// Comma-separated session `search_path` schemas (for example `"$user, app, public"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_path: Option<String>,
     /// Anything else the file said, kept so it can be refused by name.
     #[serde(flatten)]
     pub other: std::collections::BTreeMap<String, toml::Value>,
@@ -307,6 +310,7 @@ pub const PROFILE_FIELDS: &[&str] = &[
     "statement-timeout",
     "lock-timeout",
     "idle-in-transaction-session-timeout",
+    "search-path",
 ];
 
 impl Profile {
@@ -423,6 +427,20 @@ impl Profile {
             .likely_cause(message)
             .next_action(
                 "use 0 to disable, integer seconds, or a duration like 500ms, 30s, 5m, 1h (max 24h)",
+            ));
+        }
+
+        if let Some(value) = &self.search_path
+            && let Err(message) = crate::connection::target::parse_search_path(value)
+        {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Config,
+                format!("profile {name:?} has an invalid search-path"),
+                "reading connection profiles",
+            )
+            .likely_cause(message)
+            .next_action(
+                "provide a comma-separated list of schema names, e.g. \"$user, public\"",
             ));
         }
 

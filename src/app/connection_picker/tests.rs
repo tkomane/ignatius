@@ -229,6 +229,19 @@ fn session_timeouts_are_shown_in_picker_detail_when_configured() {
             .as_deref()
             .is_some_and(|v| v.contains("statement-timeout"))
     );
+
+    let scoped = profile("host = \"db.example.net\"\nsearch-path = \"analytics, public\"\n");
+    let scoped_summary =
+        ConnectionProfileSummary::from_profile("scoped", &scoped, &BTreeMap::new());
+    assert_eq!(
+        scoped_summary.search_path.as_deref(),
+        Some("analytics, public")
+    );
+    assert!(
+        scoped_summary
+            .detail()
+            .contains("search-path analytics, public")
+    );
 }
 
 #[test]

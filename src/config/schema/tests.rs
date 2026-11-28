@@ -509,3 +509,28 @@ fn profile_and_connection_timeouts_round_trip_and_validate() {
             .any(|i| i.path == "connection.lock-timeout-seconds")
     );
 }
+
+#[test]
+fn profile_search_path_round_trips_and_validates() {
+    assert!(PROFILE_FIELDS.contains(&"search-path"));
+
+    let config: Config = toml::from_str(
+        "[profiles.analytics]\nhost = \"localhost\"\nsearch-path = \"\\\"$user\\\", analytics, public\"\n",
+    )
+    .expect("parse search-path");
+    let profile = &config.profiles["analytics"];
+    assert_eq!(
+        profile.search_path.as_deref(),
+        Some("\"$user\", analytics, public")
+    );
+    assert!(profile.validate("analytics").is_ok());
+
+    let bad: Config =
+        toml::from_str("[profiles.bad]\nhost = \"localhost\"\nsearch-path = \"app,,public\"\n")
+            .expect("parse invalid search-path");
+    let err = bad.profiles["bad"]
+        .validate("bad")
+        .expect_err("empty segment in search-path must fail");
+    assert_eq!(err.kind, crate::diagnostics::DiagnosticKind::Config);
+    assert!(err.headline.contains("search-path"));
+}

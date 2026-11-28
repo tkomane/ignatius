@@ -169,7 +169,8 @@ is shown as unknown when that view is not readable.
 
 **Applied**: `service`, `passfile`, `host`, `port`, `dbname`, `user`, `password`,
 `sslmode`, `target_session_attrs`, `application_name`, `connect_timeout`,
-`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`.
+`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
+`search_path`.
 
 `target_session_attrs` follows the libpq vocabulary (`any`, `read-write`,
 `read-only`, `primary`, `standby`) across CLI (`--target-session-attrs`),
@@ -214,6 +215,18 @@ redacted reason. Active `statement_timeout`, `lock_timeout`, and
 `idle_in_transaction_session_timeout` bounds also surface in the connection
 picker, **Connection and auth details**, and `ignatius doctor`.
 
+**Session `search_path`**: `search_path` accepts a comma-separated list of up to
+32 schema names (`MAX_SEARCH_PATH_SCHEMAS`, including `$user` / `"$user"` and
+quoted identifiers) via `--search-path`, URI or keyword/service `search_path`,
+and profile `search-path`. Ignatius validates the schema list without empty
+segments or control characters and applies `SET search_path TO ...` using
+`quote_identifier` before reading `current_setting('search_path')` into
+`SessionInfo::search_path`. Inside the TUI, `set-search-path` updates the active
+session's `search_path` (prefilled from a selected schema in Objects or the
+current `search_path`) and refuses updates while disconnected, busy, or inside
+a failed transaction. Internal object-tree connections keep their default
+`search_path`.
+
 **Environment variables read**: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 `PGPASSWORD`, `PGAPPNAME`, `PGSSLMODE`, `PGTARGETSESSIONATTRS`,
 `PGCONNECT_TIMEOUT`, `PGSERVICE`, `PGSERVICEFILE`, `PGPASSFILE`, `PGSYSCONFDIR`.
@@ -243,9 +256,9 @@ then the password file, then the prompt.
 **Profiles**: a `[profiles]` table in `config.toml` names a connection, reached
 as `@name` or `--profile name`. A profile carries `host`, `port`, `dbname`,
 `user`, `sslmode`, `target-session-attrs`, `environment`, `read-only`,
-`description`, `auth`, `statement-timeout`, `lock-timeout`, and
-`idle-in-transaction-session-timeout`, and nothing else. It never carries a
-password.
+`description`, `auth`, `statement-timeout`, `lock-timeout`,
+`idle-in-transaction-session-timeout`, and `search-path`, and nothing else. It
+never carries a password.
 
 ## Interactive connection picker
 

@@ -71,6 +71,7 @@ fn profile() -> ConnectionProfileSummary {
         statement_timeout: None,
         lock_timeout: None,
         idle_in_transaction_session_timeout: None,
+        search_path: None,
         environment: "local".into(),
         read_only: false,
         auth: None,

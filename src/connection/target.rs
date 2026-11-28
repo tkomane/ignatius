@@ -349,6 +349,8 @@ pub struct ConnectionArgs {
     pub lock_timeout: Option<Duration>,
     /// `--idle-in-transaction-session-timeout`
     pub idle_in_transaction_session_timeout: Option<Duration>,
+    /// `--search-path`
+    pub search_path: Option<Vec<String>>,
 }
 
 /// Copying a password on purpose.
@@ -430,6 +432,8 @@ pub struct ConnectionTarget {
     pub lock_timeout: Option<Duration>,
     /// Session `idle_in_transaction_session_timeout`, when explicitly configured. `Some(Duration::ZERO)` disables it.
     pub idle_in_transaction_session_timeout: Option<Duration>,
+    /// Explicit session `search_path` schemas applied on startup.
+    pub search_path: Option<Vec<String>>,
     /// User-declared classification of this database.
     pub environment: Environment,
     /// Whether the session should be made read-only at the server.
@@ -460,6 +464,109 @@ pub const DEFAULT_OBJECT_TREE_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum allowed session timeout duration (24 hours).
 pub const MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(86_400);
+
+/// Maximum number of schemas permitted in a configured `search_path`.
+pub const MAX_SEARCH_PATH_SCHEMAS: usize = 32;
+
+/// Parses a comma-separated PostgreSQL `search_path` list into unquoted schema
+/// names (preserving `$user` as `"$user"`).
+pub fn parse_search_path(raw: &str) -> Result<Vec<String>, String> {
+    if raw.trim().is_empty() {
+        return Err("search_path cannot be empty".to_owned());
+    }
+    if raw.chars().any(|ch| ch == '\0' || ch.is_control()) {
+        return Err("search_path cannot contain NUL or control characters".to_owned());
+    }
+
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                if in_quotes && chars.peek() == Some(&'"') {
+                    current.push('"');
+                    current.push('"');
+                    let _ = chars.next();
+                } else {
+                    in_quotes = !in_quotes;
+                    current.push('"');
+                }
+            }
+            ',' if !in_quotes => {
+                segments.push(std::mem::take(&mut current));
+            }
+            other => current.push(other),
+        }
+    }
+    if in_quotes {
+        return Err("search_path has an unclosed double quote".to_owned());
+    }
+    segments.push(current);
+
+    if segments.len() > MAX_SEARCH_PATH_SCHEMAS {
+        return Err(format!(
+            "search_path lists {} schemas (maximum is {MAX_SEARCH_PATH_SCHEMAS})",
+            segments.len()
+        ));
+    }
+
+    let mut schemas = Vec::with_capacity(segments.len());
+    for segment in segments {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            return Err("search_path contains an empty schema entry".to_owned());
+        }
+        let normalized = if trimmed.starts_with('"') || trimmed.ends_with('"') {
+            let Some(inner) = trimmed
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix('"'))
+            else {
+                return Err(format!(
+                    "invalid quoted schema name {trimmed:?} in search_path"
+                ));
+            };
+            // Ensure no unescaped internal quotes remain.
+            let mut out = String::with_capacity(inner.len());
+            let mut inner_chars = inner.chars().peekable();
+            while let Some(ch) = inner_chars.next() {
+                if ch == '"' {
+                    if inner_chars.peek() == Some(&'"') {
+                        out.push('"');
+                        let _ = inner_chars.next();
+                    } else {
+                        return Err(format!(
+                            "invalid quoted schema name {trimmed:?} in search_path"
+                        ));
+                    }
+                } else {
+                    out.push(ch);
+                }
+            }
+            if out.trim().is_empty() {
+                return Err("search_path contains an empty quoted schema name".to_owned());
+            }
+            out
+        } else {
+            trimmed.to_owned()
+        };
+        schemas.push(normalized);
+    }
+
+    Ok(schemas)
+}
+
+/// Formats a validated `search_path` schema list into a safe `SET search_path`
+/// statement using [`crate::query::identifiers::quote_identifier`].
+#[must_use]
+pub fn format_set_search_path_sql(schemas: &[String]) -> String {
+    let quoted: Vec<String> = schemas
+        .iter()
+        .map(|schema| crate::query::identifiers::quote_identifier(schema))
+        .collect();
+    format!("SET search_path TO {}", quoted.join(", "))
+}
 
 /// Parses a human-entered timeout duration (`0`/`0ms`/`0s`, integer seconds, or `ms`/`s`/`m`/`h`).
 pub fn parse_timeout_duration(input: &str) -> Result<Duration, String> {
@@ -576,6 +683,7 @@ impl ConnectionTarget {
         copy.statement_timeout = Some(DEFAULT_OBJECT_TREE_STATEMENT_TIMEOUT);
         copy.lock_timeout = Some(DEFAULT_OBJECT_TREE_LOCK_TIMEOUT);
         copy.idle_in_transaction_session_timeout = None;
+        copy.search_path = None;
         copy.endpoints = vec![Endpoint {
             host: self.host.clone(),
             port: self.port,
@@ -654,6 +762,7 @@ impl ConnectionTarget {
             statement_timeout: self.statement_timeout,
             lock_timeout: self.lock_timeout,
             idle_in_transaction_session_timeout: self.idle_in_transaction_session_timeout,
+            search_path: self.search_path.clone(),
             environment: self.environment.clone(),
             read_only: self.read_only,
             notes: self.notes.clone(),
@@ -708,6 +817,7 @@ const SUPPORTED_KEYS: &[&str] = &[
     "statement_timeout",
     "lock_timeout",
     "idle_in_transaction_session_timeout",
+    "search_path",
 ];
 
 /// Parameters whose silent omission could weaken confidentiality or identity
@@ -950,6 +1060,27 @@ pub fn resolve(
         },
     };
 
+    let search_path = match &args.search_path {
+        Some(schemas) => Some(schemas.clone()),
+        None => match parsed
+            .get("search_path")
+            .cloned()
+            .or_else(|| service_values.get("search_path").cloned())
+        {
+            Some(value) => Some(parse_search_path(&value).map_err(|message| {
+                Diagnostic::new(
+                    DiagnosticKind::Config,
+                    format!("invalid search_path {value:?}: {message}"),
+                    "resolving the connection target",
+                )
+                .next_action(
+                    "provide a comma-separated list of schema names, e.g. \"$user\", public",
+                )
+            })?),
+            None => None,
+        },
+    };
+
     // A password file is the last resort and the safest of the routes: it keeps
     // the password off the command line, out of the environment, and out of
     // shell history. It is only read when nothing else supplied one.
@@ -1008,6 +1139,7 @@ pub fn resolve(
         statement_timeout,
         lock_timeout,
         idle_in_transaction_session_timeout,
+        search_path,
         environment: args.environment.clone().unwrap_or_default(),
         read_only: args.read_only,
         notes,

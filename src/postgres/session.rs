@@ -407,6 +407,42 @@ impl Session {
         self.client.is_closed() || self.connection_lost.load(Ordering::SeqCst)
     }
 
+    /// Updates the session's PostgreSQL `search_path` safely via
+    /// [`crate::connection::format_set_search_path_sql`] and reads back the
+    /// authoritative server setting.
+    pub async fn set_search_path(&self, schemas: &[String]) -> Result<String, Diagnostic> {
+        if schemas.is_empty() || schemas.len() > crate::connection::MAX_SEARCH_PATH_SCHEMAS {
+            return Err(Diagnostic::new(
+                DiagnosticKind::Usage,
+                format!(
+                    "search_path must list between 1 and {} schemas",
+                    crate::connection::MAX_SEARCH_PATH_SCHEMAS
+                ),
+                "updating session search_path",
+            ));
+        }
+        let _guard = self.user_sql_gate.lock().await;
+        let sql = crate::connection::format_set_search_path_sql(schemas);
+        self.client
+            .batch_execute(&sql)
+            .await
+            .map_err(|err| from_query_error(&err, 0))?;
+        let row = single_row(
+            &self.client,
+            "SELECT current_setting('search_path') AS search_path",
+        )
+        .await
+        .map_err(|err| from_query_error(&err, 0))?
+        .ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticKind::Query,
+                "PostgreSQL did not report current_setting('search_path')",
+                "reading updated search_path",
+            )
+        })?;
+        Ok(row.get("search_path").unwrap_or_default().to_owned())
+    }
+
     /// Payload-only compatibility boundary for idle notices. Does not drain
     /// active operations or erase cumulative accounting. First-party consumers
     /// use [`Self::take_connection_notice_report`] instead.
@@ -2804,6 +2840,14 @@ async fn connect_candidate(
             .batch_execute(&format!(
                 "SET idle_in_transaction_session_timeout = {millis}"
             ))
+            .await
+            .map_err(|err| from_connect_error(&err, target))?;
+    }
+
+    if let Some(schemas) = &target.search_path {
+        let sql = crate::connection::format_set_search_path_sql(schemas);
+        client
+            .batch_execute(&sql)
             .await
             .map_err(|err| from_connect_error(&err, target))?;
     }

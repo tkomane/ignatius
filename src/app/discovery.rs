@@ -419,6 +419,7 @@ pub fn palette_actions(model: &Model) -> Vec<Action> {
         Action::JumpToLine,
         Action::SwitchTheme,
         Action::OpenConnectionPicker,
+        Action::SetSearchPath,
         Action::Cancel,
         Action::ToggleHelp,
         Action::FocusNext,
@@ -704,6 +705,11 @@ pub fn action_is_available(model: &Model, action: &Action) -> bool {
         }
         Action::QueryBench => model.connection.is_ready() && !model.editor.text().trim().is_empty(),
         Action::SchemaSnapshot => model.connection.is_ready(),
+        Action::SetSearchPath => {
+            model.connection.is_usable()
+                && !model.phase.is_busy()
+                && model.transaction != TransactionState::Failed
+        }
         Action::SqlRunbook => !model.editor.text().trim().is_empty(),
         Action::StopWatch => model.watch.is_some(),
         Action::DeleteForward
@@ -922,6 +928,15 @@ pub fn action_prerequisite(model: &Model, action: &Action) -> Option<String> {
         | Action::ClusterConfig
         | Action::DataBrowser
         | Action::SchemaSnapshot => "connect to a database first".to_owned(),
+        Action::SetSearchPath => {
+            if let Some(reason) = connection {
+                reason.to_owned()
+            } else if model.phase.is_busy() {
+                "wait for the current query to finish".to_owned()
+            } else {
+                "run ROLLBACK before changing search_path".to_owned()
+            }
+        }
         Action::PlanDiff | Action::QueryBench => {
             if !model.connection.is_ready() {
                 "connect to a database first".to_owned()
@@ -1065,6 +1080,7 @@ pub const fn palette_group(action: &Action) -> &'static str {
         | Action::MovePage(_)
         | Action::Undo
         | Action::Redo => "Session",
+        Action::SetSearchPath => "Session",
     }
 }
 

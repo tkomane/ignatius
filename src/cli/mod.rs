@@ -691,6 +691,10 @@ pub struct ConnectionOptions {
     /// duration with `ms`, `s`, `m`, or `h` (up to `24h`).
     #[arg(long, value_name = "DUR")]
     pub idle_in_transaction_session_timeout: Option<String>,
+
+    /// Comma-separated PostgreSQL `search_path` schemas to apply at startup.
+    #[arg(long, value_name = "SCHEMAS")]
+    pub search_path: Option<String>,
 }
 
 impl ConnectionOptions {
@@ -711,6 +715,7 @@ impl ConnectionOptions {
             || self.statement_timeout.is_some()
             || self.lock_timeout.is_some()
             || self.idle_in_transaction_session_timeout.is_some()
+            || self.search_path.is_some()
     }
 
     /// Converts to resolved connection arguments.
@@ -779,6 +784,17 @@ impl ConnectionOptions {
             ),
             None => None,
         };
+        let search_path = match &self.search_path {
+            Some(text) => Some(
+                crate::connection::parse_search_path(text).map_err(|message| {
+                    Diagnostic::new(DiagnosticKind::Usage, message, "reading --search-path")
+                        .next_action(
+                            "provide a comma-separated list of schema names, e.g. \"$user\", public",
+                        )
+                })?,
+            ),
+            None => None,
+        };
         Ok(ConnectionArgs {
             read_only: self.read_only,
             host: self.host.clone(),
@@ -792,6 +808,7 @@ impl ConnectionOptions {
             statement_timeout,
             lock_timeout,
             idle_in_transaction_session_timeout,
+            search_path,
         })
     }
 
@@ -918,6 +935,23 @@ impl ConnectionOptions {
                     )
                 })?,
             );
+        }
+        if args.search_path.is_none()
+            && let Some(text) = &profile.search_path
+        {
+            args.search_path = Some(crate::connection::parse_search_path(text).map_err(
+                |message| {
+                    Diagnostic::new(
+                        DiagnosticKind::Config,
+                        format!("profile {name:?} has an invalid search-path"),
+                        "reading connection profiles",
+                    )
+                    .likely_cause(message)
+                    .next_action(
+                        "provide a comma-separated list of schema names, e.g. \"$user, public\"",
+                    )
+                },
+            )?);
         }
         // A profile can only add read-only, never take it away: a flag that
         // makes a session safer must not be undone by a file.
